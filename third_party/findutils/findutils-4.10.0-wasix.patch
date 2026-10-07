@@ -1,0 +1,204 @@
+--- a/configure
++++ b/configure
+@@ -47054,7 +47054,7 @@
+   fi
+ 
+   if test -z "$ac_list_mounted_fs"; then
+-    as_fn_error $? "could not determine how to read list of mounted file systems" "$LINENO" 5
++    ac_list_mounted_fs=found
+     # FIXME -- no need to abort building the whole package
+     # Can't build mountlist.c or anything that needs its functions
+   fi
+@@ -71005,4 +71005,3 @@
+ printf "%s\n" "$as_me: WARNING: unrecognized options: $ac_unrecognized_opts" >&2;}
+ fi
+ 
+-
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -2617,11 +2617,11 @@
+ DISTCLEANFILES = tool-versions.txt
+ 
+ # "gnulib-tests" is the gnulib unit test dir.
+-SUBDIRS = gl build-aux lib find xargs locate doc po m4 gnulib-tests
++SUBDIRS = gl build-aux lib find xargs
+ ALL_RECURSIVE_TARGETS = check-root
+ ACLOCAL_AMFLAGS = -I gl/m4 -I m4
+ TESTFILE_SUFFIXES = .exp .xo .xe .xi
+-built_programs = find xargs frcode locate updatedb
++built_programs = find xargs
+ 
+ # Indirections required so that we'll still be able to know the
+ # complete list of our tests even if the user overrides TESTS
+--- a/find/ftsfind.c
++++ b/find/ftsfind.c
+@@ -64,7 +64,12 @@
+ /* FTS_TIGHT_CYCLE_CHECK tries to work around Savannah bug #17877
+  * (but actually using it doesn't fix the bug).
+  */
++#ifdef __wasi__
++/* WASIX libc cannot anchor openat(AT_FDCWD, ...) at the process cwd. */
++static int ftsoptions = FTS_NOSTAT|FTS_TIGHT_CYCLE_CHECK|FTS_NOCHDIR|FTS_VERBATIM;
++#else
+ static int ftsoptions = FTS_NOSTAT|FTS_TIGHT_CYCLE_CHECK|FTS_CWDFD|FTS_VERBATIM;
++#endif
+ 
+ static int prev_depth = INT_MIN; /* fts_level can be < 0 */
+ static int curr_fd = -1;
+@@ -731,6 +736,15 @@
+   int end_of_leading_options = 0; /* First arg after any -H/-L etc. */
+   struct predicate *eval_tree;
+ 
++#ifdef __wasi__
++  char *startup_cwd = getcwd (NULL, 0);
++  if (startup_cwd)
++    {
++      chdir (startup_cwd);
++      free (startup_cwd);
++    }
++#endif
++
+   if (argv[0])
+     set_program_name (argv[0]);
+   else
+--- a/find/pred.c
++++ b/find/pred.c
+@@ -1015,7 +1015,7 @@
+      type = FTYPE_BLK;
+   else if (S_ISCHR (mode))
+      type = FTYPE_CHR;
+-# ifdef S_IFSOCK
++# if defined S_IFSOCK && !defined __wasi__
+   else if (S_ISSOCK (mode))
+      type = FTYPE_SOCK;
+ # endif
+@@ -1048,7 +1048,7 @@
+     case S_IFCHR:
+       type = FTYPE_CHR;
+       break;
+-# ifdef S_IFSOCK
++# if defined S_IFSOCK && !defined __wasi__
+     case S_IFSOCK:
+       type = FTYPE_SOCK;
+       break;
+--- a/gl/lib/fts.c
++++ b/gl/lib/fts.c
+@@ -1239,7 +1239,7 @@
+   while (0)
+ 
+ #define fts_opendir(file, Pdir_fd)                              \
+-        opendirat((! ISSET(FTS_NOCHDIR) && ISSET(FTS_CWDFD)     \
++        rpl_opendirat((! ISSET(FTS_NOCHDIR) && ISSET(FTS_CWDFD) \
+                    ? sp->fts_cwd_fd : AT_FDCWD),                \
+                   file,                                         \
+                   (((ISSET(FTS_PHYSICAL)                        \
+@@ -1805,7 +1805,15 @@
+          * fail, set the errno from the stat call.
+          */
+         int flags = follow ? 0 : AT_SYMLINK_NOFOLLOW;
+-        if (fstatat (sp->fts_cwd_fd, p->fts_accpath, sbp, flags) < 0)
++        int stat_result;
++#ifdef __wasi__
++        if (ISSET (FTS_NOCHDIR) && sp->fts_cwd_fd == AT_FDCWD)
++          stat_result = follow ? stat (p->fts_accpath, sbp)
++                               : lstat (p->fts_accpath, sbp);
++        else
++#endif
++          stat_result = fstatat (sp->fts_cwd_fd, p->fts_accpath, sbp, flags);
++        if (stat_result < 0)
+           {
+             if (follow && errno == ENOENT
+                 && 0 <= fstatat (sp->fts_cwd_fd, p->fts_accpath, sbp,
+--- a/gl/lib/getgroups.c
++++ b/gl/lib/getgroups.c
+@@ -30,7 +30,7 @@
+ /* Provide a stub that fails with ENOSYS, since there is no group
+    information available on mingw.  */
+ int
+-getgroups (_GL_UNUSED int n, _GL_UNUSED GETGROUPS_T *groups)
++getgroups (_GL_UNUSED int n, _GL_UNUSED gid_t *groups)
+ {
+   errno = ENOSYS;
+   return -1;
+--- a/gl/lib/mountlist.c
++++ b/gl/lib/mountlist.c
+@@ -462,7 +462,7 @@
+ struct mount_entry *
+ read_file_system_list (bool need_fs_type)
+ {
+-  struct mount_entry *mount_list;
++  struct mount_entry *mount_list = NULL;
+   struct mount_entry *me;
+   struct mount_entry **mtail = &mount_list;
+   (void) need_fs_type;
+--- a/gl/lib/opendirat.c
++++ b/gl/lib/opendirat.c
+@@ -33,11 +33,17 @@
+    On success, *PNEW_FD is at least 3, so this is a "safer" function.  */
+ 
+ DIR *
+-opendirat (int dir_fd, char const *dir, int extra_flags, int *pnew_fd)
++rpl_opendirat (int dir_fd, char const *dir, int extra_flags, int *pnew_fd)
+ {
+   int open_flags = (O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOCTTY
+                     | O_NONBLOCK | extra_flags);
+-  int new_fd = openat (dir_fd, dir, open_flags);
++  int new_fd;
++#ifdef __wasi__
++  if (dir_fd == AT_FDCWD)
++    new_fd = open (dir, open_flags);
++  else
++#endif
++    new_fd = openat (dir_fd, dir, open_flags);
+ 
+   if (new_fd < 0)
+     return NULL;
+--- a/gl/lib/opendirat.h
++++ b/gl/lib/opendirat.h
+@@ -27,7 +27,7 @@
+ #endif
+ 
+ 
+-DIR *opendirat (int, char const *, int, int *)
++DIR *rpl_opendirat (int, char const *, int, int *)
+   _GL_ATTRIBUTE_MALLOC _GL_ATTRIBUTE_DEALLOC (closedir, 1);
+ 
+ 
+--- a/gl/lib/save-cwd.c
++++ b/gl/lib/save-cwd.c
+@@ -62,7 +62,7 @@
+ {
+   cwd->name = NULL;
+ 
+-  cwd->desc = open (".", O_SEARCH | O_CLOEXEC);
++  cwd->desc = -1; /* WASIX has no fchdir; restore with getcwd and chdir. */
+   if (!GNULIB_FCNTL_SAFER)
+     cwd->desc = fd_safer_flag (cwd->desc, O_CLOEXEC);
+   if (cwd->desc < 0)
+--- /dev/null
++++ b/wasix-compat/unistd.h
+@@ -0,0 +1,8 @@
++#ifndef _WASIX_COMPAT_UNISTD_H
++#define _WASIX_COMPAT_UNISTD_H
++#include_next <unistd.h>
++#ifndef __WASIX_FORK_DECLARED
++#define __WASIX_FORK_DECLARED
++pid_t fork(void);
++#endif
++#endif
+--- /dev/null
++++ b/wasix-compat/proc.c
+@@ -0,0 +1,13 @@
++#include <wasi/api.h>
++typedef int pid_t;
++extern int errno;
++
++pid_t fork(void) {
++  __wasi_pid_t pid;
++  __wasi_errno_t err = __wasi_proc_fork((__wasi_bool_t)1, &pid);
++  if (err != __WASI_ERRNO_SUCCESS) {
++    errno = err;
++    return -1;
++  }
++  return (pid_t)pid;
++}

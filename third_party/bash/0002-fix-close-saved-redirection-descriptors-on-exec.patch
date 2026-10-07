@@ -1,0 +1,138 @@
+From e6b4dacd9cc0094b87118e134bebb732333f5804 Mon Sep 17 00:00:00 2001
+From: Corey Weir <corey.weir852@gmail.com>
+Date: Thu, 3 Sep 2026 06:04:43 +1000
+Subject: [PATCH 2/3] fix: close saved redirection descriptors on exec
+
+---
+ execute_cmd.c | 61 ++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 60 insertions(+), 1 deletion(-)
+
+diff --git a/execute_cmd.c b/execute_cmd.c
+index c883fc4..1197d5e 100644
+--- a/execute_cmd.c
++++ b/execute_cmd.c
+@@ -348,6 +348,35 @@ close_fd_bitmap (
+     }
+ }
+ 
++/* Add Bash's internal redirection-save descriptors to the descriptors that
++   forked children close explicitly.  Some WASIX libc versions cannot carry
++   FD_CLOEXEC through fcntl(), so relying on close-on-exec alone leaks these
++   descriptors into the replacement program. */
++static struct fd_bitmap *
++copy_fd_bitmap_for_redirects (
++     struct fd_bitmap *fdbp,
++     REDIRECT *redirects
++)
++{
++  struct fd_bitmap *copy;
++  REDIRECT *redirect;
++  int size;
++
++  size = fdbp ? fdbp->size : 0;
++  for (redirect = redirects; redirect; redirect = redirect->next)
++    if (redirect->instruction == r_close_this && redirect->redirector.dest >= size)
++      size = redirect->redirector.dest + 1;
++
++  copy = new_fd_bitmap (size);
++  if (fdbp && fdbp->size)
++    memcpy (copy->bitmap, fdbp->bitmap, fdbp->size);
++  for (redirect = redirects; redirect; redirect = redirect->next)
++    if (redirect->instruction == r_close_this)
++      copy->bitmap[redirect->redirector.dest] = 1;
++
++  return copy;
++}
++
+ /* Return the line number of the currently executing command. */
+ int
+ executing_line_number ()
+@@ -569,6 +598,7 @@ execute_command_internal (
+ {
+   int exec_result, user_subshell, invert, ignore_return, was_error_trap, fork_flags;
+   REDIRECT *my_undo_list, *exec_undo_list;
++  struct fd_bitmap *exec_fds_to_close;
+   char *tcmd;
+   volatile int save_line_number;
+ #if defined (PROCESS_SUBSTITUTION)
+@@ -598,6 +628,7 @@ execute_command_internal (
+     command->flags |= CMD_IGNORE_RETURN;	/* XXX */
+ 
+   exec_result = EXECUTION_SUCCESS;
++  exec_fds_to_close = (struct fd_bitmap *)NULL;
+ 
+   /* If a command was being explicitly run in a subshell, or if it is
+      a shell control-structure, and it has a pipe, then we do the command
+@@ -829,6 +860,13 @@ execute_command_internal (
+   if (exec_undo_list)
+     add_unwind_protect (dispose_redirects, exec_undo_list);
+ 
++  if (exec_undo_list)
++    {
++      exec_fds_to_close = copy_fd_bitmap_for_redirects (fds_to_close, exec_undo_list);
++      fds_to_close = exec_fds_to_close;
++      add_unwind_protect (dispose_fd_bitmap, exec_fds_to_close);
++    }
++
+   QUIT;
+ 
+   switch (command->type)
+@@ -1093,6 +1131,9 @@ execute_command_internal (
+   if (exec_undo_list)
+     dispose_redirects (exec_undo_list);
+ 
++  if (exec_fds_to_close)
++    dispose_fd_bitmap (exec_fds_to_close);
++
+   if (my_undo_list || exec_undo_list)
+     discard_unwind_frame ("loop_redirections");
+ 
+@@ -5389,6 +5430,7 @@ execute_builtin_or_function (
+ {
+   int result;
+   REDIRECT *saved_undo_list;
++  struct fd_bitmap *exec_fds_to_close;
+ #if defined (PROCESS_SUBSTITUTION)
+   int ofifo, nfifo, osize;
+   void *ofifo_list;
+@@ -5426,19 +5468,36 @@ execute_builtin_or_function (
+   else
+     dispose_exec_redirects ();
+ 
++  exec_fds_to_close = (struct fd_bitmap *)NULL;
+   if (saved_undo_list)
+     {
+       begin_unwind_frame ("saved-redirects");
+       add_unwind_protect (cleanup_redirects, (char *)saved_undo_list);
++      if (builtin == 0)
++	{
++	  exec_fds_to_close = copy_fd_bitmap_for_redirects (fds_to_close, saved_undo_list);
++	  fds_to_close = exec_fds_to_close;
++	  add_unwind_protect (dispose_fd_bitmap, exec_fds_to_close);
++	}
+     }
+ 
+   redirection_undo_list = (REDIRECT *)NULL;
+ 
+   if (builtin)
+-    result = execute_builtin (builtin, words, flags, 0);
++    {
++      /* WASIX libc cannot mark Bash's saved descriptors close-on-exec.  The
++         exec builtin bypasses the fork-child path that normally closes this
++         bitmap, so close it before replacing the current process. */
++      if (builtin == exec_builtin && fds_to_close)
++	close_fd_bitmap (fds_to_close);
++      result = execute_builtin (builtin, words, flags, 0);
++    }
+   else
+     result = execute_function (var, words, flags, fds_to_close, 0, 0);
+ 
++  if (exec_fds_to_close)
++    dispose_fd_bitmap (exec_fds_to_close);
++
+   /* We do this before undoing the effects of any redirections. */
+   fflush (stdout);
+   fpurge (stdout);
+-- 
+2.54.0
+

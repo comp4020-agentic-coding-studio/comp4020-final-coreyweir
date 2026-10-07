@@ -1,0 +1,29 @@
+diff --git a/pkgs/toolchain/env.nix b/pkgs/toolchain/env.nix
+--- a/pkgs/toolchain/env.nix
++++ b/pkgs/toolchain/env.nix
+@@ -34,8 +34,8 @@
+         else "no";
+       WASIXCC_COMPILER_POST_FLAGS =
+         if pic
+-        then "-fPIC"
+-        else "-fno-PIC";
++        then "-fPIC:-mno-wide-arithmetic"
++        else "-fno-PIC:-mno-wide-arithmetic";
+     };
+ 
+   autoconfEnv = {WASIXCC_AUTOCONF_WORKAROUNDS = "yes";};
+diff --git a/pkgs/overlays/c/curl/wasix.nix b/pkgs/overlays/c/curl/wasix.nix
+--- a/pkgs/overlays/c/curl/wasix.nix
++++ b/pkgs/overlays/c/curl/wasix.nix
+@@ -31,6 +31,10 @@
+       zstdSupport = true;
+     }) {
+       passthru.wasinix.shipped = true;
++      configureFlags = ["--disable-threaded-resolver"];
++      postPatch = ''
++        substituteInPlace lib/curl_setup.h \
++          --replace-fail '#if defined(HAVE_EVENTFD) && defined(HAVE_SYS_EVENTFD_H)' '#if 0'
++      '';
+       # wcurl is a target-side wrapper script; it execs /bin/bash, mounted from the
+       # bash webc dependency at load (like git's SHELL_PATH=/bin/bash). curl-config
+       # stays a build-host dev script in -dev (git's build runs it for link flags).

@@ -1,0 +1,212 @@
+From 328ce002ec7c97b12773230b06c21fec950a298f Mon Sep 17 00:00:00 2001
+From: Corey Weir <corey.weir852@gmail.com>
+Date: Tue, 8 Sep 2026 19:40:44 +1000
+Subject: [PATCH 3/3] build: make SYSROOT overridable and use libc siginterrupt
+
+The tree hardcoded CC=clang-19 and a relative --sysroot inside CFLAGS, neither
+of which resolves on a fresh checkout; the last build had overridden CC and
+satisfied the sysroot path by some means no longer present. Introduce
+SYSROOT ?= <the previous relative path> in all seven Makefiles so the default
+is unchanged and the tree can build against a different wasix-libc with
+make SYSROOT=... CC=... (command-line assignments propagate to sub-makes).
+
+Building against the newer wasix-libc then fails in nojobs.c: its signal.h
+declares siginterrupt, colliding with the static fallback bash defines when
+HAVE_SIGINTERRUPT is undefined. That libc also defines the symbol
+(siginterrupt.o, T siginterrupt), so define HAVE_SIGINTERRUPT rather than
+patching the source. Bash's fallback was sigaction() toggling SA_RESTART,
+which is the same operation.
+
+Note the tree is no longer bidirectional: config.h is shared, so with
+HAVE_SIGINTERRUPT defined it will not link against the old sysroot. SYSROOT is
+overridable but only the newer wasix-libc works.
+
+Motivation: the old sysroot's execve calls the no-result __wasi_proc_exec2 and
+traps on unreachable, so bash could never observe ENOEXEC and its script
+fallback never ran. Rebuilt against the newer sysroot bash imports proc_exec4,
+and ./script.sh runs. Full WASIX aggregate 29/29.
+---
+ Makefile              | 6 +++++-
+ builtins/Makefile     | 6 +++++-
+ config.h              | 6 +++++-
+ lib/glob/Makefile     | 6 +++++-
+ lib/malloc/Makefile   | 6 +++++-
+ lib/readline/Makefile | 6 +++++-
+ lib/sh/Makefile       | 6 +++++-
+ lib/termcap/Makefile  | 6 +++++-
+ 8 files changed, 40 insertions(+), 8 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index fdcdfdd..7db20a0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,4 +1,8 @@
+ CC=clang-19
++
++# Overridable so the tree can build against a different wasix-libc.
++# Command-line assignments (make SYSROOT=... CC=...) propagate to sub-makes.
++SYSROOT ?= ../wasix-libc/sysroot32
+ LLD_PATH=/prog/rust/build/x86_64-unknown-linux-gnu/lld/bin
+ 
+ PACKAGE = bash
+@@ -16,7 +20,7 @@ MACHTYPE = wasm32-wasmer-wasi
+ CFLAGS = --target=wasm32-wasmer-wasi \
+          -O2 \
+          -include ./config.h \
+-         --sysroot ../wasix-libc/sysroot32 \
++         --sysroot $(SYSROOT) \
+          -I. \
+          -I./include \
+          -I./lib \
+diff --git a/builtins/Makefile b/builtins/Makefile
+index 03fc0e1..bc8bbb9 100644
+--- a/builtins/Makefile
++++ b/builtins/Makefile
+@@ -1,4 +1,8 @@
+ CC=clang-19
++
++# Overridable so the tree can build against a different wasix-libc.
++# Command-line assignments (make SYSROOT=... CC=...) propagate to sub-makes.
++SYSROOT ?= ../../wasix-libc/sysroot32
+ LLD_PATH=/prog/rust/build/x86_64-unknown-linux-gnu/lld/bin
+ 
+ PACKAGE = bash
+@@ -16,7 +20,7 @@ MACHTYPE = wasm32-wasmer-wasi
+ CFLAGS = --target=wasm32-wasmer-wasi \
+          -O2 \
+          -include ../config.h \
+-         --sysroot ../../wasix-libc/sysroot32 \
++         --sysroot $(SYSROOT) \
+          -I. \
+          -I.. \
+          -I../include \
+diff --git a/config.h b/config.h
+index 8f03688..6805052 100644
+--- a/config.h
++++ b/config.h
+@@ -847,7 +847,11 @@
+ /* #undef HAVE_SETVBUF */
+ 
+ /* Define if you have the siginterrupt function.  */
+-/* #undef HAVE_SIGINTERRUPT */
++/* wasix-libc provides siginterrupt (declared in signal.h, defined in libc.a).
++   Without this, nojobs.c redeclares it static and the build fails with
++   "static declaration follows non-static declaration". The libc version has
++   the same semantics as bash's fallback: sigaction() toggling SA_RESTART. */
++#define HAVE_SIGINTERRUPT 1
+ 
+ /* Define if you have the POSIX.1-style sigsetjmp function.  */
+ /* #undef HAVE_POSIX_SIGSETJMP */
+diff --git a/lib/glob/Makefile b/lib/glob/Makefile
+index 7f61c18..66196b4 100644
+--- a/lib/glob/Makefile
++++ b/lib/glob/Makefile
+@@ -1,4 +1,8 @@
+ CC=clang-19
++
++# Overridable so the tree can build against a different wasix-libc.
++# Command-line assignments (make SYSROOT=... CC=...) propagate to sub-makes.
++SYSROOT ?= ../../../wasix-libc/sysroot32
+ LLD_PATH=/prog/rust/build/x86_64-unknown-linux-gnu/lld/bin
+ 
+ PACKAGE = bash
+@@ -17,7 +21,7 @@ CFLAGS = --target=wasm32-wasmer-wasi \
+          -O2 \
+          -include strmatch.h \
+          -include ../../config.h \
+-         --sysroot ../../../wasix-libc/sysroot32 \
++         --sysroot $(SYSROOT) \
+          -I. \
+          -I.. \
+          -I../.. \
+diff --git a/lib/malloc/Makefile b/lib/malloc/Makefile
+index 0e43b64..27b9905 100644
+--- a/lib/malloc/Makefile
++++ b/lib/malloc/Makefile
+@@ -1,4 +1,8 @@
+ CC=clang-19
++
++# Overridable so the tree can build against a different wasix-libc.
++# Command-line assignments (make SYSROOT=... CC=...) propagate to sub-makes.
++SYSROOT ?= ../../../wasix-libc/sysroot32
+ LLD_PATH=/prog/rust/build/x86_64-unknown-linux-gnu/lld/bin
+ 
+ PACKAGE = bash
+@@ -16,7 +20,7 @@ MACHTYPE = wasm32-wasmer-wasi
+ CFLAGS = --target=wasm32-wasmer-wasi \
+          -O2 \
+          -include ../../config.h \
+-         --sysroot ../../../wasix-libc/sysroot32 \
++         --sysroot $(SYSROOT) \
+          -I. \
+          -I.. \
+          -I../.. \
+diff --git a/lib/readline/Makefile b/lib/readline/Makefile
+index 74125af..8dd5ccb 100644
+--- a/lib/readline/Makefile
++++ b/lib/readline/Makefile
+@@ -1,4 +1,8 @@
+ CC=clang-19
++
++# Overridable so the tree can build against a different wasix-libc.
++# Command-line assignments (make SYSROOT=... CC=...) propagate to sub-makes.
++SYSROOT ?= ../../../wasix-libc/sysroot32
+ LLD_PATH=/prog/rust/build/x86_64-unknown-linux-gnu/lld/bin
+ 
+ PACKAGE = bash
+@@ -16,7 +20,7 @@ MACHTYPE = wasm32-wasmer-wasi
+ CFLAGS = --target=wasm32-wasmer-wasi \
+          -O2 \
+          -include ../../config.h \
+-         --sysroot ../../../wasix-libc/sysroot32 \
++         --sysroot $(SYSROOT) \
+          -I. \
+          -I.. \
+          -I../.. \
+diff --git a/lib/sh/Makefile b/lib/sh/Makefile
+index c20f940..e0e5e33 100644
+--- a/lib/sh/Makefile
++++ b/lib/sh/Makefile
+@@ -1,4 +1,8 @@
+ CC=clang-19
++
++# Overridable so the tree can build against a different wasix-libc.
++# Command-line assignments (make SYSROOT=... CC=...) propagate to sub-makes.
++SYSROOT ?= ../../../wasix-libc/sysroot32
+ LLD_PATH=/prog/rust/build/x86_64-unknown-linux-gnu/lld/bin
+ 
+ PACKAGE = bash
+@@ -16,7 +20,7 @@ MACHTYPE = wasm32-wasmer-wasi
+ CFLAGS = --target=wasm32-wasmer-wasi \
+          -O2 \
+          -include ../../config.h \
+-         --sysroot ../../../wasix-libc/sysroot32 \
++         --sysroot $(SYSROOT) \
+          -I. \
+          -I.. \
+          -I../.. \
+diff --git a/lib/termcap/Makefile b/lib/termcap/Makefile
+index 555b5fd..4f186b4 100644
+--- a/lib/termcap/Makefile
++++ b/lib/termcap/Makefile
+@@ -1,4 +1,8 @@
+ CC=clang-19
++
++# Overridable so the tree can build against a different wasix-libc.
++# Command-line assignments (make SYSROOT=... CC=...) propagate to sub-makes.
++SYSROOT ?= ../../../wasix-libc/sysroot32
+ LLD_PATH=/prog/rust/build/x86_64-unknown-linux-gnu/lld/bin
+ 
+ PACKAGE = bash
+@@ -16,7 +20,7 @@ MACHTYPE = wasm32-wasmer-wasi
+ CFLAGS = --target=wasm32-wasmer-wasi \
+          -O2 \
+          -include ../../config.h \
+-         --sysroot ../../../wasix-libc/sysroot32 \
++         --sysroot $(SYSROOT) \
+          -I. \
+          -I.. \
+          -I../.. \
+-- 
+2.54.0
+
