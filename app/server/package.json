@@ -1,0 +1,12 @@
+{
+  "name": "riff-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Runtime manifest for the deployed relays. The client is built separately and served by nginx, so this deliberately carries none of the build toolchain — ranges are kept identical to the root manifest so the box runs the versions the smoke tests exercise.",
+  "dependencies": {
+    "ws": "^8.18.3",
+    "y-websocket": "^1.5.4",
+    "yjs": "^13.6.27"
+  }
+}

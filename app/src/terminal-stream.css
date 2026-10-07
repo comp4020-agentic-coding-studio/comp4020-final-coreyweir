@@ -1,0 +1,7 @@
+.terminal-target {
+  padding-bottom: 10px;
+}
+
+.readonly-terminal {
+  overflow: hidden;
+}

@@ -1,0 +1,23 @@
+.preview-heading a,
+.preview-actions button {
+  padding: 7px 10px;
+  border: 1px solid #d5d5cf;
+  border-radius: 4px;
+  background: white;
+  color: inherit;
+  font-size: 8px;
+  text-decoration: none;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.preview-frame {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  background: white;
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+# Claude tarball replayed by the claude-bundle smokes.
+.cache/
+*.tsbuildinfo
+.DS_Store
+ansible/env_vars

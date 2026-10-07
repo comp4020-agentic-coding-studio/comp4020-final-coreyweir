@@ -1,0 +1,67 @@
+.github-auth-alternative {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 10px;
+  color: #92928b;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.github-auth-alternative::before,
+.github-auth-alternative::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: #deded8;
+}
+
+.github-auth-pat-toggle {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid #cfcfc8;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  font-size: 10px;
+}
+
+.github-auth-pat label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #55554f;
+  font-size: 10px;
+}
+
+.github-auth-pat input {
+  padding: 11px 12px;
+  border: 1px solid #cfcfc8;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.github-auth-pat > p {
+  margin: 8px 0 12px;
+  color: #777770;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.github-auth-pat > div {
+  display: flex;
+  gap: 8px;
+}
+
+.github-auth-pat > div > button:first-child {
+  padding: 11px 14px;
+  border: 1px solid #cfcfc8;
+  border-radius: 3px;
+  background: #fff;
+  color: #555;
+}
+
+.github-auth-pat .primary {
+  margin-top: 0;
+}
