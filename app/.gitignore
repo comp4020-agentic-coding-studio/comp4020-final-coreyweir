@@ -1,5 +1,5 @@
 node_modules/
-dist/
+# dist/ is committed: see ../Dockerfile
 # Claude tarball replayed by the claude-bundle smokes.
 .cache/
 *.tsbuildinfo
