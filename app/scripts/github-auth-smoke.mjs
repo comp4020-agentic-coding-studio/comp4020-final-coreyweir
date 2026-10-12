@@ -71,6 +71,19 @@ try {
   const unrelatedResponse = await fetch(`${baseUrl}/unrelated`);
   assert.equal(unrelatedResponse.status, 404);
 
+  // No client id configured: answer 503 and never reach GitHub.
+  const unconfigured = createGitHubDeviceProxy({ clientId: undefined, fetchImpl: () => assert.fail("reached GitHub") });
+  const unconfiguredResponse = await new Promise((resolve) => {
+    const result = { statusCode: 0, headers: {}, body: "" };
+    unconfigured(
+      { url: "/api/github/device/code", method: "POST" },
+      { setHeader: (name, value) => { result.headers[name.toLowerCase()] = value; }, end: (body) => { result.body = body; resolve(result); }, set statusCode(code) { result.statusCode = code; } },
+      () => assert.fail("fell through"),
+    );
+  });
+  assert.equal(unconfiguredResponse.statusCode, 503);
+  assert.equal(JSON.parse(unconfiguredResponse.body).error, "github_sign_in_unavailable");
+
   console.log("GitHub auth proxy smoke test passed");
 } finally {
   server.close();

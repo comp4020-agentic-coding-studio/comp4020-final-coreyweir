@@ -90,7 +90,7 @@ export function GitHubAuthPoc({ roomGate = false }: { roomGate?: boolean }) {
           <p>{roomGate ? "The facilitator must sign in before Riff starts the browser workspace. Claude and Nodepod’s Git wrapper will receive the token for this session." : "This proves that Riff can obtain an OAuth token in the browser and use it with GitHub’s API. The token stays in this page’s memory and disappears on reload."}</p>
           <div className="github-auth-boundary">
             <strong>PoC boundary</strong>
-            <p>Authorization currently identifies as GitHub CLI. The client identity and login transport are isolated so they can be replaced before student use.</p>
+            <p>Authorization identifies as Riff’s own GitHub OAuth app, using the device flow. The token stays in this page’s memory.</p>
           </div>
         </article>
 

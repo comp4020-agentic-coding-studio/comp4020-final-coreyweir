@@ -12,9 +12,6 @@ import { createPreviewRelay } from "./server/previewRelay.mjs";
 // @ts-expect-error The OAuth proxy is plain JavaScript so its smoke test can import it directly.
 import { createGitHubDeviceProxy } from "./server/githubDeviceProxy.mjs";
 
-// Temporary public client identity used only by the isolated OAuth PoC.
-const GITHUB_CLI_CLIENT_ID = "178c6fc778ccc68e1d6a";
-
 function collaborationRelay(): Plugin {
   return {
     name: "riff-collaboration-relay",
@@ -28,9 +25,9 @@ function collaborationRelay(): Plugin {
       const previewRelay = createPreviewRelay();
 
       server.middlewares.use(previewRelay.middleware);
-      server.middlewares.use(createGitHubDeviceProxy({
-        clientId: process.env.GITHUB_OAUTH_CLIENT_ID || GITHUB_CLI_CLIENT_ID,
-      }));
+      // Riff's own OAuth app; run the dev server through `mise exec` so
+      // mise.local.toml supplies it.
+      server.middlewares.use(createGitHubDeviceProxy({ clientId: process.env.GITHUB_CLIENT_ID }));
 
       server.httpServer?.on("upgrade", (request, socket, head) => {
         const url = new URL(request.url ?? "/", "http://localhost");

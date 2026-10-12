@@ -33,8 +33,10 @@ async function requestGitHub(fetchImpl, url, fields) {
   return { status: upstream.ok ? 200 : upstream.status, body };
 }
 
+// clientId is Riff's own OAuth app (GITHUB_CLIENT_ID). Without one the routes
+// answer 503 rather than the server refusing to start: CI runs the image with
+// no secrets, and nothing else depends on GitHub.
 export function createGitHubDeviceProxy({ clientId, fetchImpl = fetch }) {
-  if (!clientId) throw new Error("A GitHub OAuth client ID is required");
 
   return async function githubDeviceProxy(request, response, next) {
     const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
@@ -44,6 +46,14 @@ export function createGitHubDeviceProxy({ clientId, fetchImpl = fetch }) {
     }
     if (request.method !== "POST") {
       sendJson(response, 405, { error: "method_not_allowed" });
+      return;
+    }
+
+    if (!clientId) {
+      sendJson(response, 503, {
+        error: "github_sign_in_unavailable",
+        error_description: "This server has no GitHub client id configured (GITHUB_CLIENT_ID).",
+      });
       return;
     }
 

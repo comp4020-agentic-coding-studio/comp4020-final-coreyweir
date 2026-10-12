@@ -10,10 +10,6 @@ import { createTerminalRelay } from "./terminalRelay.mjs";
 import { createPreviewRelay } from "./previewRelay.mjs";
 import { createGitHubDeviceProxy } from "./githubDeviceProxy.mjs";
 
-// The same public client identity the development server falls back to, so a
-// deployment without its own OAuth app behaves identically to local work.
-const GITHUB_CLI_CLIENT_ID = "178c6fc778ccc68e1d6a";
-
 const port = Number(process.env.PORT ?? 8093);
 const host = process.env.HOST ?? "127.0.0.1";
 // Health lives on its own listener rather than a path. The preview vhost
@@ -29,7 +25,7 @@ const collaboration = createCollaboration({ dbPath: process.env.RIFF_DB ?? "riff
 
 const middlewares = [
   previewRelay.middleware,
-  createGitHubDeviceProxy({ clientId: process.env.GITHUB_OAUTH_CLIENT_ID || GITHUB_CLI_CLIENT_ID }),
+  createGitHubDeviceProxy({ clientId: process.env.GITHUB_CLIENT_ID }),
 ];
 
 function countHosts(rooms) {

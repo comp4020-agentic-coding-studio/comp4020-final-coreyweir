@@ -13,15 +13,13 @@ Open the printed local URL, then host a new room or join with an existing room I
 
 ### GitHub authentication PoC
 
-Open `/?poc=github-auth` to test GitHub's OAuth device flow separately from room creation and Nodepod. During this development spike, the flow uses GitHub CLI's public OAuth client identity and retains the resulting token only in page memory. Reloading or leaving the page forgets it.
+Open `/?poc=github-auth` to test GitHub's OAuth device flow separately from room creation and Nodepod. The flow uses Riff's own OAuth app (device flow enabled) and retains the resulting token only in page memory. Reloading or leaving the page forgets it.
 
-The Vite development server provides the fixed-purpose same-origin proxy required because GitHub's OAuth token endpoints do not support browser CORS. No client secret is used. Override the temporary client identity when a project-owned OAuth app is available:
+The server provides the fixed-purpose same-origin proxy required because GitHub's OAuth token endpoints do not support browser CORS. The device flow needs no client secret. The client id comes from `GITHUB_CLIENT_ID` (a Fly secret in production, `mise.local.toml` locally); without it the proxy answers 503. Start the dev server through mise so it sees the variable:
 
 ```sh
-GITHUB_OAUTH_CLIENT_ID="your-client-id" npm run dev
+mise exec -- npx vite --host 127.0.0.1 --port 8093 --strictPort
 ```
-
-This authentication identity must be replaced before student-facing deployment.
 
 When a facilitator creates or refreshes a room with a Git repository configured, Riff requires this authentication before opening the workspace. The token is added to the in-memory Nodepod environment as `GITHUB_TOKEN` and `GH_TOKEN`, making it available to Claude and Nodepod's Git wrapper. It is never added to the persisted host configuration or collaborative room state.
 
