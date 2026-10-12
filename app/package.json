@@ -60,11 +60,11 @@
   "dependencies": {
     "@quickdrawjs/react": "^0.1.1",
     "@scelar/nodepod": "file:vendor/scelar-nodepod-1.9.20-riff.43.tgz",
-    "@wasmer/sdk": "file:../../wasmer-js-fork",
+    "@wasmer/sdk": "file:vendor/wasmer-sdk-0.10.0-riff.e56540d.tgz",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/xterm": "^6.0.0",
-    "lemon-tls": "file:../../lemon-tls-browser",
+    "lemon-tls": "file:vendor/lemon-tls-0.7.0-riff.e00e974.tgz",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "ws": "^8.21.3",

@@ -13,12 +13,14 @@ BlueOak). The licenses below need more than a mention:
   locally patched build): MIT with the Commons Clause, © 2026 R1ck404 /
   ScelarOrg. The Commons Clause forbids selling the software. Riff is
   non-commercial coursework. See `third_party/licenses/nodepod-MIT-CommonsClause.txt`.
-- **@wasmer/sdk** (a local fork of wasmer-js): MIT, © Wasmer Inc. See
+- **@wasmer/sdk** (`app/vendor/wasmer-sdk-0.10.0-riff.e56540d.tgz`, a local
+  fork of wasmer-js): MIT, © Wasmer Inc. See
   `third_party/licenses/wasmer-js-MIT.txt`.
-- **lemon-tls** (a local fork, adapted to run in the browser): Apache-2.0.
+- **lemon-tls** (`app/vendor/lemon-tls-0.7.0-riff.e00e974.tgz`, a local fork,
+  adapted to run in the browser): Apache-2.0.
   The files have been modified from upstream. See
   `third_party/licenses/lemon-tls-Apache-2.0.txt`.
-- **Mithic** (`app/dist/mithic/*.cjs`, bundled from
+- **Mithic** (`app/public/mithic/*.cjs`, shipped as `app/dist/mithic/`, bundled from
   <https://github.com/andykswong/mithic>): MIT, © 2026 Andy K. S. Wong. See
   `third_party/licenses/mithic-MIT.txt`.
 

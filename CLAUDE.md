@@ -87,12 +87,15 @@ same commit. Each README quality turns into what it means for a change:
 
 ## Traps
 
-- **The client does not build from this repo yet.** `app/package.json` points
-  `@wasmer/sdk` and `lemon-tls` at `file:../../…`, and Vite's `publicDir` at
-  `../../nodepod_wasm_wip/…`. Those paths were written for
-  `collab_riff/site_poc/riff_oauth` and resolve wrongly from `app/`. Until
-  that's fixed, a client change means rebuilding in `collab_riff`, copying
-  `dist/` across, and saying so in the commit. Never hand-edit `app/dist/`.
+- **The client builds here, from `app/` alone** (`npm ci && npm run build`).
+  The three forks are packed archives in `app/vendor/`, and `app/public/`
+  holds the launcher and Mithic files. Nothing may point outside the repo
+  again (`file:../../…`, a `publicDir` or `fs.allow` beyond `app/`). A fork
+  change is made in its own repo, packed, and installed per
+  `app/vendor/README.md`. Never hand-edit `app/dist/`.
+- **Claude Code is never in the repo or the build.** The browser derives it
+  from the npm tarball (`app/src/claudeBundle.ts`). Don't copy
+  `claude-booted*` into `app/public/`, whatever `nodepod_wasm_wip` does.
 - **Changing the client without rebuilding changes nothing that's deployed.**
   Check that `app/dist/` matches the source change before calling it done.
 - fly.toml sets `PORT=8080` for nginx. The node server also reads `PORT`, so

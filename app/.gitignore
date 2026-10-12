@@ -5,3 +5,7 @@ node_modules/
 *.tsbuildinfo
 .DS_Store
 ansible/env_vars
+
+# Claude Code is derived in the browser (src/claudeBundle.ts) and never shipped;
+# see THIRD_PARTY_NOTICES.md. Keep any prebuilt copy out of the public dir.
+public/claude/claude-booted*

@@ -1,5 +1,27 @@
 # Vendored packages
 
+Three forks are installed from archives here, so the client builds from a
+clean clone with nothing beside it:
+
+| Archive | Fork (in `collab_riff/`) | Packed from |
+|---|---|---|
+| `scelar-nodepod-1.9.20-riff.N.tgz` | `nodepod_fork` | see below |
+| `wasmer-sdk-0.10.0-riff.<commit>.tgz` | `wasmer-js-fork` | `dist/` as built at that commit |
+| `lemon-tls-0.7.0-riff.<commit>.tgz` | `lemon-tls-browser` | source files at that commit |
+
+The wasmer and lemon-tls archives are named after the fork's commit, for the
+same reason nodepod gets a new `riff.N`: a new name gives a new integrity hash.
+Neither fork has a `prepack` step, so `npm pack <fork dir>` tars whatever is on
+disk. For wasmer that means `dist/`, and `dist/` is only rebuilt by
+`npm run build` (Rust and wasm-pack), so rebuild first if the fork has changed.
+Then install the new archive with `npm install file:vendor/<archive>`, as for
+nodepod below.
+
+Before replacing an archive, check the result against what's deployed. For
+wasmer, compare `dist/wasmer_js_bg.wasm` with `../dist/assets/wasmer_js_bg-*.wasm`.
+
+## @scelar/nodepod
+
 `scelar-nodepod-1.9.20-riff.27.tgz` is the private Riff build of
 `@scelar/nodepod`. It includes the source-level environment, shell, Git binary,
 Preview, external-command lifecycle, direct external-command routing,

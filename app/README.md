@@ -61,13 +61,13 @@ The smoke test boots the existing Nodepod bundle, starts a structured session wi
 
 See [`docs/claude-nodepod-integration.md`](docs/claude-nodepod-integration.md) for the controller boundary and the local-versus-shared preview constraint.
 
-During this prototype, Vite serves the prepared Mithic browser assets and the Claude launcher (`shim.cjs`, `run.cjs`) read-only from `../../nodepod_wasm_wip/browser/public`. The pinned Nodepod compatibility patch is also invoked from that sibling project after install. A deployable package or artifact pipeline is still required before `riff-app` can stand alone.
+The prepared Mithic browser assets and the Claude launcher (`shim.cjs`, `run.cjs`) live in `public/`, copied from `nodepod_wasm_wip/browser/public`. `@scelar/nodepod`, `@wasmer/sdk` and `lemon-tls` are packed fork builds in `vendor/` (see `vendor/README.md`), so `npm ci && npm run build` works from a clean clone with nothing beside it.
 
 ### Claude runtime derivation
 
 Riff does not serve or ship a prebuilt `claude-booted.patched.js`. [`src/claudeBundle.ts`](src/claudeBundle.ts) derives it in the browser on first boot: it streams the published `@anthropic-ai/claude-code-darwin-x64` tarball from registry.npmjs.org, gunzips and untars it on the fly, reads the JavaScript bundle out of the Bun executable's Mach-O `__BUN,__bun` section, and applies the boot and Nodepod source patches. Only the ~23 MB of JavaScript is retained; the surrounding ~280 MB streams past and is discarded. The result is verified against `CLAUDE_BUNDLE_SHA256` and kept in Cache Storage, so the ~82 MB transfer happens once per browser (about 8 s cold, 40 ms warm).
 
-Bumping `CLAUDE_VERSION` requires re-pinning `CLAUDE_BUNDLE_SHA256` and re-checking every patch in `patchClaudeSource`, which matches against minified identifiers. `npm run test:claude-bundle` prints the digest it derived and names any patch that stopped applying. The prebuilt copies in the shared publicDir belong to `nodepod_wasm_wip`; the `riff-exclude-claude-bundle` Vite plugin keeps them out of Riff's dev server and build output.
+Bumping `CLAUDE_VERSION` requires re-pinning `CLAUDE_BUNDLE_SHA256` and re-checking every patch in `patchClaudeSource`, which matches against minified identifiers. `npm run test:claude-bundle` prints the digest it derived and names any patch that stopped applying. `nodepod_wasm_wip` keeps prebuilt copies for its own demo; they were deliberately not copied into `public/`, and `.gitignore` refuses `public/claude/claude-booted*`.
 
 ## Tests
 

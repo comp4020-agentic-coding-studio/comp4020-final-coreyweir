@@ -45,18 +45,21 @@ README, PROCESS.md and the reflections are mine to write.
 
 ### P1: before crit 10 (19 Oct)
 
-1. **Fix the client build.** Every client change is blocked until this is done.
-   - `app/package.json` points `@wasmer/sdk` and `lemon-tls` at
-     `file:../../…`. Vendor them: wasmer-js-fork (24 GB tree) via `npm pack`
-     into `app/vendor/`, as nodepod already is, and lemon-tls likewise.
-   - `vite.config.ts:104` `publicDir` points at
-     `../../nodepod_wasm_wip/browser/public` (30 MB). Bring it in-tree, but
-     **Claude Code (`claude/claude-booted*.js`) must stay out of git**.
-     `THIRD_PARTY_NOTICES.md` says it isn't shipped. Decide how the build
-     gets it, for example fetched at build time or kept as a local-only
-     path, gitignored.
-   - Done when a clean clone builds and `app/dist/` matches what's
-     committed.
+1. ~~**Fix the client build.**~~ Done. The forks are packed archives in
+   `app/vendor/` (`wasmer-sdk-0.10.0-riff.e56540d`,
+   `lemon-tls-0.7.0-riff.e00e974`), and the six launcher and Mithic files are
+   in `app/public/`. Claude Code needed nothing: the browser already derives it
+   from the npm tarball (`src/claudeBundle.ts`), so it stays out of git. A
+   clean clone builds. The output matches the committed `dist/` except that
+   `@noble/hashes` 2.4.0 is now bundled twice (npm nests one copy under
+   `lemon-tls` and one under `@noble/curves`, because nodepod's 1.8.0 holds the
+   root). Same version, a few KB.
+   - Left behind: `scripts/git-sync-smoke.mjs` and
+     `scripts/claude-stream-smoke.mjs` still import from `nodepod_wasm_wip`.
+     They're research smokes, not part of the build.
+   - Open: build the client in the Docker image instead of committing
+     `app/dist/`? That would remove the "dist out of date" trap, at the cost
+     of a slower deploy.
 2. **SQLite + Hocuspocus** (ADR 0002).
    - Replace y-websocket and y-leveldb.
    - Write each update as a row from `onChange`, with `user_id`. Compact by
@@ -167,7 +170,8 @@ README, PROCESS.md and the reflections are mine to write.
 - **The course org's OAuth app restriction.** Personal repos only, or ask the
   convenor.
 - **Who may view a kept, ended board.** Decided with crit 10's permissions.
-- **How Claude Code reaches the build** (P1.1).
+- ~~**How Claude Code reaches the build** (P1.1).~~ It doesn't: the browser derives it.
+- **Build the client in the Docker image**, or keep committing `app/dist/`.
 
 ## Measuring claims
 

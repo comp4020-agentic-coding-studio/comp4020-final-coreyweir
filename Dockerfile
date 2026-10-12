@@ -1,8 +1,8 @@
 # syntax = docker/dockerfile:1
 
-# The client is prebuilt and committed (app/dist) because its build depends on
-# local forks that aren't published yet; see PROCESS.md. The image only has
-# to serve it and run the node relays.
+# The client is prebuilt and committed (app/dist). It builds from app/ alone
+# (the forks are vendored), so building it here instead is possible; see
+# PLAN.md. For now the image only serves it and runs the node relays.
 
 FROM docker.io/library/node:24-slim
 RUN apt-get update \
