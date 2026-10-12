@@ -29,6 +29,8 @@ steers the agent into last week's work.
 
 The project moves in phases, and the commit history should show it. Don't
 skip ahead to building something the current phase hasn't decided on.
+`PLAN.md` holds the order of work and its details. Read it before starting
+an item, and update it when the item lands.
 
 1. **Port** (done, `c8792b8..7af9c15`): the existing Riff deployed on fly,
    with server-side persistence.
