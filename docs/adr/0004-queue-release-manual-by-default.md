@@ -27,8 +27,7 @@ says that where hosts could reasonably differ, it should be a setting.
 
 **3.**
 
-- **Send** puts the prompt into Claude and submits it. It's pasted as one
-  block, so newlines survive, and enter follows as a separate step. To edit a
+- **Send** puts the prompt into Claude and submits it, newlines intact. To edit a
   prompt first, edit it in the queue. Sending while Claude is still working
   is fine: Claude Code treats it as a follow-up and answers once its turn
   ends. Re-check this on the bundled version (2.1.221).
@@ -36,12 +35,24 @@ says that where hosts could reasonably differ, it should be a setting.
   Turning it on while Claude is idle sends the next prompt straight away.
   The toggle sits in the room's shared state, so everyone can see whether
   auto is on.
-- **How the page knows Claude has finished:** Claude Code's hooks. At boot,
-  the host's settings get a `Stop` hook and a `UserPromptSubmit` hook, both
-  calling `riff-hook`. That's a Nodepod `externalCommands` entry, so the hook
-  runs as a function in the host page and gets the hook's JSON on stdin. No
-  network, no polling. WASIX bash already reaches Nodepod commands through
-  the existing bridge, so it doesn't matter which shell Claude uses.
+- **How the page and Claude talk.** Two mechanisms; the decision doesn't
+  depend on which one we use.
+  - **Planned: a Claude Code mod** (v2.1.287+). A mod runs inside Claude
+    Code, follows each turn's start and end directly, and can submit a prompt
+    as if it had been typed, so nothing is pasted into stdin. It needs the
+    bundled Claude Code moved up from 2.1.221 and our patches redone. That's
+    worth doing anyway for newer models. The mod API is early access and
+    "may change between releases without notice".
+  - **Until then: settings hooks plus a paste.** At boot, the host's settings
+    get a `Stop` hook and a `UserPromptSubmit` hook, both calling
+    `riff-hook`.
+  - **Either way, the channel to the page is `riff-hook`.** It's a Nodepod
+    `externalCommands` entry, so it runs as a function in the host page and
+    gets its JSON on stdin. No network, no polling. WASIX bash already
+    reaches Nodepod commands through the existing bridge, so it doesn't
+    matter which shell Claude uses. Getting a prompt from the page to a mod
+    needs a channel the other way: something the mod polls, or a file it
+    watches.
 - **One prompt per turn.** Auto ignores a `Stop` with `stop_hook_active` set,
   and an empty queue means auto just waits.
 - **Only the host can send or toggle auto,** because only the host's browser
@@ -59,7 +70,8 @@ says that where hosts could reasonably differ, it should be a setting.
 - **The busy signal:** `UserPromptSubmit` and `Stop` together tell the page
   whether Claude is working. The room can show that, and it's one more fact
   for the audit log.
-- **To check during implementation:**
+- **To check during implementation:** for the mod, that function hooks can
+  be enabled in our bundle. For the fallback:
   - that pasting followed by a separate enter submits reliably in Nodepod;
   - that a long paste (shown as `[Pasted text #1 +N lines]`) still sends the
     full text.
