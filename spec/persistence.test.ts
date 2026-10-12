@@ -1,6 +1,5 @@
 import { expect, inject, it } from "vitest";
-import * as Y from "yjs";
-import { WebsocketProvider } from "y-websocket";
+import { joinRoom as joinShared, uniqueRoom } from "./yjs-room";
 
 // Crit 8: a stranger's trace is still there when they come back. A room's
 // shared state is a Yjs document synced through /collaboration/, so the
@@ -12,34 +11,10 @@ import { WebsocketProvider } from "y-websocket";
 // Surviving a restart/redeploy (y-leveldb on the fly volume) is checked by
 // hand: write, `flyctl machine restart`, read back.
 const baseUrl = inject("baseUrl");
-const collaborationUrl = new URL("/collaboration", baseUrl);
-collaborationUrl.protocol = collaborationUrl.protocol === "https:" ? "wss:" : "ws:";
-
-function joinRoom(room: string): Promise<{ doc: Y.Doc; leave: () => void }> {
-  const doc = new Y.Doc();
-  const provider = new WebsocketProvider(collaborationUrl.href, room, doc, {
-    WebSocketPolyfill: WebSocket as unknown as typeof globalThis.WebSocket,
-    connect: true,
-  });
-  const leave = () => {
-    provider.destroy();
-    doc.destroy();
-  };
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      leave();
-      reject(new Error(`room ${room} never synced with ${collaborationUrl.href}`));
-    }, 10_000);
-    provider.on("sync", (synced: boolean) => {
-      if (!synced) return;
-      clearTimeout(timer);
-      resolve({ doc, leave });
-    });
-  });
-}
+const joinRoom = (room: string) => joinShared(baseUrl, room);
 
 it("a room's state survives everyone leaving and a new session joining", async () => {
-  const room = `spec-persistence-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const room = uniqueRoom("spec-persistence");
   const trace = `left by the first visitor at ${new Date().toISOString()}`;
 
   const first = await joinRoom(room);
