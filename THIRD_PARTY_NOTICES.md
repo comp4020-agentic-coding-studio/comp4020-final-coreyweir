@@ -20,9 +20,6 @@ BlueOak). The licenses below need more than a mention:
   adapted to run in the browser): Apache-2.0.
   The files have been modified from upstream. See
   `third_party/licenses/lemon-tls-Apache-2.0.txt`.
-- **Mithic** (`app/public/mithic/*.cjs`, shipped as `app/dist/mithic/`, bundled from
-  <https://github.com/andykswong/mithic>): MIT, © 2026 Andy K. S. Wong. See
-  `third_party/licenses/mithic-MIT.txt`.
 
 ## WebAssembly command binaries
 

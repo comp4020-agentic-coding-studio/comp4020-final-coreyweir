@@ -47,16 +47,33 @@ README, PROCESS.md and the reflections are mine to write.
 
 1. ~~**Fix the client build.**~~ Done. The forks are packed archives in
    `app/vendor/` (`wasmer-sdk-0.10.0-riff.e56540d`,
-   `lemon-tls-0.7.0-riff.e00e974`), and the six launcher and Mithic files are
-   in `app/public/`. Claude Code needed nothing: the browser already derives it
+   `lemon-tls-0.7.0-riff.e00e974`), and the launcher files are in
+   `app/public/claude/` (the four Mithic files went later; see below).
+   Claude Code needed nothing: the browser already derives it
    from the npm tarball (`src/claudeBundle.ts`), so it stays out of git. A
    clean clone builds. The output matches the committed `dist/` except that
    `@noble/hashes` 2.4.0 is now bundled twice (npm nests one copy under
    `lemon-tls` and one under `@noble/curves`, because nodepod's 1.8.0 holds the
    root). Same version, a few KB.
-   - Left behind: `scripts/git-sync-smoke.mjs` and
-     `scripts/claude-stream-smoke.mjs` still import from `nodepod_wasm_wip`.
-     They're research smokes, not part of the build.
+   - Left behind: `scripts/claude-stream-smoke.mjs` still imports from
+     `nodepod_wasm_wip`. It's a research smoke, not part of the build.
+   - ~~Mithic, the JavaScript shell from before WASIX bash.~~ Removed. Every
+     way of starting bash in the pod (`execSync`, `spawnSync` and `spawn`, by
+     name and by `/bin/bash`) was answered by WASIX bash, and a tripwire in
+     place of Mithic's `/bin/bash` never fired. Nodepod checks exact external
+     commands before PATH, for sync spawns too. Boot no longer fetches its
+     604 KB. Its two smokes went with it.
+     - Unmeasured since: a dev server Claude starts with a wrapped
+       `pnpm run dev` staying up under WASIX bash (the Mithic smoke was the
+       only check). Test it before a crit relies on a Claude-started preview.
+     - Hypothesis: `execFileSync("/bin/bash", ["--version"])` fails with
+       "not found" in the pod, Mithic or not. Claude's shell probe uses the
+       async path, so it doesn't bite today.
+     - `scripts/git-sync-browser-smoke.mjs` times out waiting for
+       "Initialized empty Git repository" in the terminal text, before and
+       after the removal alike. Git through bash itself works on every spawn
+       path (via `.wasix-session/bin/git`), so the smoke's terminal harness is
+       what broke. Fix or retire it.
    - ~~Build the client in the Docker image instead of committing
      `app/dist/`?~~ Done. Measured on the fly remote builder: 38 s for a cold
      build with a fresh `npm ci` (the client build itself 14 s), 7 s when

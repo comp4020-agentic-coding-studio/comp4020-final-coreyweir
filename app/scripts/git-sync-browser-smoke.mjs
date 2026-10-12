@@ -86,7 +86,7 @@ try {
   assert(!terminalText.includes("sync-supported git command"), terminalText);
   assert(workerRequests.some((url) => /\/__worker__\.js\?dev=\d+$/.test(url)), workerRequests);
   assert.deepEqual(pageErrors, []);
-  console.log("Browser Mithic Git commands delegate to Nodepod workers");
+  console.log("Git commands run through bash delegate to Nodepod workers");
 } finally {
   await browser.close();
 }

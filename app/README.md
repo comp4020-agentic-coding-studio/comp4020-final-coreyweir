@@ -25,8 +25,6 @@ This authentication identity must be replaced before student-facing deployment.
 
 When a facilitator creates or refreshes a room with a Git repository configured, Riff requires this authentication before opening the workspace. The token is added to the in-memory Nodepod environment as `GITHUB_TOKEN` and `GH_TOKEN`, making it available to Claude and Nodepod's Git wrapper. It is never added to the persisted host configuration or collaborative room state.
 
-The postinstall patch also delegates Git commands invoked synchronously by Claude's Mithic shell to Nodepod's child-worker command path. This keeps fast local queries such as `git --version` synchronous while allowing implemented commands such as `clone`, `fetch`, `pull`, and `push` to perform asynchronous GitHub API requests.
-
 ## Implemented
 
 - Quickdraw infinite canvas with drawing, notes, images, selection, undo, pan, and zoom
@@ -61,7 +59,7 @@ The smoke test boots the existing Nodepod bundle, starts a structured session wi
 
 See [`docs/claude-nodepod-integration.md`](docs/claude-nodepod-integration.md) for the controller boundary and the local-versus-shared preview constraint.
 
-The prepared Mithic browser assets and the Claude launcher (`shim.cjs`, `run.cjs`) live in `public/`, copied from `nodepod_wasm_wip/browser/public`. `@scelar/nodepod`, `@wasmer/sdk` and `lemon-tls` are packed fork builds in `vendor/` (see `vendor/README.md`), so `npm ci && npm run build` works from a clean clone with nothing beside it.
+The Claude launcher (`shim.cjs`, `run.cjs`) lives in `public/claude/`, copied from `nodepod_wasm_wip/browser/public`. `@scelar/nodepod`, `@wasmer/sdk` and `lemon-tls` are packed fork builds in `vendor/` (see `vendor/README.md`), so `npm ci && npm run build` works from a clean clone with nothing beside it.
 
 ### Claude runtime derivation
 

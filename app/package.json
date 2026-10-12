@@ -20,7 +20,6 @@
     "test:preview-browser": "node scripts/preview-browser-smoke.mjs",
     "test:preview-relay": "node scripts/preview-relay-smoke.mjs",
     "test:preview-participant": "node scripts/preview-participant-browser-smoke.mjs",
-    "test:nodepod-background": "node scripts/nodepod-background-browser-smoke.mjs",
     "test:wasmer-command-browser": "node scripts/wasmer-command-browser-smoke.mjs",
     "test:wasix-bash-external-browser": "node scripts/wasix-bash-external-browser-smoke.mjs",
     "test:wasix-bash-mount-matrix": "node scripts/wasix-bash-mount-matrix-browser-smoke.mjs",
@@ -52,7 +51,6 @@
     "test:claude-stream": "node scripts/claude-stream-smoke.mjs",
     "test:github-auth": "node scripts/github-auth-smoke.mjs",
     "test:github-pat-browser": "node scripts/github-pat-browser-smoke.mjs",
-    "test:git-sync": "node scripts/git-sync-smoke.mjs",
     "test:git-sync-browser": "node scripts/git-sync-browser-smoke.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test:wasix-concurrent-bash-browser": "node scripts/wasix-concurrent-bash-browser-smoke.mjs"

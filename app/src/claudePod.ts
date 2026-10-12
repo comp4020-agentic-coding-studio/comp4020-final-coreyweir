@@ -343,16 +343,12 @@ export class ClaudePodController {
   async boot() {
     if (this.pod) return;
     this.report("Loading Claude runtime");
-    const [shim, run, claude, mithicShell, mithicCoreutils, mithicRunner, bash] = await Promise.all([
+    const [shim, run, claude] = await Promise.all([
       fetchText("/claude/shim.cjs"),
       fetchText("/claude/run.cjs"),
       // Derived in-browser from the published npm tarball rather than served as
       // a prebuilt artifact; cached after the first cold boot.
       loadClaudeBundle({ report: this.report }),
-      fetchBytes("/mithic/mithic-shell.cjs"),
-      fetchBytes("/mithic/mithic-coreutils.cjs"),
-      fetchText("/mithic/run-mithic.cjs"),
-      fetchText("/mithic/bash.cjs"),
     ]);
 
     const env: Record<string, string> = {
@@ -386,10 +382,6 @@ export class ClaudePodController {
         "/opt/claude/shim.cjs": shim,
         "/opt/claude/run.cjs": run,
         "/opt/claude/claude-booted.patched.js": claude,
-        "/opt/mithic/mithic-shell.cjs": mithicShell,
-        "/opt/mithic/mithic-coreutils.cjs": mithicCoreutils,
-        "/opt/mithic/run-mithic.cjs": mithicRunner,
-        "/bin/bash": bash,
         "/work/repo/.keep": "",
         "/home/user/.claude.json": JSON.stringify({
           firstStartTime: new Date().toISOString(),
@@ -412,8 +404,10 @@ export class ClaudePodController {
         "wasm-fs-probe": this.runWasmerCommand,
         python: this.runWasmerCommand,
         // W1: Claude Code's Bash tool resolves $SHELL ("bash") or the absolute
-        // "/bin/bash" — cover both exact keys. The mithic shim file stays on
-        // disk as a fallback; spawn-request interception shadows it.
+        // "/bin/bash" — cover both exact keys. Nodepod checks exact external
+        // commands before PATH, for sync spawns too (they run in a child
+        // worker whose shell does the same check), so no /bin/bash file is
+        // needed. `sh -c` stays with Nodepod's built-in shell.
         bash: this.runBashExternal,
         "/bin/bash": this.runBashExternal,
       },

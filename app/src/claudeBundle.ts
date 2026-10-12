@@ -382,9 +382,10 @@ export function patchClaudeSource(code: string): string {
     );
   }
 
-  // A cold Mithic process can take longer than Claude's native 1s shell probe
-  // inside Nodepod. Keep validation enabled, but allow the WASM-backed shell to
-  // start before Claude concludes that no POSIX shell exists.
+  // The first WASIX bash start (fetching and compiling its package) can take
+  // longer than Claude's native 1s shell probe. Keep validation enabled, but
+  // allow the WASM-backed shell to start before Claude concludes that no POSIX
+  // shell exists.
   const shellValidation = 'cn(e,["--version"],{timeout:1000,useCwd:!1})';
   if (code.includes(shellValidation)) {
     code = code.replace(

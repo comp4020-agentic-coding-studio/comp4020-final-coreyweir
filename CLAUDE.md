@@ -91,7 +91,7 @@ same commit. Each README quality turns into what it means for a change:
 
 - **The client builds here, from `app/` alone** (`npm ci && npm run build`).
   The three forks are packed archives in `app/vendor/`, and `app/public/`
-  holds the launcher and Mithic files. Nothing may point outside the repo
+  holds the Claude launcher (`shim.cjs`, `run.cjs`). Nothing may point outside the repo
   again (`file:../../…`, a `publicDir` or `fs.allow` beyond `app/`). A fork
   change is made in its own repo, packed, and installed per
   `app/vendor/README.md`.
