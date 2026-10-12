@@ -2,16 +2,13 @@
 // middleware (see vite.config.ts), which only exists in dev mode — a built
 // deployment has no Vite, so the same modules are mounted here on a plain
 // node:http server. nginx terminates TLS and serves dist/; this process only
-// handles the relays, the OAuth proxy, and the health endpoint.
-import { createRequire } from "node:module";
+// handles the room documents, the relays, the OAuth proxy, and the health
+// endpoint.
 import { createServer } from "node:http";
-import { WebSocketServer } from "ws";
+import { createCollaboration } from "./collaboration.mjs";
 import { createTerminalRelay } from "./terminalRelay.mjs";
 import { createPreviewRelay } from "./previewRelay.mjs";
 import { createGitHubDeviceProxy } from "./githubDeviceProxy.mjs";
-
-const require = createRequire(import.meta.url);
-const { setupWSConnection } = require("y-websocket/bin/utils");
 
 // The same public client identity the development server falls back to, so a
 // deployment without its own OAuth app behaves identically to local work.
@@ -27,8 +24,8 @@ const healthPort = Number(process.env.HEALTH_PORT ?? 8094);
 
 const previewRelay = createPreviewRelay();
 const terminalRelay = createTerminalRelay();
-const collaboration = new WebSocketServer({ noServer: true });
-const collaborationSockets = new Set();
+// RIFF_DB is a SQLite file on the fly volume (deploy/start.sh).
+const collaboration = createCollaboration({ dbPath: process.env.RIFF_DB ?? "riff.sqlite" });
 
 const middlewares = [
   previewRelay.middleware,
@@ -55,7 +52,7 @@ function health() {
     rssBytes: process.memoryUsage().rss,
     preview: { rooms: previewRelay.rooms.size, hosts: countHosts(previewRelay.rooms), pending },
     terminal: { rooms: terminalRelay.rooms.size, hosts: countHosts(terminalRelay.rooms), clients: terminalClients },
-    collaboration: { sockets: collaborationSockets.size },
+    collaboration: collaboration.stats(),
   };
 }
 
@@ -119,11 +116,8 @@ server.on("upgrade", (request, socket, head) => {
   for (const [prefix, handle] of [
     ["/terminal/", (room) => terminalRelay.handleUpgrade(request, socket, head, room)],
     ["/preview-control/", (room) => previewRelay.handleUpgrade(request, socket, head, room)],
-    ["/collaboration/", (room) => collaboration.handleUpgrade(request, socket, head, (websocket) => {
-      collaborationSockets.add(websocket);
-      websocket.on("close", () => collaborationSockets.delete(websocket));
-      setupWSConnection(websocket, request, { docName: room, gc: true });
-    })],
+    // Hocuspocus reads the document name from each message, not the path.
+    ["/collaboration/", () => collaboration.handleUpgrade(request, socket, head)],
   ]) {
     if (!url.pathname.startsWith(prefix)) continue;
     const room = roomFrom(url.pathname, prefix);
@@ -147,8 +141,6 @@ function shutdown(signal) {
   // HTTP server's close callback fire at all.
   previewRelay.close();
   terminalRelay.close();
-  for (const websocket of collaborationSockets) websocket.terminate();
-  collaborationSockets.clear();
   collaboration.close();
   healthServer.close();
   server.close(() => process.exit(0));

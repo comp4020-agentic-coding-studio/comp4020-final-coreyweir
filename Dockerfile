@@ -31,6 +31,6 @@ RUN mkdir -p /srv/www/readme \
 COPY deploy/nginx.conf /srv/nginx.conf
 COPY deploy/start.sh /srv/start.sh
 
-ENV YPERSISTENCE=/data/yjs
+ENV RIFF_DB=/data/riff.sqlite
 EXPOSE 8080
 CMD ["bash", "/srv/start.sh"]

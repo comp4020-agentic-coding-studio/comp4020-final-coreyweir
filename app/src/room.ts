@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import * as Y from "yjs";
-import { WebsocketProvider } from "y-websocket";
+import { HocuspocusProvider } from "@hocuspocus/provider";
 import { IndexeddbPersistence } from "y-indexeddb";
-import type { Awareness } from "y-protocols/awareness";
+import { Awareness } from "y-protocols/awareness";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -60,9 +60,11 @@ export function setIdentityName(name: string) {
   return identity;
 }
 
-function websocketUrl() {
+// Hocuspocus names the document in every message, so the path is only for
+// the logs; it keeps the same /collaboration/<doc> shape as before.
+function websocketUrl(docName: string) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${location.host}/collaboration`;
+  return `${protocol}//${location.host}/collaboration/${encodeURIComponent(docName)}`;
 }
 
 function participantList(awareness: Awareness): Participant[] {
@@ -76,7 +78,10 @@ function participantList(awareness: Awareness): Participant[] {
 
 export function useRoom(roomId: string, facilitator: boolean) {
   const [doc] = useState(() => new Y.Doc());
-  const [provider] = useState(() => new WebsocketProvider(websocketUrl(), `riff-${roomId}`, doc));
+  const [awareness] = useState(() => new Awareness(doc));
+  const [provider] = useState(
+    () => new HocuspocusProvider({ url: websocketUrl(`riff-${roomId}`), name: `riff-${roomId}`, document: doc, awareness }),
+  );
   const [persistence] = useState(() => new IndexeddbPersistence(`riff-${roomId}`, doc));
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -88,30 +93,30 @@ export function useRoom(roomId: string, facilitator: boolean) {
 
   useEffect(() => {
     const onStatus = ({ status: next }: { status: ConnectionStatus }) => setStatus(next);
-    const onAwareness = () => setParticipants(participantList(provider.awareness));
+    const onAwareness = () => setParticipants(participantList(awareness));
     const onPrompts = () => setPromptVersion((version) => version + 1);
     const onRoomState = () => setRoomVersion((version) => version + 1);
 
-    provider.awareness.setLocalStateField("user", {
+    awareness.setLocalStateField("user", {
       ...identity,
       role: facilitator ? "facilitator" : "participant",
     });
     provider.on("status", onStatus);
-    provider.awareness.on("change", onAwareness);
+    awareness.on("change", onAwareness);
     prompts.observeDeep(onPrompts);
     roomState.observe(onRoomState);
     onAwareness();
 
     return () => {
       provider.off("status", onStatus);
-      provider.awareness.off("change", onAwareness);
+      awareness.off("change", onAwareness);
       prompts.unobserveDeep(onPrompts);
       roomState.unobserve(onRoomState);
       provider.destroy();
       persistence.destroy();
       doc.destroy();
     };
-  }, [doc, facilitator, identity.colour, identity.name, persistence, prompts, provider, roomState]);
+  }, [awareness, doc, facilitator, identity.colour, identity.name, persistence, prompts, provider, roomState]);
 
   const promptSnapshots: PromptSnapshot[] = [];
   prompts.forEach((map, id) => {

@@ -10,7 +10,7 @@
     "typecheck": "tsc -b",
     "test:osc133": "node --test src/osc133.test.ts",
     "test:wasix-bridge-unit": "node --test src/wasixBridge.test.ts",
-    "test:collaboration": "node scripts/collaboration-smoke.mjs",
+    "test:collaboration": "node --test --test-force-exit scripts/collaboration-store.test.mjs",
     "test:terminal-relay": "node scripts/terminal-relay-smoke.mjs",
     "test:terminal-browser": "node scripts/terminal-browser-smoke.mjs",
     "test:wasix-terminal-browser": "node scripts/wasix-terminal-browser-smoke.mjs",
@@ -58,6 +58,8 @@
     "test:wasix-concurrent-bash-browser": "node scripts/wasix-concurrent-bash-browser-smoke.mjs"
   },
   "dependencies": {
+    "@hocuspocus/provider": "^4.7.0",
+    "@hocuspocus/server": "^4.7.0",
     "@quickdrawjs/react": "^0.1.1",
     "@scelar/nodepod": "file:vendor/scelar-nodepod-1.9.20-riff.43.tgz",
     "@wasmer/sdk": "file:vendor/wasmer-sdk-0.10.0-riff.e56540d.tgz",
@@ -69,7 +71,7 @@
     "react-dom": "^19.1.1",
     "ws": "^8.21.3",
     "y-indexeddb": "^9.0.12",
-    "y-websocket": "^1.5.4",
+    "y-protocols": "^1.0.7",
     "yjs": "^13.6.27"
   },
   "devDependencies": {

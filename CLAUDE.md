@@ -66,8 +66,9 @@ same commit. Each README quality turns into what it means for a change:
 - **Not too opinionated.** Where hosts could reasonably differ (manual versus
   automatic release from the queue), make it a setting, not a hard-coded
   behaviour. Ask me before picking the default.
-- **Information durability.** Shared room state persists server-side (y-leveldb
-  on the fly volume). Don't add room state that lives only in one client or
+- **Information durability.** Shared room state persists server-side: every
+  update is a row in SQLite on the fly volume (`/data/riff.sqlite`,
+  `docs/adr/0002`). Don't add room state that lives only in one client or
   in server memory. The one deliberate exception is the terminal mirror: it
   stays in memory and never reaches disk, because it can show secrets
   (`docs/adr/0001`). Don't "fix" that.
@@ -109,9 +110,15 @@ same commit. Each README quality turns into what it means for a change:
   blocked as mixed content). `spec/headers.test.ts` checks the page, a room
   link and one script, not every path. Never add that CSP to Vite's dev
   server: on `http://127.0.0.1` it upgrades the page's own assets.
-- y-websocket keeps an empty room **in memory** whether or not persistence is
-  on. A room that survives a reconnect proves nothing about a restart. Prove
-  persistence with `flyctl machine restart` and then read the room back.
+- A change is saved when the server **acknowledges** it. The store writes
+  each update from the Yjs document's own `update` event, which runs before
+  Hocuspocus sends the ack. Its `onChange` hook runs after the ack, so don't
+  move the write there. Wait on the ack (`unsyncedChanges` reaching 0), never
+  on a sleep.
+- A room that survives a reconnect proves nothing about a restart. Prove
+  persistence with `flyctl machine restart` and read the room back; the log
+  line `doc <name> loaded: N rows` shows it came from disk.
+  `npm run test:collaboration` (in `app/`) covers SIGKILL and compaction.
 - The client still keeps its own IndexedDB copy of each room. "It persisted"
   has to say which store it came from.
 - `/readme/` is generated from `README.md` at image build time. Editing the

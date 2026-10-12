@@ -1,6 +1,6 @@
 # 2. Room state in SQLite, as an append-only update log
 
-- Status: accepted, not yet implemented (week 10, planning phase)
+- Status: accepted, implemented 2026-10-12 (see "Implementation" below)
 - Date: 2026-10-12
 
 ## Context
@@ -107,3 +107,48 @@ mode on `/data`.
   pruned when the room ends, so nobody signs up to a backlog of dead rooms.
   This needs "ended" defined: the host ends it, or the host has been absent
   past a grace period long enough to cover a reload.
+
+## Implementation (2026-10-12)
+
+`app/server/collaboration.mjs`, on `@hocuspocus/server` 4.7.0 and the
+client's `@hocuspocus/provider` 4.7.0. Where it differs from the plan above:
+
+- **Rows are written from the document's own `update` event, not from
+  `onChange`.** In 4.7.0 `onChange` does carry `update` and the connection's
+  `context`, as expected. But Hocuspocus acknowledges a change to the client
+  right after applying it, and runs `onChange` a microtask later, so an
+  `onChange` writer could ack something not yet on disk. Yjs fires `update`
+  synchronously inside the apply, so writing there means the server never
+  acknowledges an update it hasn't committed. The listener is attached after
+  the stored rows are applied, so loading writes nothing back. `user_id`
+  comes from the transaction origin's connection context (null until
+  identity lands).
+- **Schema:** `doc_updates(seq, doc, data, user_id, at, snapshot)`. `data`
+  instead of `update` (a SQL keyword); a snapshot is a row with
+  `snapshot = 1`.
+- **Compaction threshold:** compact when the bytes since the last snapshot
+  reach the snapshot's own size, and at least 1 MB. Rewrites then cost a
+  constant factor of what was written. Loading a document with more than one
+  row also compacts it, while nobody is connected yet.
+- **Durability setting:** WAL with `synchronous = NORMAL`. A commit survives
+  the process being killed; a power loss on the host can drop the last
+  commits.
+- **Logged sizes:** `doc <name> loaded: N rows, B bytes stored, S bytes as one
+  snapshot`, `doc <name> compacted: …`, and `doc <name> large update: B
+  bytes` for any single update of 100 KB or more (almost always an image).
+  `/healthz` reports loaded documents, connections and the database's size.
+
+Checked by:
+
+- `app/scripts/collaboration-store.test.mjs` (`npm run test:collaboration`):
+  the server runs in a child process; 45 acknowledged edits (several
+  compactions at a 64 KB threshold, then edits after the last snapshot), then
+  SIGKILL, then a fresh process and client read every edit back. It fails if
+  rows aren't written or if compaction deletes without snapshotting (both
+  tried).
+- `spec/persistence.test.ts` against the live app. Hocuspocus unloads a
+  document when its last client leaves, and the fly logs show the second
+  session's document loaded from SQLite.
+- By hand on the live app: a marker written and acknowledged, `flyctl
+  machine restart`, and the marker read back, with the new process logging
+  `doc riff-restart-proof-1791776183 loaded: 1 rows`.

@@ -72,14 +72,17 @@ README, PROCESS.md and the reflections are mine to write.
      the live bundle. Hosts who want real plain http can allow "Insecure
      content" for the site in Chrome. CORS still limits the guest to origins
      that allow cross-origin reads, over either scheme.
-2. **SQLite + Hocuspocus** (ADR 0002).
-   - Replace y-websocket and y-leveldb.
-   - Write each update as a row from `onChange`, with `user_id`. Compact by
-     bytes, not count.
-   - Log document sizes.
-   - Check: kill the process mid-session, and the room reloads intact.
-   - Prove persistence with `flyctl machine restart`, never with a
-     reconnect.
+2. ~~**SQLite + Hocuspocus** (ADR 0002).~~ Done. `app/server/collaboration.mjs`
+   on Hocuspocus 4.7.0, `/data/riff.sqlite`. Rows are written from the Yjs
+   `update` event rather than `onChange`, because Hocuspocus acks before
+   `onChange` runs (details in the ADR). Compaction at max(1 MB, snapshot
+   size). Old `/data/yjs` rooms were dropped as planned.
+   - Checked: `npm run test:collaboration` (SIGKILL mid-session, across
+     compaction), `pnpm check` live (the realtime and persistence specs now
+     wait on the server's ack), `flyctl machine restart` with a marker read
+     back, and two browser profiles plus a headless client on the live room.
+   - Left: `/data/yjs` (36 KB) is still on the volume; delete it once
+     nobody needs an old room.
 3. **Identity.**
    - Our own GitHub OAuth app. Sign-in asks for no permissions. "Connect
      GitHub for pushing" asks again for `repo` or `public_repo` when

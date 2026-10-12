@@ -1,8 +1,10 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import nodepod from "@scelar/nodepod/vite";
-import { WebSocketServer } from "ws";
-import { createRequire } from "node:module";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+// @ts-expect-error Shared with the production server, which is plain Node.js.
+import { createCollaboration } from "./server/collaboration.mjs";
 // @ts-expect-error The relay is shared with its plain Node.js smoke test.
 import { createTerminalRelay } from "./server/terminalRelay.mjs";
 // @ts-expect-error The relay is shared with its plain Node.js smoke test.
@@ -13,16 +15,15 @@ import { createGitHubDeviceProxy } from "./server/githubDeviceProxy.mjs";
 // Temporary public client identity used only by the isolated OAuth PoC.
 const GITHUB_CLI_CLIENT_ID = "178c6fc778ccc68e1d6a";
 
-const require = createRequire(import.meta.url);
-const { setupWSConnection } = require("y-websocket/bin/utils") as {
-  setupWSConnection: (socket: unknown, request: unknown, options: { docName: string; gc: boolean }) => void;
-};
-
 function collaborationRelay(): Plugin {
   return {
     name: "riff-collaboration-relay",
     configureServer(server) {
-      const socketServer = new WebSocketServer({ noServer: true });
+      // Development uses the same SQLite store as production, in a
+      // gitignored file under app/.data unless RIFF_DB says otherwise.
+      const dbPath = process.env.RIFF_DB ?? ".data/riff.sqlite";
+      mkdirSync(dirname(dbPath), { recursive: true });
+      const collaboration = createCollaboration({ dbPath });
       const terminalRelay = createTerminalRelay();
       const previewRelay = createPreviewRelay();
 
@@ -50,16 +51,12 @@ function collaborationRelay(): Plugin {
           return;
         }
         if (!url.pathname.startsWith("/collaboration/")) return;
-
-        socketServer.handleUpgrade(request, socket, head, (websocket) => {
-          const roomName = decodeURIComponent(url.pathname.slice("/collaboration/".length));
-          setupWSConnection(websocket as never, request, { docName: roomName, gc: true });
-        });
+        collaboration.handleUpgrade(request, socket, head);
       });
       server.httpServer?.once("close", () => {
         previewRelay.close();
         terminalRelay.close();
-        socketServer.close();
+        collaboration.close();
       });
     },
   };
