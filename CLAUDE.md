@@ -66,7 +66,9 @@ same commit. Each README quality turns into what it means for a change:
   behaviour. Ask me before picking the default.
 - **Information durability.** Shared room state persists server-side (y-leveldb
   on the fly volume). Don't add room state that lives only in one client or
-  in server memory.
+  in server memory. The one deliberate exception is the terminal mirror: it
+  stays in memory and never reaches disk, because it can show secrets
+  (`docs/adr/0001`). Don't "fix" that.
 - **No lock-in.** Anything that stores someone's work needs a way to export it.
   Don't add a store without one.
 
