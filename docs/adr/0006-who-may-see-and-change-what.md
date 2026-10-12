@@ -1,0 +1,162 @@
+# 6. Who may see and change what, and the log of who did
+
+- Status: accepted, not yet implemented (week 10, planning phase)
+- Date: 2026-10-12
+
+## Context
+
+With identity in place (ADR 0005), the server can decide what each person
+may do instead of trusting the browser. Today every rule is in the UI: only
+the facilitator sees the Queue and Send buttons (`canQueue` in `App.tsx`),
+but any client can write any part of the room document. Crit 10 asks for
+this decision to be written down with reasons, and for a server-side log of
+who did what that outlives the crit.
+
+Hocuspocus can make a connection read-only per document, set in
+`onAuthenticate`. A read-only connection's updates are dropped and answered
+with a failed sync status (`MessageReceiver` in `@hocuspocus/server` 4.7.0).
+It can't permit some keys of a document and refuse others.
+
+## Options
+
+1. **Keep one document and check each update on the server.** Decode it,
+   work out which keys it touches, and refuse forbidden ones.
+2. **One document per permission boundary.** Each person can write a
+   document or can't. Actions that cross a boundary go through the server.
+3. **Leave rules in the UI and only log.** The log shows who broke a rule
+   after the fact.
+
+## Decision
+
+**2.**
+
+### Roles
+
+- **Members.** `room_members(id, room_id, user_id NULL, secret_hash NULL,
+  is_host, name, name_key, joined_at, last_seen, removed_at)`, `STRICT`.
+  - `CHECK ((user_id IS NULL) <> (secret_hash IS NULL))`: a member is a
+    GitHub user or a guest, never both.
+  - The host is the member with `is_host = 1`. A partial unique index (`ON
+    room_members(room_id) WHERE is_host`) allows at most one per room.
+  - Creating a room inserts the room and its host member in one
+    transaction, because the schema can't require a host.
+  - `UNIQUE (room_id, name_key)` and `UNIQUE (room_id, user_id)`.
+- **Rooms.** `rooms(id, code, keep, locked, state, host_last_seen,
+  created_at, ended_at)`.
+  - `id` is permanent and random, and names the documents.
+  - `code` is the short join code. It can change; `id` never does.
+- **The server resolves the role on every connection**, from the session
+  cookie or the member secret: host, participant, or nobody. The browser no
+  longer claims to be the host. `?host=1` and first-claim capabilities go.
+
+### Who may change what
+
+| What | Where | Host | Participant |
+|---|---|---|---|
+| Board | `room/<id>/shared` | write | write |
+| Staged prompts: write, edit, delete | `room/<id>/shared` | write | write |
+| Queue: order, Send, remove | `room/<id>/control` | write | read |
+| Proposing a prompt for the queue | stateless message, server checks | yes | yes |
+| Settings: auto release, keep the board | `room/<id>/control` | write | read |
+| Preview state | `room/<id>/control` | write | read |
+| Member list (names, GitHub logins, verified) | `room/<id>/control`, written by the server | read | read |
+| Terminal: typing into Claude | terminal relay | yes | no (mirror only) |
+| Remove a member, rotate the code, lock the room | API, server checks | yes | no |
+
+- **Staged prompts are shared work.** Anyone in the room may edit or delete
+  any draft, as in a shared doc. The log shows who did.
+- **The member list is written by the server.** So the "verified GitHub
+  user" badge can't be faked by typing a name into awareness.
+- **A participant who writes `control` anyway** (from the console, say) has
+  the update dropped. The denial is logged. Their own copy keeps the forged
+  change (Yjs never undoes a local edit), but the server and everyone else
+  never see it.
+
+### Who may see what
+
+- **A live room:** its members. Anyone with the code can become a member
+  unless the room is locked.
+- **The terminal mirror and the preview:** members of the live room only.
+  The mirror is never stored (ADR 0001).
+- **A kept, ended board:** the host and its members, read-only. This
+  settles the question ADR 0003 left open.
+- **A not-kept, ended board:** nobody; the server refuses the connection
+  (ADR 0003).
+- **There is no public list of rooms.**
+
+### Removing someone, and a leaked code
+
+- **Remove.** The host can remove a member. The server sets `removed_at`,
+  drops that member's sockets and refuses their credential from then on.
+  The host can invite a removed GitHub user back.
+- **Rotate the code.** A removed guest could rejoin with the code as a new
+  guest. So the host can rotate it: the old code stops resolving, and
+  members already in stay connected.
+- **Lock the room.** No new joins by code. Members and invited GitHub users
+  still get in.
+- **A code leaked on a stream:** rotate, remove, lock, then share the new
+  code privately.
+
+### The log
+
+- **The table:** `events(seq, at, room_id, member_id, action, detail_json)`.
+  - `detail_json` is a flat object of scalars: ids, counts, bytes, setting
+    names and values, denial reasons. Never content, because prompts and the
+    board can hold secrets.
+  - Rows are kept 90 days, swept hourly (ADR 0005).
+- **Each event is also printed to stdout as logfmt,** so `flyctl logs` reads
+  it directly:
+
+  ```
+  [audit] room=K7MQ2P member=3 github=coreyweir role=host action=queue.send prompt=3f2a
+  [audit] room=K7MQ2P member=12 guest="Ada" role=participant action=denied what=control.write
+  ```
+- **Logged actions:**
+  - sign-in and sign-out;
+  - room create, join, leave and end;
+  - queue propose, send (host or auto, ADR 0004) and remove;
+  - settings changes;
+  - member remove, code rotate, lock and unlock;
+  - host connect and refusals;
+  - every denial.
+  - Edits to `shared` are combined per connection and document, about every
+    10 seconds (`action=board.edit updates=14 bytes=3100`).
+- **Not the log:** `doc_updates.user_id` (ADR 0002). Compaction merges those
+  rows, so it can't answer who did what last week.
+
+## Consequences
+
+- **Moving a prompt into the queue crosses documents.** The prompt leaves
+  `shared` and appears in `control`. A participant proposes; the server
+  checks the proposal and applies it as itself. The host's client does the
+  move directly.
+- **Two documents per room,** over one socket (a shared
+  `HocuspocusProviderWebsocket`). The client's IndexedDB copy, export and
+  import (ADR 0003) handle both.
+- **Each room keeps one host socket.** A second one from the same host (a
+  reload) replaces the first instead of being refused.
+- **Specs before the code:**
+  - a socket with no credential is refused;
+  - a socket from another origin is refused;
+  - a participant's write to `control` doesn't survive a reconnect;
+  - the host's write does;
+  - a removed member is refused;
+  - an old code stops resolving after a rotate.
+- **Rules for the board itself stay coarse.** Anyone in the room can erase
+  anyone's drawing. Finer rules would mean option 1.
+
+## The case for the options we didn't pick
+
+**One document, checked per update.** "Permissions per key, no data model
+change, and the queue can stay where it is." Our answer: deciding what a
+Yjs update touches means decoding it against the document's state on the
+server, for every update, in code we'd own alone. When it's wrong, it's
+wrong silently. Read-only connections are Hocuspocus's own, tested
+mechanism, and the boundary between `shared` and `control` is the same as
+the boundary between "anyone" and "the host".
+
+**Rules in the UI, plus a log.** "This is a room of colleagues. Nobody is
+forging Yjs updates from the console; a log is enough to settle disputes."
+Our answer: crit groups rotate, codes leak, and one person's forged Send
+types into the host's Claude, which can push to the host's repo. A log
+tells you afterwards. The server refusing it means it never happens.

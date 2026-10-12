@@ -36,8 +36,8 @@ README, PROCESS.md and the reflections are mine to write.
 | [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
 | [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import | No |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
-| 0005 (to write) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | No |
-| 0006 (to write) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision | No |
+| [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | No |
+| [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision | No |
 
 ## Work, in order
 
@@ -108,9 +108,10 @@ README, PROCESS.md and the reflections are mine to write.
      in dev, so start Vite through `mise exec`). No id → the proxy answers 503,
      so CI's secret-less image still starts. Checked: GitHub issues a device
      code for it on the dev server.
-     - [ ] Push to a course-org repo with it. If GitHub asks for org
-       approval, request it; the convenor decides. This settles whether the
-       web flow can serve org repos or the device flow stays as a fallback.
+     - Org access for the app requested (convenor decides). Pull from
+       course-org repos already works, which is enough to run a dev server
+       on one of those projects. Push waits on approval; the web flow goes
+       ahead regardless, and the device flow goes with it.
    - **GitHub users.** `users(id, github_id UNIQUE, login, avatar_url,
      created_at, last_seen)`. Rows come only from a completed sign-in.
    - **Sessions** for GitHub users only: `sessions(token_hash PK, user_id,
@@ -147,15 +148,21 @@ README, PROCESS.md and the reflections are mine to write.
      or join. Guests can host. "Connect GitHub for pushing" lives in host
      setup. `githubDeviceProxy.mjs` goes once the web flow covers pushing.
 4. **Rooms and permissions** (ADR 0006; crit 10's written decision).
-   - `rooms(id, code, host_member_id, keep, locked, state, host_last_seen,
-     created_at, ended_at)`. `id` is permanent and random (128 bits) and
-     names the documents; `code` is short, case-insensitive, no 0/O/1/I.
-     `host_member_id` points at a `room_members` row for GitHub and guest
-     hosts alike.
-   - `room_members(room_id, id, user_id NULL, secret_hash NULL, name,
-     joined_at, last_seen, removed_at)`: exactly one of `user_id` and
-     `secret_hash` set. `PRAGMA foreign_keys = ON` per connection (SQLite
-     leaves it off).
+   - `rooms(id, code, keep, locked, state, host_last_seen, created_at,
+     ended_at)`. `id` is permanent and random (128 bits) and names the
+     documents; `code` is short, case-insensitive, no 0/O/1/I.
+   - `room_members(id, room_id, user_id NULL, secret_hash NULL, is_host,
+     name, name_key, joined_at, last_seen, removed_at)`, `STRICT`.
+     `CHECK ((user_id IS NULL) <> (secret_hash IS NULL))`: a member is a
+     GitHub user or a guest, never both. The host is the member with
+     `is_host = 1`; a partial unique index (`ON room_members(room_id) WHERE
+     is_host`) allows at most one per room. A `host_member_id` on `rooms`
+     would make the two tables reference each other (deferred keys on every
+     insert) and couldn't say more. The schema can't promise every room has
+     a host, so creating a room inserts the room and its host member in one
+     transaction. `UNIQUE (room_id, name_key)` and `UNIQUE (room_id,
+     user_id)`. `PRAGMA foreign_keys = ON` per connection (SQLite leaves it
+     off).
    - `POST /api/rooms` creates a room and makes the caller host.
      `GET /api/rooms/by-code/:code` resolves live rooms only. Both rate-limited
      per IP, since rooms are the one thing anyone can create.
