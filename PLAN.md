@@ -36,8 +36,8 @@ README, PROCESS.md and the reflections are mine to write.
 | [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
 | [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import | No |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
-| [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | No |
-| [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision | No |
+| [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes, except the client's use of the push token (`389ffff`, `4acb32b`) |
+| [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision | Yes, except queue proposals (`389ffff`, `4acb32b`, `f78b367`) |
 
 ## Work, in order
 
@@ -102,7 +102,14 @@ README, PROCESS.md and the reflections are mine to write.
      back, and two browser profiles plus a headless client on the live room.
    - Left: `/data/yjs` (36 KB) is still on the volume; delete it once
      nobody needs an old room.
-3. **Identity** (ADR 0005). Design agreed 12 Oct:
+3. ~~**Identity** (ADR 0005).~~ Built 12 Oct (`389ffff` server, `4acb32b`
+   client); the ADR's "Implementation" section has the differences.
+   - Left: the host page reading the sealed push token (`#push=…`) and
+     "Connect GitHub for pushing" in host setup; then the device flow goes.
+   - Left: sign in with a real GitHub account on the live site and check
+     the session, `/api/me`, a GitHub member's badge, and sign-out.
+
+   Design agreed 12 Oct:
    - ~~Device flow on our own OAuth app first~~ (`43f34f6`): client id
      `Ov23liF1O4v3obY6vdCc` from `GITHUB_CLIENT_ID` (Fly secret; `mise.local.toml`
      in dev, so start Vite through `mise exec`). No id → the proxy answers 503,
@@ -147,7 +154,21 @@ README, PROCESS.md and the reflections are mine to write.
    - **Landing page.** "Sign in with GitHub" or "Continue as guest", then host
      or join. Guests can host. "Connect GitHub for pushing" lives in host
      setup. `githubDeviceProxy.mjs` goes once the web flow covers pushing.
-4. **Rooms and permissions** (ADR 0006; crit 10's written decision).
+4. ~~**Rooms and permissions** (ADR 0006; crit 10's written decision).~~
+   Built 12 Oct (`389ffff`, `4acb32b`, `f78b367`). Live: `pnpm check` 32/32,
+   and two browser profiles at 1920×1080 and 390×844 through join, a
+   refused duplicate name, staging, queueing, the People panel, a new code,
+   a reload, and removal (shut out in about 20 ms).
+   - Left: participants proposing to the queue (stateless message).
+   - Left: gate the preview's HTTP side (`/room-preview/<id>/…`) to members.
+   - Left: a "this room predates sign-in" page for old `riff-<code>` links
+     (today they reach the join form and "no live room").
+   - Left: the browser smokes that drive a room (`app/scripts/*-browser-smoke.mjs`)
+     haven't been run since; the relay smokes have.
+   - A cold machine answers 502 for the second or two before node listens
+     (nginx starts first). Seen once at the start of a spec run.
+
+   Plan as agreed:
    - `rooms(id, code, keep, locked, state, host_last_seen, created_at,
      ended_at)`. `id` is permanent and random (128 bits) and names the
      documents; `code` is short, case-insensitive, no 0/O/1/I.
@@ -187,7 +208,12 @@ README, PROCESS.md and the reflections are mine to write.
      still get in). Order for a leaked code: rotate, remove, lock.
    - Viewers of a kept, ended board: the host and its members (settles
      ADR 0003's open question).
-5. **Who-did-what log.** `events(seq, at, room_id, member_id, action,
+5. ~~**Who-did-what log.**~~ Built with 4 (`app/server/audit.mjs`); what it
+   records so far is listed in ADR 0006's "Implementation". Left: leave and
+   end (with ADR 0003), queue release (with ADR 0004), a rehearsal of crit 10's
+   narration from `flyctl logs`.
+
+   Plan as agreed: `events(seq, at, room_id, member_id, action,
    detail_json)`. `detail_json` is a flat object of scalars (ids, counts,
    bytes, setting names, denial reasons), never content. Each event is also
    printed to stdout as logfmt for `flyctl logs`:

@@ -1,6 +1,6 @@
 # 6. Who may see and change what, and the log of who did
 
-- Status: accepted, not yet implemented (week 10, planning phase)
+- Status: accepted, implemented 2026-10-12 except queue proposals (see "Implementation" below)
 - Date: 2026-10-12
 
 ## Context
@@ -160,3 +160,42 @@ forging Yjs updates from the console; a log is enough to settle disputes."
 Our answer: crit groups rotate, codes leak, and one person's forged Send
 types into the host's Claude, which can push to the host's repo. A log
 tells you afterwards. The server refusing it means it never happens.
+
+## Implementation (2026-10-12)
+
+`389ffff` (server), `4acb32b` (client), `f78b367` (removal behind fly's
+proxy). `rooms.resolve()` turns a guest secret or the session cookie into a
+role for every document, relay hello and API call; Hocuspocus marks the
+control document read-only for anyone but the host; both relays take the
+same credential, and a second host socket replaces the first. Where it
+differs from the plan, or stops short:
+
+- **Participants can't propose to the queue yet.** The stateless proposal
+  isn't built; the Queue button is the host's only. Queueing copies the
+  prompt's text into `control` and deletes it from `shared`.
+- **The control document also carries the room's code and lock state**,
+  written by the server beside the member list, so a rotated code reaches
+  every member at once.
+- **Removal is told, not only enforced.** fly's proxy held a browser's side
+  of a socket the server had closed open for seconds (through nginx alone it
+  closed at once). The server now sends each of the member's documents a
+  Hocuspocus PermissionDenied before hanging up, and drops the connection
+  500 ms after the close frame. Live, a removed browser is shut out in about
+  20 ms instead of 3 s.
+- **The preview's HTTP side isn't gated.** `/room-preview/<room id>/…` is
+  loaded by an iframe, which can't send a guest's secret. The room id is
+  random (128 bits) and only members learn it, but a removed member who kept
+  it could still load the preview while the room is live. Open.
+- **What the log records so far:** room create and join, code rotate,
+  lock and unlock, member removal, sign-in and sign-out, edits to each
+  document (one line per person, document and 10 s), and every refusal with
+  its reason (cross-origin socket or API call, not a member, a document that
+  isn't a room's, a read-only write, host-only actions, a participant
+  claiming the terminal or the preview, a bad sign-in state). Leaving and
+  ending (ADR 0003) and queue releases (ADR 0004) come with those features.
+- **Checked:** `spec/permissions.test.ts`, 14 checks against the live app,
+  including the relays. Mutations that turn them red, one at a time:
+  control writable by everyone, no Origin check, removed members still
+  resolving, the relays treating anyone as host. The log was read in
+  `flyctl logs` after a spec run and a two-browser run.
+

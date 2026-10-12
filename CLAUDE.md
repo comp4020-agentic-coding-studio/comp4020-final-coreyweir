@@ -16,11 +16,12 @@ Reused code does not answer the brief. What I change, decide and justify does.
 
 ## Where we are
 
-Week 10. Crit 9 ("All at once") is today: real-time (already true via Yjs,
-now measured in `spec/realtime.test.ts`) plus one written decision about how
-the room behaves with several people in it. Next is crit 10 on 19 October:
-the server tells people apart, checks what each may see and change, and logs
-who did what in a way that outlives the crit. A3 is due at noon on 9 November.
+Week 10. Crit 9 ("All at once") was today; its decision is `docs/adr/0001`.
+Next is crit 10 on 19 October: the server tells people apart, checks what
+each may see and change, and logs who did what in a way that outlives the
+crit. That is built (`docs/adr/0005`, `docs/adr/0006`, checked in
+`spec/permissions.test.ts`); what's left of it is in `PLAN.md`. A3 is due at
+noon on 9 November.
 
 Update this section at each crit. A harness describing last week's project
 steers the agent into last week's work.
@@ -78,7 +79,9 @@ same commit. Each README quality turns into what it means for a change:
 ## Layout
 
 - `app/`: the Riff tree (an npm project; its own `package.json` and lockfile).
-  `app/server/` holds the node relays. `app/src/` is the client.
+  `app/server/` is the node server: `riff.mjs` assembles it (store, sign-in,
+  rooms API, Hocuspocus, relays, log) and both `index.mjs` (production) and
+  the Vite dev server mount it. `app/src/` is the client.
 - `app/dist/`: build output, gitignored. The Docker image builds the client
   itself (first stage of `Dockerfile`), so a deploy always ships the source.
 - `deploy/`: nginx config and the start script. `Dockerfile` at the root.
@@ -128,6 +131,21 @@ same commit. Each README quality turns into what it means for a change:
   repo root (the fly token lives in `mise.local.toml`).
 - Don't assume the host is on a desktop. Hosting works on a phone (tested on
   a Pixel 6), so both roles have to work at 390×844.
+- **`RIFF_ORIGIN` is required.** The server checks `Origin` on every POST and
+  websocket upgrade against it and builds the GitHub `redirect_uri` from it,
+  never from the `Host` header. Production sets it in `fly.toml`; dev
+  defaults to `http://127.0.0.1:8093`. Use `127.0.0.1`, never `localhost`:
+  cookies are per host and GitHub's callback is registered for `127.0.0.1`.
+- Start the dev server through `mise exec -- npx vite --host 127.0.0.1
+  --port 8093 --strictPort` (in `app/`), or it has no GitHub client secret
+  or session secret and sign-in answers 503.
+- **Fly's proxy holds a websocket open after the server closes it.** The
+  browser only finds out ~3 s later. Anything that shuts someone out tells
+  the client in-band first (Hocuspocus `PermissionDenied`, a relay `error`
+  message), then closes with `hangUp` (`app/server/sockets.mjs`). Checked
+  live, not just on dev, where nginx closes at once.
+- Type-check the client with `npm run typecheck` (`tsc -b`). `tsc -p .`
+  checks nothing, because the root tsconfig only holds references.
 - Preview relaying routes on path prefixes (`/room-preview/`,
   `/preview-control/`). fly.dev can't do wildcard subdomains, so keep it that
   way.

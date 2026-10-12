@@ -1,6 +1,6 @@
 # 5. Identity: GitHub sign-in, and guests who exist only in their room
 
-- Status: accepted, not yet implemented (week 10, planning phase)
+- Status: accepted, implemented 2026-10-12 except the push token in the client (see "Implementation" below)
 - Date: 2026-10-12
 
 ## Context
@@ -142,3 +142,30 @@ costs one endpoint.
 **Token stored on the server.** "Then the host never reconnects." Our
 answer: the server would hold push access to every host's repositories,
 which is the worst thing a breach of this server could leak.
+
+## Implementation (2026-10-12)
+
+Server in `389ffff` (`app/server/store.mjs`, `auth.mjs`, `rooms.mjs`,
+assembled by `riff.mjs`), client in `4acb32b` (`app/src/api.ts`, the
+landing page in `App.tsx`). Where it differs from the plan above, or stops
+short of it:
+
+- **The push token is sealed but not yet used.** `/auth/github/start?purpose=push`
+  asks for `repo`, and the callback returns the token AES-GCM-sealed (key by
+  HKDF from `SESSION_SECRET` and the session's hash) in the URL fragment,
+  `#push=…`, which never reaches a server or a log. `POST
+  /api/github/token/unwrap` opens it for that session only. The host page
+  doesn't read the fragment yet: pushing still goes through the device flow
+  (`githubDeviceProxy.mjs`, on our own client id), which stays until it does.
+- **`events` has a `user_id` column** beside `member_id`, because sign-in
+  and sign-out happen outside any room.
+- **Names stay taken after removal.** `UNIQUE (room_id, name_key)` covers
+  removed members too, so the log's names stay unambiguous within a room.
+- **A signed-in member who joins again gets their existing membership**
+  back (200, not 201), whatever name they type.
+- **Checked:** `spec/sign-in.test.ts` (the redirect's parameters, the
+  signed state cookie, open-redirect `return` values, a bad, missing or
+  tampered state rejected before GitHub is contacted) against the live app;
+  turning the state check off turns three of them red. **Not checked from
+  outside:** the path of a real GitHub user, which needs a real sign-in.
+
