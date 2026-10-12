@@ -11,21 +11,13 @@ type PreviewRequest = {
   body: string;
 };
 
-function storedCapability(key: string) {
-  const stored = localStorage.getItem(key);
-  if (stored) return stored;
-  const capability = `${crypto.randomUUID()}${crypto.randomUUID()}`;
-  localStorage.setItem(key, capability);
-  return capability;
-}
-
 export function previewRelayUrl(roomId: string, generation: number) {
-  return `/room-preview/${encodeURIComponent(`riff-${roomId}`)}/${generation}/`;
+  return `/room-preview/${encodeURIComponent(roomId)}/${generation}/`;
 }
 
 function controlUrl(roomId: string) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${location.host}/preview-control/${encodeURIComponent(`riff-${roomId}`)}`;
+  return `${protocol}//${location.host}/preview-control/${encodeURIComponent(roomId)}`;
 }
 
 function fromBase64(value: string) {
@@ -45,6 +37,7 @@ function toBase64(bytes: Uint8Array) {
 
 export function usePreviewHostChannel(
   roomId: string,
+  token: string | null,
   facilitator: boolean,
   controllerRef: RefObject<ClaudePodController | null>,
 ) {
@@ -56,7 +49,6 @@ export function usePreviewHostChannel(
     if (!facilitator) return;
     let active = true;
     let reconnectTimer = 0;
-    const capability = storedCapability(`riff-preview-host:${roomId}`);
 
     function send(message: object) {
       if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify(message));
@@ -66,7 +58,7 @@ export function usePreviewHostChannel(
       if (!active) return;
       const socket = new WebSocket(controlUrl(roomId));
       socketRef.current = socket;
-      socket.addEventListener("open", () => send({ type: "hello", capability }));
+      socket.addEventListener("open", () => send({ type: "hello", ...(token ? { token } : {}) }));
       socket.addEventListener("message", async (event) => {
         const message = JSON.parse(String(event.data)) as PreviewRequest | { type: string };
         if (message.type === "host-accepted") {
@@ -118,7 +110,7 @@ export function usePreviewHostChannel(
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [controllerRef, facilitator, roomId]);
+  }, [controllerRef, facilitator, roomId, token]);
 
   return useCallback((live: boolean) => {
     liveRef.current = live;

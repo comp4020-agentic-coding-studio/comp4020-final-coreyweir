@@ -35,7 +35,7 @@ export function createRiff({
     auth,
     audit,
     origin,
-    onMembersChanged: (roomId) => publishMembers(roomId),
+    onRoomChanged: (roomId) => publishRoom(roomId),
     onRemoved: (roomId, memberId) => {
       collaboration.disconnectMember(memberId);
       terminalRelay.disconnectMember(roomId, memberId);
@@ -77,21 +77,25 @@ export function createRiff({
   const terminalRelay = createTerminalRelay({ authorize: relayAuthorize, onRefused: relayRefused });
   const previewRelay = createPreviewRelay({ authorize: relayAuthorize, onRefused: relayRefused });
 
-  // The member list lives in the control document, written only here, so
-  // names and the GitHub badge can't be forged from a browser.
-  function publishMembers(roomId) {
-    const members = rooms.memberList(roomId);
+  // The room's code, lock and member list live in the control document,
+  // written only here, so names and the GitHub badge can't be forged from a
+  // browser and everyone sees a rotated code or a removal at once.
+  function publishRoom(roomId) {
+    const { room, members } = rooms.summary(roomId);
     collaboration
       .change(`room/${roomId}/control`, (document) => {
-        const map = document.getMap("members");
+        const info = document.getMap("room");
+        const list = document.getMap("members");
         document.transact(() => {
+          if (info.get("code") !== room.code) info.set("code", room.code);
+          if (info.get("locked") !== room.locked) info.set("locked", room.locked);
           for (const member of members) {
-            const current = map.get(String(member.id));
-            if (JSON.stringify(current) !== JSON.stringify(member)) map.set(String(member.id), member);
+            const current = list.get(String(member.id));
+            if (JSON.stringify(current) !== JSON.stringify(member)) list.set(String(member.id), member);
           }
         });
       })
-      .catch((error) => console.error("[riff] publishing members failed", error));
+      .catch((error) => console.error("[riff] publishing room state failed", error));
   }
 
   const deviceProxy = createGitHubDeviceProxy({ clientId: githubClientId });

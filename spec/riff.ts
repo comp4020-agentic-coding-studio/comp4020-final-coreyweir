@@ -211,6 +211,34 @@ export function upgradeStatus(baseUrl: string, origin: string | null): Promise<n
   });
 }
 
+// The terminal mirror and the preview relay: open `/terminal/<room>` or
+// `/preview-control/<room>`, say hello, and report what the server said back
+// (message types and error codes, then `closed:<code>` if it hung up).
+export function relayHello(
+  baseUrl: string,
+  relay: "terminal" | "preview-control",
+  roomId: string,
+  hello: Record<string, unknown>,
+  listenMs = 1_000,
+): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const url = `${collaborationUrl(baseUrl).replace(/\/collaboration$/, "")}/${relay}/${encodeURIComponent(roomId)}`;
+    const ws = new WebSocket(url, { origin: originOf(baseUrl) });
+    const heard: string[] = [];
+    ws.on("open", () => ws.send(JSON.stringify(hello)));
+    ws.on("message", (raw: RawData) => {
+      const message = JSON.parse(toBytes(raw).length ? new TextDecoder().decode(toBytes(raw)) : "{}");
+      heard.push(message.code ? `${message.type}:${message.code}` : message.type);
+    });
+    ws.on("close", (code) => heard.push(`closed:${code}`));
+    ws.on("error", reject);
+    setTimeout(() => {
+      ws.terminate();
+      resolve(heard);
+    }, listenMs);
+  });
+}
+
 // The `ws` client with a fixed Origin header (a browser always sends one;
 // node's built-in WebSocket can't), and a tap on what the server sends.
 function socketClass(origin: string | null, tap: (bytes: Uint8Array) => void) {

@@ -6,7 +6,7 @@ import { clientAddress, createRateLimit, HttpError, parseCookies, readJson, same
 
 const MINUTE = 60 * 1000;
 
-export function createRooms({ store, auth, audit, origin, onMembersChanged = () => {}, onRemoved = () => {} }) {
+export function createRooms({ store, auth, audit, origin, onRoomChanged = () => {}, onRemoved = () => {} }) {
   const s = store.statements;
   // Rooms are the one thing anyone can create, so creating, joining and
   // looking up codes are limited per address. A full spec run makes about
@@ -101,7 +101,7 @@ export function createRooms({ store, auth, audit, origin, onMembersChanged = () 
     const chosen = name(body, current?.user.login);
     const { room, member, secret } = store.createRoom({ name: chosen, userId: current?.user.id });
     audit.record(who(room, member), "room.create");
-    onMembersChanged(room.id);
+    onRoomChanged(room.id);
     sendJson(response, 201, { room: roomJson(room), member: memberJson(member, secret) });
   }
 
@@ -136,7 +136,7 @@ export function createRooms({ store, auth, audit, origin, onMembersChanged = () 
       throw error;
     }
     audit.record(who(room, added.member), "room.join");
-    onMembersChanged(room.id);
+    onRoomChanged(room.id);
     sendJson(response, 201, { room: roomJson(room), member: memberJson(added.member, added.secret) });
   }
 
@@ -159,6 +159,7 @@ export function createRooms({ store, auth, audit, origin, onMembersChanged = () 
     const actor = hostOf(request, roomId, "code.rotate");
     const code = store.rotateCode(roomId);
     audit.record({ ...actor, code }, "code.rotate", { old: actor.code });
+    onRoomChanged(roomId);
     sendJson(response, 200, { code });
   }
 
@@ -168,6 +169,7 @@ export function createRooms({ store, auth, audit, origin, onMembersChanged = () 
     if (typeof body.locked !== "boolean") throw new HttpError(400, "bad_lock");
     s.setLocked.run(body.locked ? 1 : 0, roomId);
     audit.record(actor, body.locked ? "room.lock" : "room.unlock");
+    onRoomChanged(roomId);
     sendJson(response, 200, { locked: body.locked });
   }
 
@@ -179,7 +181,7 @@ export function createRooms({ store, auth, audit, origin, onMembersChanged = () 
     s.removeMember.run(Date.now(), target.id);
     audit.record(actor, "member.remove", { target: target.id, target_name: target.name });
     onRemoved(roomId, target.id);
-    onMembersChanged(roomId);
+    onRoomChanged(roomId);
     response.writeHead(204, { "cache-control": "no-store" });
     response.end();
   }
@@ -204,17 +206,19 @@ export function createRooms({ store, auth, audit, origin, onMembersChanged = () 
     return true;
   }
 
-  // The member list the room sees, written by the server so nobody can
-  // fake a name or a "verified" badge.
-  function memberList(roomId) {
-    return s.members.all(roomId).map((row) => ({
+  // What the room sees about itself (the code, whether it's locked, who's
+  // in it), written by the server so nobody can fake a name or a badge.
+  function summary(roomId) {
+    const room = s.roomById.get(roomId);
+    const members = s.members.all(roomId).map((row) => ({
       id: row.id,
       name: row.name,
       host: Boolean(row.is_host),
       login: row.login ?? null,
       removed: row.removed_at !== null,
     }));
+    return { room: roomJson(room), members };
   }
 
-  return { handle, resolve, memberList };
+  return { handle, resolve, summary };
 }

@@ -18,19 +18,13 @@ export type TerminalEvent = TerminalSnapshot & { type: "snapshot" } | TerminalDa
 
 function terminalUrl(roomId: string) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${location.host}/terminal/riff-${roomId}`;
+  return `${protocol}//${location.host}/terminal/${encodeURIComponent(roomId)}`;
 }
 
-function hostCapability(roomId: string) {
-  const key = `riff-host-capability:${roomId}`;
-  const stored = localStorage.getItem(key);
-  if (stored) return stored;
-  const capability = `${crypto.randomUUID()}${crypto.randomUUID()}`;
-  localStorage.setItem(key, capability);
-  return capability;
-}
-
-export function useTerminalChannel(roomId: string, facilitator: boolean) {
+// `token` is a guest's room secret; a signed-in member sends none and the
+// server reads the session cookie. The server, not this hello, decides
+// whether the socket is the host's (docs/adr/0006).
+export function useTerminalChannel(roomId: string, token: string | null, facilitator: boolean) {
   const socketRef = useRef<WebSocket | null>(null);
   const listenersRef = useRef(new Set<(event: TerminalEvent) => void>());
   const [connected, setConnected] = useState(false);
@@ -42,7 +36,6 @@ export function useTerminalChannel(roomId: string, facilitator: boolean) {
   useEffect(() => {
     let active = true;
     let reconnectTimer = 0;
-    const capability = facilitator ? hostCapability(roomId) : null;
 
     function connect() {
       if (!active) return;
@@ -55,7 +48,7 @@ export function useTerminalChannel(roomId: string, facilitator: boolean) {
         socket.send(JSON.stringify({
           type: "hello",
           role: facilitator ? "host" : "participant",
-          ...(capability ? { capability } : {}),
+          ...(token ? { token } : {}),
         }));
       });
       socket.addEventListener("message", (event) => {
@@ -90,7 +83,7 @@ export function useTerminalChannel(roomId: string, facilitator: boolean) {
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [facilitator, roomId]);
+  }, [facilitator, roomId, token]);
 
   const publish = useCallback((next: Omit<TerminalSnapshot, "sequence">) => {
     const socket = socketRef.current;

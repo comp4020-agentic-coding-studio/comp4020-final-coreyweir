@@ -1,23 +1,30 @@
 import { useEffect, useState } from "react";
 import * as Y from "yjs";
-import { HocuspocusProvider } from "@hocuspocus/provider";
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { Awareness } from "y-protocols/awareness";
+import type { Access } from "./api";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
 export type Participant = {
   clientId: number;
+  memberId: number | null;
   name: string;
   colour: string;
   role: "facilitator" | "participant";
 };
 
+// Written by the server into the control document (server/riff.mjs).
+export type RoomMember = { id: number; name: string; host: boolean; login: string | null; removed: boolean };
+
+export type QueuedPrompt = { id: string; author: string; text: string; rank: number };
+
 export type PromptSnapshot = {
   id: string;
   author: string;
   sourceId: string | null;
-  status: "staged" | "queued";
+  status: "staged";
   rank: number;
   text: Y.Text;
   map: Y.Map<unknown>;
@@ -25,98 +32,127 @@ export type PromptSnapshot = {
 
 const colours = ["#315efb", "#b35642", "#39775d", "#8156a4", "#a16c17"];
 
-function storedIdentity() {
+// Your colour on the board is a local choice; your name is the one the
+// server holds for you in this room.
+function localColour() {
   try {
-    const stored = JSON.parse(localStorage.getItem("riff-identity") ?? "null") as { name?: unknown; colour?: unknown } | null;
-    if (stored && typeof stored.name === "string" && typeof stored.colour === "string") {
-      return { name: stored.name, colour: stored.colour };
-    }
+    const stored = JSON.parse(localStorage.getItem("riff-identity") ?? "null") as { colour?: unknown } | null;
+    if (stored && typeof stored.colour === "string") return stored.colour;
   } catch {
     // Replace malformed local identity data below.
   }
-  return null;
+  const colour = colours[Math.floor(Math.random() * colours.length)];
+  localStorage.setItem("riff-identity", JSON.stringify({ colour }));
+  return colour;
 }
 
-function getIdentity() {
-  const stored = storedIdentity();
-  if (stored) return stored;
-  const identity = {
-    name: "Guest",
-    colour: colours[Math.floor(Math.random() * colours.length)],
-  };
-  localStorage.setItem("riff-identity", JSON.stringify(identity));
-  return identity;
+const NAME_KEY = "riff-name";
+
+export function savedName() {
+  return localStorage.getItem(NAME_KEY) ?? "";
 }
 
-export function savedIdentityName() {
-  const identity = storedIdentity();
-  return identity?.name === "Guest" ? "" : identity?.name ?? "";
+export function saveName(name: string) {
+  localStorage.setItem(NAME_KEY, name.trim().slice(0, 40));
 }
 
-export function setIdentityName(name: string) {
-  const current = getIdentity();
-  const identity = { ...current, name: name.trim().slice(0, 40) || "Guest" };
-  localStorage.setItem("riff-identity", JSON.stringify(identity));
-  return identity;
-}
-
-// Hocuspocus names the document in every message, so the path is only for
-// the logs; it keeps the same /collaboration/<doc> shape as before.
-function websocketUrl(docName: string) {
+// One socket per page carries both of the room's documents. Hocuspocus
+// names the document in every message, so the path is just /collaboration.
+function websocketUrl() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${location.host}/collaboration/${encodeURIComponent(docName)}`;
+  return `${protocol}//${location.host}/collaboration`;
 }
 
 function participantList(awareness: Awareness): Participant[] {
   return [...awareness.getStates()].map(([clientId, state]) => ({
     clientId,
+    memberId: typeof state.user?.memberId === "number" ? state.user.memberId : null,
     name: state.user?.name ?? "Guest",
     colour: state.user?.colour ?? "#999999",
     role: state.user?.role === "facilitator" ? "facilitator" : "participant",
   }));
 }
 
-export function useRoom(roomId: string, facilitator: boolean) {
+// A room is two documents (docs/adr/0006): `shared` (the board and staged
+// prompts) everyone writes; `control` (the queue, the preview state, and the
+// server-written code and member list) only the host writes. The server
+// enforces that; the UI just doesn't offer what would be refused.
+export function useRoom(access: Access) {
+  const roomId = access.room.id;
+  const facilitator = access.member.host;
   const [doc] = useState(() => new Y.Doc());
+  const [control] = useState(() => new Y.Doc());
   const [awareness] = useState(() => new Awareness(doc));
-  const [provider] = useState(
-    () => new HocuspocusProvider({ url: websocketUrl(`riff-${roomId}`), name: `riff-${roomId}`, document: doc, awareness }),
-  );
-  const [persistence] = useState(() => new IndexeddbPersistence(`riff-${roomId}`, doc));
+  const [socket] = useState(() => new HocuspocusProviderWebsocket({ url: websocketUrl() }));
+  const [provider] = useState(() => {
+    const shared = new HocuspocusProvider({
+      websocketProvider: socket,
+      name: `room/${roomId}/shared`,
+      document: doc,
+      awareness,
+      token: access.token ?? "",
+    });
+    shared.attach();
+    return shared;
+  });
+  const [controlProvider] = useState(() => {
+    const controlled = new HocuspocusProvider({
+      websocketProvider: socket,
+      name: `room/${roomId}/control`,
+      document: control,
+      awareness: null,
+      token: access.token ?? "",
+    });
+    controlled.attach();
+    return controlled;
+  });
+  const [persistence] = useState(() => new IndexeddbPersistence(`room/${roomId}/shared`, doc));
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
+  const [shutOut, setShutOut] = useState<string | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [promptVersion, setPromptVersion] = useState(0);
   const [roomVersion, setRoomVersion] = useState(0);
-  const [identity] = useState(() => getIdentity());
+  const [colour] = useState(localColour);
   const prompts = doc.getMap<Y.Map<unknown>>("prompts");
-  const roomState = doc.getMap<unknown>("roomState");
+  const queue = control.getMap<QueuedPrompt>("queue");
+  const roomState = control.getMap<unknown>("roomState");
+  const roomInfo = control.getMap<unknown>("room");
+  const members = control.getMap<RoomMember>("members");
 
   useEffect(() => {
     const onStatus = ({ status: next }: { status: ConnectionStatus }) => setStatus(next);
     const onAwareness = () => setParticipants(participantList(awareness));
     const onPrompts = () => setPromptVersion((version) => version + 1);
-    const onRoomState = () => setRoomVersion((version) => version + 1);
+    const onControl = () => setRoomVersion((version) => version + 1);
+    const onRefused = ({ reason }: { reason: string }) => setShutOut(reason);
 
     awareness.setLocalStateField("user", {
-      ...identity,
+      memberId: access.member.id,
+      name: access.member.name,
+      colour,
       role: facilitator ? "facilitator" : "participant",
     });
-    provider.on("status", onStatus);
+    socket.on("status", onStatus);
+    provider.on("authenticationFailed", onRefused);
     awareness.on("change", onAwareness);
     prompts.observeDeep(onPrompts);
-    roomState.observe(onRoomState);
+    control.on("update", onControl);
     onAwareness();
 
     return () => {
-      provider.off("status", onStatus);
+      socket.off("status", onStatus);
+      provider.off("authenticationFailed", onRefused);
       awareness.off("change", onAwareness);
       prompts.unobserveDeep(onPrompts);
-      roomState.unobserve(onRoomState);
+      control.off("update", onControl);
       provider.destroy();
+      controlProvider.destroy();
+      socket.destroy();
       persistence.destroy();
       doc.destroy();
+      control.destroy();
     };
-  }, [awareness, doc, facilitator, identity.colour, identity.name, persistence, prompts, provider, roomState]);
+  }, [access.member.id, access.member.name, awareness, colour, control, controlProvider, doc, facilitator, persistence, prompts, provider, socket]);
 
   const promptSnapshots: PromptSnapshot[] = [];
   prompts.forEach((map, id) => {
@@ -126,7 +162,7 @@ export function useRoom(roomId: string, facilitator: boolean) {
       id,
       author: String(map.get("author") ?? "Guest"),
       sourceId: typeof map.get("sourceId") === "string" ? String(map.get("sourceId")) : null,
-      status: map.get("status") === "queued" ? "queued" : "staged",
+      status: "staged",
       rank: Number(map.get("rank") ?? 0),
       text,
       map,
@@ -134,19 +170,41 @@ export function useRoom(roomId: string, facilitator: boolean) {
   });
   promptSnapshots.sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id));
 
+  const queued = [...queue.entries()]
+    .map(([id, item]) => ({ ...item, id }))
+    .sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id));
+  const memberList = [...members.values()].sort((a, b) => a.id - b.id);
+
+  // The host moves a staged prompt into the queue: its text as it stands,
+  // into the control document, and out of the shared one.
+  function queuePrompt(prompt: PromptSnapshot) {
+    control.transact(() => {
+      queue.set(prompt.id, { id: prompt.id, author: prompt.author, text: prompt.text.toString(), rank: Date.now() });
+    });
+    prompts.delete(prompt.id);
+  }
+
   return {
     doc,
-    identity,
+    control,
+    identity: { name: access.member.name, colour },
     participants,
     persistence,
     promptSnapshots,
     promptVersion,
     prompts,
     provider,
+    queue,
+    queued,
+    queuePrompt,
+    members: memberList,
+    code: typeof roomInfo.get("code") === "string" ? String(roomInfo.get("code")) : access.room.code,
+    locked: roomInfo.has("locked") ? roomInfo.get("locked") === true : access.room.locked,
     previewLive: roomState.get("previewLive") === true,
     previewGeneration: Number(roomState.get("previewGeneration") ?? 0),
     roomState,
     roomVersion,
+    shutOut,
     status,
   };
 }

@@ -62,10 +62,11 @@ function ParticipantTerminal({ subscribe }: { subscribe: (listener: (event: Term
 
 export const TerminalPane = forwardRef<TerminalPaneHandle, {
   roomId: string;
+  token: string | null;
   facilitator: boolean;
   config: HostConfig | null;
   onPreviewUrlChange: (url: string | null, generation: number) => void;
-}>(function TerminalPane({ roomId, facilitator, config, onPreviewUrlChange }, ref) {
+}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange }, ref) {
   const targetRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ClaudePodController | null>(null);
   const previewChangeRef = useRef(onPreviewUrlChange);
@@ -77,8 +78,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const [starting, setStarting] = useState(false);
   const [outputSize, setOutputSize] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const channel = useTerminalChannel(roomId, facilitator);
-  const publishPreview = usePreviewHostChannel(roomId, facilitator, controllerRef);
+  const channel = useTerminalChannel(roomId, token, facilitator);
+  const publishPreview = usePreviewHostChannel(roomId, token, facilitator, controllerRef);
 
   previewChangeRef.current = onPreviewUrlChange;
 

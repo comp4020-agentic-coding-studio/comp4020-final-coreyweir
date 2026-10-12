@@ -7,6 +7,7 @@ import {
   open,
   openPart,
   Refused,
+  relayHello,
   timeUntil,
   uniqueName,
   upgradeStatus,
@@ -176,6 +177,33 @@ describe("removing someone, and a leaked code", () => {
 
     const stillIn = await openPart(baseUrl, guest, "shared");
     stillIn.leave();
+  }, 30_000);
+});
+
+describe("the terminal mirror and the preview", () => {
+  it("lets only the host publish the terminal, and only members watch it", async () => {
+    const host = await createRoom(baseUrl);
+    const guest = await joinRoom(baseUrl, host.code);
+
+    expect(await relayHello(baseUrl, "terminal", host.roomId, { type: "hello", role: "host", token: host.secret }))
+      .toContain("host-accepted");
+    // a participant asking to host is told no, and stays a viewer
+    const pretender = await relayHello(baseUrl, "terminal", host.roomId, { type: "hello", role: "host", token: guest.secret });
+    expect(pretender).toContain("error:host-rejected");
+    expect(pretender).not.toContain("host-accepted");
+    // no credential: nothing from the room, and the socket is closed
+    const stranger = await relayHello(baseUrl, "terminal", host.roomId, { type: "hello", role: "participant" });
+    expect(stranger).toEqual(["error:not-a-member", "closed:4401"]);
+  }, 30_000);
+
+  it("lets only the host serve the preview", async () => {
+    const host = await createRoom(baseUrl);
+    const guest = await joinRoom(baseUrl, host.code);
+
+    expect(await relayHello(baseUrl, "preview-control", host.roomId, { type: "hello", token: host.secret }))
+      .toContain("host-accepted");
+    expect(await relayHello(baseUrl, "preview-control", host.roomId, { type: "hello", token: guest.secret }))
+      .toEqual(["error:host-rejected", "closed:4403"]);
   }, 30_000);
 });
 
