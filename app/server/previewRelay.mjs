@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
@@ -13,13 +13,6 @@ const STRIPPED_HEADERS = new Set([
 
 function send(socket, message) {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
-}
-
-function sameCapability(actual, expected) {
-  if (typeof actual !== "string" || typeof expected !== "string") return false;
-  const left = Buffer.from(actual);
-  const right = Buffer.from(expected);
-  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 function filteredHeaders(headers) {
@@ -116,14 +109,17 @@ function fail(response, status, message) {
   response.end(message);
 }
 
-export function createPreviewRelay() {
+// `authorize(roomName, hello, request)` returns who the socket belongs to,
+// with a server-resolved role, or null. Only the host serves a preview.
+export function createPreviewRelay({ authorize, onRefused } = {}) {
+  if (typeof authorize !== "function") throw new Error("createPreviewRelay needs authorize");
   const socketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_SOCKET_BYTES });
   const rooms = new Map();
 
   function roomFor(name) {
     let room = rooms.get(name);
     if (!room) {
-      room = { capability: null, host: null, generation: 0, pending: new Map() };
+      room = { host: null, generation: 0, pending: new Map() };
       rooms.set(name, room);
     }
     return room;
@@ -137,7 +133,7 @@ export function createPreviewRelay() {
     room.pending.clear();
   }
 
-  socketServer.on("connection", (socket, _request, roomName) => {
+  socketServer.on("connection", (socket, request, roomName) => {
     const room = roomFor(roomName);
     socket.role = "unclaimed";
 
@@ -151,17 +147,24 @@ export function createPreviewRelay() {
       }
 
       if (message.type === "hello") {
-        const valid = typeof message.capability === "string" && message.capability.length >= 48;
-        if (valid && room.capability === null) {
-          room.capability = message.capability;
-        }
-        if (valid && sameCapability(message.capability, room.capability) && (room.host === null || room.host === socket)) {
-          room.host = socket;
-          socket.role = "host";
-          send(socket, { type: "host-accepted" });
-        } else {
+        const who = authorize(roomName, message, request);
+        if (!who || who.role !== "host") {
+          onRefused?.(roomName, "preview.host", who);
           send(socket, { type: "error", code: "host-rejected" });
+          socket.close(4403, "host only");
+          return;
         }
+        // The same host again (a reload) replaces the old socket.
+        if (room.host && room.host !== socket) {
+          send(room.host, { type: "error", code: "host-replaced" });
+          room.host.close(4409, "replaced");
+          room.generation = 0;
+          rejectPending(room, 502, "Preview host reconnected");
+        }
+        socket.who = who;
+        room.host = socket;
+        socket.role = "host";
+        send(socket, { type: "host-accepted" });
         return;
       }
 
@@ -302,6 +305,10 @@ export function createPreviewRelay() {
   return {
     rooms,
     middleware,
+    disconnectMember(roomName, memberId) {
+      const host = rooms.get(roomName)?.host;
+      if (host?.who?.memberId === memberId) host.close(4403, "removed");
+    },
     handleUpgrade(request, socket, head, roomName) {
       socketServer.handleUpgrade(request, socket, head, (websocket) => {
         socketServer.emit("connection", websocket, request, roomName);

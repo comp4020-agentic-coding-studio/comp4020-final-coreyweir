@@ -25,6 +25,10 @@ dockerfile = "Dockerfile"
 
 [env]
 PORT = "8080"
+# Where browsers reach Riff. Sign-in's redirect_uri and the Origin check on
+# every socket and POST are built from this, never from a request's Host.
+# GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET and SESSION_SECRET are fly secrets.
+RIFF_ORIGIN = "https://comp4020-final-coreyweir.fly.dev"
 
 [http_service]
 internal_port = 8080

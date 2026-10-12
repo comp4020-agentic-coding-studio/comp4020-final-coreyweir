@@ -2,13 +2,9 @@
 // middleware (see vite.config.ts), which only exists in dev mode — a built
 // deployment has no Vite, so the same modules are mounted here on a plain
 // node:http server. nginx terminates TLS and serves dist/; this process only
-// handles the room documents, the relays, the OAuth proxy, and the health
-// endpoint.
+// handles Riff's own routes (riff.mjs) and the health endpoint.
 import { createServer } from "node:http";
-import { createCollaboration } from "./collaboration.mjs";
-import { createTerminalRelay } from "./terminalRelay.mjs";
-import { createPreviewRelay } from "./previewRelay.mjs";
-import { createGitHubDeviceProxy } from "./githubDeviceProxy.mjs";
+import { createRiff } from "./riff.mjs";
 
 const port = Number(process.env.PORT ?? 8093);
 const host = process.env.HOST ?? "127.0.0.1";
@@ -18,66 +14,36 @@ const host = process.env.HOST ?? "127.0.0.1";
 // to whatever the facilitator's Claude happens to be serving.
 const healthPort = Number(process.env.HEALTH_PORT ?? 8094);
 
-const previewRelay = createPreviewRelay();
-const terminalRelay = createTerminalRelay();
-// RIFF_DB is a SQLite file on the fly volume (deploy/start.sh).
-const collaboration = createCollaboration({ dbPath: process.env.RIFF_DB ?? "riff.sqlite" });
-
-const middlewares = [
-  previewRelay.middleware,
-  createGitHubDeviceProxy({ clientId: process.env.GITHUB_CLIENT_ID }),
-];
-
-function countHosts(rooms) {
-  let hosts = 0;
-  for (const room of rooms.values()) if (room.host) hosts += 1;
-  return hosts;
-}
+// RIFF_DB is a SQLite file on the fly volume (deploy/start.sh). RIFF_ORIGIN
+// is where browsers reach us (fly.toml); sign-in and the Origin checks are
+// built from it, never from a request's Host header.
+const riff = createRiff({
+  dbPath: process.env.RIFF_DB ?? "riff.sqlite",
+  origin: process.env.RIFF_ORIGIN,
+  githubClientId: process.env.GITHUB_CLIENT_ID,
+  githubClientSecret: process.env.GITHUB_CLIENT_SECRET,
+  sessionSecret: process.env.SESSION_SECRET,
+});
 
 // Host metrics cannot answer "is anyone actually able to use this", so report
 // the state that matters: whether each room still has a facilitator attached,
 // and whether preview requests are piling up unanswered.
 function health() {
-  let pending = 0;
-  for (const room of previewRelay.rooms.values()) pending += room.pending.size;
-  let terminalClients = 0;
-  for (const room of terminalRelay.rooms.values()) terminalClients += room.clients.size;
   return {
     status: "ok",
     uptimeSeconds: Math.round(process.uptime()),
     rssBytes: process.memoryUsage().rss,
-    preview: { rooms: previewRelay.rooms.size, hosts: countHosts(previewRelay.rooms), pending },
-    terminal: { rooms: terminalRelay.rooms.size, hosts: countHosts(terminalRelay.rooms), clients: terminalClients },
-    collaboration: collaboration.stats(),
+    ...riff.health(),
   };
 }
 
-function fail(response, error) {
-  console.error("[riff] request failed", error);
-  if (response.headersSent) return response.destroy();
-  response.writeHead(500, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-  response.end("Internal error");
-}
-
+// nginx serves the built client, so anything Riff doesn't answer is a
+// request for a route this process does not own.
 function runMiddlewares(request, response) {
-  let index = 0;
-  const next = () => {
-    const middleware = middlewares[index++];
-    // nginx serves the built client, so anything still unmatched here is a
-    // request for a route this process does not own.
-    if (!middleware) {
-      response.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-      response.end("Not found");
-      return;
-    }
-    try {
-      const result = middleware(request, response, next);
-      if (result && typeof result.catch === "function") result.catch((error) => fail(response, error));
-    } catch (error) {
-      fail(response, error);
-    }
-  };
-  next();
+  riff.middleware(request, response, () => {
+    response.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    response.end("Not found");
+  });
 }
 
 const server = createServer(runMiddlewares);
@@ -97,30 +63,8 @@ const healthServer = createServer((request, response) => {
   response.end(body);
 });
 
-// A malformed percent-escape is a bad request, not a crash — decode before
-// handing the name to a relay so an exception cannot tear down the upgrade.
-function roomFrom(pathname, prefix) {
-  try {
-    return decodeURIComponent(pathname.slice(prefix.length));
-  } catch {
-    return null;
-  }
-}
-
 server.on("upgrade", (request, socket, head) => {
-  const url = new URL(request.url ?? "/", "http://localhost");
-  for (const [prefix, handle] of [
-    ["/terminal/", (room) => terminalRelay.handleUpgrade(request, socket, head, room)],
-    ["/preview-control/", (room) => previewRelay.handleUpgrade(request, socket, head, room)],
-    // Hocuspocus reads the document name from each message, not the path.
-    ["/collaboration/", () => collaboration.handleUpgrade(request, socket, head)],
-  ]) {
-    if (!url.pathname.startsWith(prefix)) continue;
-    const room = roomFrom(url.pathname, prefix);
-    if (room === null) return socket.destroy();
-    return handle(room);
-  }
-  socket.destroy();
+  if (!riff.handleUpgrade(request, socket, head)) socket.destroy();
 });
 
 // One wedged room must not drop the other four mid-session. A genuine crash
@@ -135,9 +79,7 @@ function shutdown(signal) {
   console.log(`[riff] ${signal} received, stopping`);
   // Each relay's close() terminates its client sockets, which is what lets the
   // HTTP server's close callback fire at all.
-  previewRelay.close();
-  terminalRelay.close();
-  collaboration.close();
+  riff.close();
   healthServer.close();
   server.close(() => process.exit(0));
   // systemd escalates to SIGKILL after TimeoutStopSec; exit first so a stuck

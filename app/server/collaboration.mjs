@@ -1,7 +1,8 @@
-// The room documents: Hocuspocus serves them over /collaboration/, and every
+// The room documents: Hocuspocus serves them over /collaboration, and every
 // update is committed to SQLite as a row when it arrives (docs/adr/0002).
-// Shared by the production server (index.mjs) and the Vite dev server, so
-// development exercises the same store.
+// Who may open and write which document is decided by `authorize`
+// (docs/adr/0006, wired up in riff.mjs). Shared by the production server and
+// the Vite dev server, so development exercises the same store.
 import { statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { Hocuspocus } from "@hocuspocus/server";
@@ -40,20 +41,35 @@ export function openDatabase(path) {
   return db;
 }
 
-function userIdFrom(origin) {
+function contextFrom(origin) {
   if (origin && typeof origin === "object" && origin.source === "connection") {
-    return origin.connection?.context?.userId ?? null;
+    return origin.connection?.context ?? null;
   }
   return null;
 }
 
+// y-protocols sync message type for an incremental update.
+const MESSAGE_YJS_UPDATE = 2;
+
+// Without an `authorize`, every document is open to everyone (the
+// collaboration-store test runs that way). With one, it is called for each
+// document a socket asks for, and returns { context, readOnly } or throws.
 export function createCollaboration({
   dbPath,
+  db: givenDb,
   compactMinBytes = DEFAULT_COMPACT_MIN_BYTES,
+  authorize,
+  onEdit = () => {},
+  onRefusedWrite = () => {},
   log = (message) => console.log(`[riff] ${message}`),
 } = {}) {
-  if (!dbPath) throw new Error("createCollaboration needs a dbPath");
-  const db = openDatabase(dbPath);
+  if (!givenDb && !dbPath) throw new Error("createCollaboration needs a db or a dbPath");
+  const db = givenDb ?? openDatabase(dbPath);
+  // socketId → websocket, and member id → socket ids, so removing someone
+  // can close what they already have open.
+  const socketsById = new Map();
+  const socketsByMember = new Map();
+  const memberBySocket = new Map();
 
   const statements = {
     rows: db.prepare("SELECT data FROM doc_updates WHERE doc = ? ORDER BY seq"),
@@ -133,7 +149,10 @@ export function createCollaboration({
       // returns: the server never acks an update it hasn't committed.
       // (Hocuspocus's own onChange hook runs a microtask later, after the ack.)
       document.on("update", (update, origin) => {
-        statements.append.run(documentName, update, userIdFrom(origin), Date.now());
+        const context = contextFrom(origin);
+        const memberId = context?.who?.memberId;
+        statements.append.run(documentName, update, memberId === undefined ? null : String(memberId), Date.now());
+        if (context?.who) onEdit(context.who, documentName, update.byteLength);
         const entry = loaded.get(documentName);
         if (!entry) return;
         entry.pendingBytes += update.byteLength;
@@ -146,6 +165,26 @@ export function createCollaboration({
 
     async afterUnloadDocument({ documentName }) {
       loaded.delete(documentName);
+    },
+
+    async onAuthenticate(payload) {
+      if (!authorize) return {};
+      const { context, readOnly } = authorize(payload);
+      payload.connectionConfig.readOnly = Boolean(readOnly);
+      const memberId = context?.who?.memberId;
+      if (memberId !== undefined) {
+        let ids = socketsByMember.get(memberId);
+        if (!ids) socketsByMember.set(memberId, (ids = new Set()));
+        ids.add(payload.socketId);
+        memberBySocket.set(payload.socketId, memberId);
+      }
+      return context;
+    },
+
+    // Hocuspocus drops a read-only connection's update and answers it with
+    // a failed sync status; this only reports that it happened.
+    async beforeSync({ connection, type, documentName, context }) {
+      if (connection?.readOnly && type === MESSAGE_YJS_UPDATE) onRefusedWrite(context?.who, documentName);
     },
   });
 
@@ -165,8 +204,17 @@ export function createCollaboration({
   function handleUpgrade(request, socket, head) {
     sockets.handleUpgrade(request, socket, head, (websocket) => {
       const client = hocuspocus.handleConnection(websocket, toFetchRequest(request));
+      socketsById.set(client.socketId, websocket);
       websocket.on("message", (data) => client.handleMessage(new Uint8Array(data)));
-      websocket.on("close", (code, reason) => client.handleClose({ code, reason: reason.toString() }));
+      websocket.on("close", (code, reason) => {
+        socketsById.delete(client.socketId);
+        const memberId = memberBySocket.get(client.socketId);
+        memberBySocket.delete(client.socketId);
+        const ids = socketsByMember.get(memberId);
+        ids?.delete(client.socketId);
+        if (ids?.size === 0) socketsByMember.delete(memberId);
+        client.handleClose({ code, reason: reason.toString() });
+      });
       websocket.on("error", (error) => console.error("[riff] collaboration socket error", error));
     });
   }
@@ -191,12 +239,39 @@ export function createCollaboration({
     };
   }
 
+  // Close every socket a member has open. Their provider reconnects, asks
+  // again, and `authorize` now refuses it.
+  function disconnectMember(memberId) {
+    const ids = socketsByMember.get(memberId);
+    if (!ids) return 0;
+    socketsByMember.delete(memberId);
+    let closed = 0;
+    for (const id of ids) {
+      const websocket = socketsById.get(id);
+      if (!websocket) continue;
+      websocket.close(4403, "removed");
+      closed += 1;
+    }
+    return closed;
+  }
+
+  // A change made by the server itself (the member list), stored like any
+  // other update.
+  async function change(documentName, transaction) {
+    const connection = await hocuspocus.openDirectConnection(documentName, { server: true });
+    try {
+      await connection.transact(transaction);
+    } finally {
+      await connection.disconnect();
+    }
+  }
+
   function close() {
     hocuspocus.closeConnections();
     for (const websocket of sockets.clients) websocket.terminate();
     sockets.close();
-    db.close();
+    if (!givenDb) db.close();
   }
 
-  return { handleUpgrade, stats, close, hocuspocus };
+  return { handleUpgrade, stats, close, disconnectMember, change, hocuspocus, db };
 }

@@ -3,7 +3,11 @@ import { createServer } from "node:http";
 import WebSocket from "ws";
 import { createTerminalRelay } from "../server/terminalRelay.mjs";
 
-const relay = createTerminalRelay();
+// Stand-in for rooms.resolve: the token names the role the server would
+// resolve; no token, no room.
+const authorize = (_room, hello) =>
+  hello.token === "host-token" ? { memberId: 1, role: "host" } : hello.token ? { memberId: 2, role: "participant" } : null;
+const relay = createTerminalRelay({ authorize });
 const server = createServer();
 server.on("upgrade", (request, socket, head) => {
   const url = new URL(request.url ?? "/", "http://localhost");
@@ -45,9 +49,9 @@ try {
   const otherRoom = connect("room-b");
   await waitFor(() => clients.every((client) => client.readyState === WebSocket.OPEN), "Clients did not connect");
 
-  host.send(JSON.stringify({ type: "hello", role: "host", capability: "host-capability-that-is-long-enough" }));
-  participant.send(JSON.stringify({ type: "hello", role: "participant" }));
-  otherRoom.send(JSON.stringify({ type: "hello", role: "participant" }));
+  host.send(JSON.stringify({ type: "hello", role: "host", token: "host-token" }));
+  participant.send(JSON.stringify({ type: "hello", role: "participant", token: "guest-token" }));
+  otherRoom.send(JSON.stringify({ type: "hello", role: "participant", token: "guest-token" }));
   await waitFor(() => host.messages.some((message) => message.type === "host-accepted"), "Host was not accepted");
 
   host.send(JSON.stringify({ type: "snapshot", ansi: "\u001b[2JClaude ready", cols: 92, rows: 28 }));
@@ -71,9 +75,21 @@ try {
   participant.send(JSON.stringify({ type: "data", data: "unauthorized" }));
   await waitFor(() => participant.messages.some((message) => message.code === "host-only"), "Participant publication was not rejected");
 
+  // A participant asking to host is told no and stays a viewer; a socket
+  // with no credential hears nothing and is closed.
+  const pretender = connect("room-a");
+  const stranger = connect("room-a");
+  await waitFor(() => pretender.readyState === WebSocket.OPEN && stranger.readyState === WebSocket.OPEN, "Pretenders did not connect");
+  pretender.send(JSON.stringify({ type: "hello", role: "host", token: "guest-token" }));
+  stranger.send(JSON.stringify({ type: "hello", role: "host" }));
+  await waitFor(() => pretender.messages.some((message) => message.code === "host-rejected"), "Participant was not refused the host role");
+  await waitFor(() => stranger.readyState === WebSocket.CLOSED, "Socket without a credential was not closed");
+  assert.equal(stranger.messages.some((message) => message.type === "snapshot"), false);
+  assert.equal(host.messages.some((message) => message.code === "host-replaced"), false);
+
   const lateParticipant = connect("room-a");
   await waitFor(() => lateParticipant.readyState === WebSocket.OPEN, "Late participant did not connect");
-  lateParticipant.send(JSON.stringify({ type: "hello", role: "participant" }));
+  lateParticipant.send(JSON.stringify({ type: "hello", role: "participant", token: "guest-token" }));
   await waitFor(() => lateParticipant.messages.some((message) => message.type === "snapshot"), "Late participant did not receive cached snapshot");
   await waitFor(() => lateParticipant.messages.some((message) => message.type === "data"), "Late participant did not receive snapshot tail");
   assert.equal(lateParticipant.messages.find((message) => message.type === "snapshot").ansi, "\u001b[2JClaude ready");

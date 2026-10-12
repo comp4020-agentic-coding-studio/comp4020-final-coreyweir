@@ -7,14 +7,17 @@ function send(socket, message) {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 }
 
-export function createTerminalRelay() {
+// `authorize(roomName, hello, request)` returns who the socket belongs to,
+// with a server-resolved role ("host" or "participant"), or null.
+export function createTerminalRelay({ authorize, onRefused } = {}) {
+  if (typeof authorize !== "function") throw new Error("createTerminalRelay needs authorize");
   const socketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_SNAPSHOT_BYTES });
   const rooms = new Map();
 
   function roomFor(name) {
     let room = rooms.get(name);
     if (!room) {
-      room = { clients: new Set(), capability: null, host: null, latest: null, tail: [], tailBytes: 0, sequence: 0 };
+      room = { clients: new Set(), host: null, latest: null, tail: [], tailBytes: 0, sequence: 0 };
       rooms.set(name, room);
     }
     return room;
@@ -24,9 +27,8 @@ export function createTerminalRelay() {
     for (const client of room.clients) send(client, message);
   }
 
-  socketServer.on("connection", (socket, _request, roomName) => {
+  socketServer.on("connection", (socket, request, roomName) => {
     const room = roomFor(roomName);
-    room.clients.add(socket);
     socket.role = "participant";
 
     socket.on("message", (raw) => {
@@ -38,22 +40,42 @@ export function createTerminalRelay() {
         return;
       }
 
+      // The first message must be a hello carrying the member's credential
+      // (docs/adr/0006). Until then the socket hears nothing from the room.
       if (message.type === "hello") {
-        if (message.role === "host" && typeof message.capability === "string" && message.capability.length >= 24) {
-          if (room.capability === null) room.capability = message.capability;
-          if (room.capability === message.capability && (room.host === null || room.host === socket)) {
-            room.host = socket;
-            socket.role = "host";
-            send(socket, { type: "host-accepted" });
-            broadcast(room, { type: "host-status", connected: true });
-          } else {
+        if (socket.who) return;
+        const who = authorize(roomName, message, request);
+        if (!who) {
+          onRefused?.(roomName, "terminal");
+          send(socket, { type: "error", code: "not-a-member" });
+          socket.close(4401, "not a member");
+          return;
+        }
+        socket.who = who;
+        room.clients.add(socket);
+        if (message.role === "host" && who.role === "host") {
+          // The same host again (a reload) replaces the old socket.
+          if (room.host && room.host !== socket) {
+            send(room.host, { type: "error", code: "host-replaced" });
+            room.host.close(4409, "replaced");
+          }
+          room.host = socket;
+          socket.role = "host";
+          send(socket, { type: "host-accepted" });
+          broadcast(room, { type: "host-status", connected: true });
+        } else {
+          if (message.role === "host") {
+            onRefused?.(roomName, "terminal.host", who);
             send(socket, { type: "error", code: "host-rejected" });
           }
-        } else {
           send(socket, { type: "host-status", connected: room.host !== null });
         }
         if (room.latest) send(socket, room.latest);
         for (const event of room.tail) send(socket, event);
+        return;
+      }
+      if (!socket.who) {
+        send(socket, { type: "error", code: "hello-first" });
         return;
       }
 
@@ -112,6 +134,11 @@ export function createTerminalRelay() {
 
   return {
     rooms,
+    disconnectMember(roomName, memberId) {
+      for (const client of rooms.get(roomName)?.clients ?? []) {
+        if (client.who?.memberId === memberId) client.close(4403, "removed");
+      }
+    },
     handleUpgrade(request, socket, head, roomName) {
       socketServer.handleUpgrade(request, socket, head, (websocket) => {
         socketServer.emit("connection", websocket, request, roomName);

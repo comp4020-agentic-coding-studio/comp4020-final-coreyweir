@@ -3,7 +3,11 @@ import { createServer } from "node:http";
 import WebSocket from "ws";
 import { createPreviewRelay } from "../server/previewRelay.mjs";
 
-const relay = createPreviewRelay();
+// Stand-in for rooms.resolve: the token names the role the server would
+// resolve; no token, no room.
+const authorize = (_room, hello) =>
+  hello.token === "host-token" ? { memberId: 1, role: "host" } : hello.token ? { memberId: 2, role: "participant" } : null;
+const relay = createPreviewRelay({ authorize });
 const server = createServer((request, response) => {
   relay.middleware(request, response, () => {
     response.writeHead(404);
@@ -20,7 +24,6 @@ await new Promise((resolve) => server.once("listening", resolve));
 
 const { port } = server.address();
 const room = "riff-preview-test";
-const hostCapability = "host-capability-that-is-at-least-forty-eight-characters-long";
 const host = new WebSocket(`ws://127.0.0.1:${port}/preview-control/${room}`);
 const messages = [];
 
@@ -80,7 +83,7 @@ host.on("message", (raw) => {
 
 try {
   await new Promise((resolve) => host.once("open", resolve));
-  host.send(JSON.stringify({ type: "hello", capability: hostCapability }));
+  host.send(JSON.stringify({ type: "hello", token: "host-token" }));
   await waitFor(() => messages.some((message) => message.type === "host-accepted"), "Preview host was not accepted");
   host.send(JSON.stringify({ type: "preview-up", generation: 7 }));
 
@@ -132,7 +135,7 @@ try {
   assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/%FF/7/`)).status, 404);
 
   host.send(JSON.stringify({ type: "preview-down", generation: 6 }));
-  host.send(JSON.stringify({ type: "hello", capability: hostCapability }));
+  host.send(JSON.stringify({ type: "hello", token: "host-token" }));
   await waitFor(() => messages.filter((message) => message.type === "host-accepted").length === 2, "Stale Preview down was not processed");
   assert.equal(relay.rooms.get(room)?.generation, 7);
   assert.equal((await fetch(`${base}/hello`)).status, 200);
