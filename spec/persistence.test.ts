@@ -6,10 +6,12 @@ import { joinRoom as joinShared, uniqueRoom } from "./yjs-room";
 // contract is: what one session writes, a later session (after the first has
 // left) reads back from the server, not from anything the client kept.
 //
-// Limit: y-websocket without persistence also keeps an empty room in memory,
-// so this passes against a server that would lose everything on restart.
-// Surviving a restart/redeploy (y-leveldb on the fly volume) is checked by
-// hand: write, `flyctl machine restart`, read back.
+// The server (Hocuspocus) unloads a document as soon as its last client
+// leaves, so the second session's copy is loaded from SQLite. Limit: from
+// outside, this can't tell that apart from a server that kept the document in
+// memory. Surviving a crash, restart or redeploy is checked separately: the
+// kill test in app/server/collaboration.test.mjs, and by hand with
+// `flyctl machine restart` against the live app.
 const baseUrl = inject("baseUrl");
 const joinRoom = (room: string) => joinShared(baseUrl, room);
 
@@ -19,11 +21,9 @@ it("a room's state survives everyone leaving and a new session joining", async (
 
   const first = await joinRoom(room);
   first.doc.getMap("spec").set("trace", trace);
-  // give the update time to reach the server before the socket closes
-  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  // the server has applied (and stored) the update before it acknowledges it
+  await first.saved();
   first.leave();
-  // the server drops an empty room from memory; what comes back must be stored
-  await new Promise((resolve) => setTimeout(resolve, 1_000));
 
   const second = await joinRoom(room);
   try {
