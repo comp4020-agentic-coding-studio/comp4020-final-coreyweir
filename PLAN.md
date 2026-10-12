@@ -10,7 +10,7 @@ so the plan's history stays readable.
 
 1. **Port** (done, `c8792b8..7af9c15`): the existing Riff, deployed on fly
    with server-side persistence.
-2. **Assess and plan** (week 10, now): this file, and ADRs 0001–0004.
+2. **Assess and plan** (week 10, now): this file, and ADRs 0001–0006.
 3. **Implement**, in the order below. Each change goes:
    1. a decision (an ADR if it changes how people share a room);
    2. a check in `spec/`;
@@ -33,14 +33,16 @@ README, PROCESS.md and the reflections are mine to write.
 | ADR | Decision | Built? |
 |---|---|---|
 | [0001](docs/adr/0001-the-terminal-mirror-is-not-persisted.md) | The terminal mirror stays in server memory and is never persisted | Yes (today's behaviour) |
-| [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | No |
+| [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
 | [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import | No |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
+| 0005 (to write) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | No |
+| 0006 (to write) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision | No |
 
 ## Work, in order
 
 ### P0: crit 9 (today)
-- [ ] Push the week-10 commits, run preflight.
+- [x] Push the week-10 commits (pushed after the cutoff; crit 9 is made up in week 12). CI green from `2fd5829`.
 - [ ] PROCESS.md update and `reflections/crit-9.md` (mine).
 
 ### P1: before crit 10 (19 Oct)
@@ -100,31 +102,101 @@ README, PROCESS.md and the reflections are mine to write.
      back, and two browser profiles plus a headless client on the live room.
    - Left: `/data/yjs` (36 KB) is still on the volume; delete it once
      nobody needs an old room.
-3. **Identity.**
-   - Our own GitHub OAuth app. Sign-in asks for no permissions. "Connect
-     GitHub for pushing" asks again for `repo` or `public_repo` when
-     hosting. The course org restricts third-party OAuth apps: personal and
-     public repos may be enough, or ask the convenor.
-   - Authorization code flow with `state` and PKCE. The callback swaps the
-     code for a token and holds it in memory, single use, for about 60s,
-     tied to the session cookie. It then 303s to a clean URL, and the page
-     POSTs `/api/github/token` to collect the token once. **The GitHub token
-     is never stored on the server.** The server stores only
-     `users(github_id, login, avatar)` and a signed httpOnly session cookie.
-   - The landing page offers sign in with GitHub, or host or join without
-     signing in. Guest mode stays.
-4. **Server-side permissions** (needs an ADR; crit 10's written decision).
-   - The server mints the host capability when the room is created,
-     instead of letting the first connection claim it.
-   - The server knows who the host is, instead of trusting the
-     client-claimed `?host=1`.
-   - The queue is host-only, enforced on the server (today `canQueue` only
-     hides it in the UI). Hocuspocus `onAuthenticate` and read-only
-     connections.
-   - Decide who may view a kept, ended board (left open in ADR 0003).
-5. **Audit log.** A who-did-what table with readable events: joined, left,
-   prompt staged, sent (host or auto), room ended. Also printed to stdout,
-   so I can narrate from `flyctl logs` at the crit.
+3. **Identity** (ADR 0005). Design agreed 12 Oct:
+   - ~~Device flow on our own OAuth app first~~ (`43f34f6`): client id
+     `Ov23liF1O4v3obY6vdCc` from `GITHUB_CLIENT_ID` (Fly secret; `mise.local.toml`
+     in dev, so start Vite through `mise exec`). No id → the proxy answers 503,
+     so CI's secret-less image still starts. Checked: GitHub issues a device
+     code for it on the dev server.
+     - [ ] Push to a course-org repo with it. If GitHub asks for org
+       approval, request it; the convenor decides. This settles whether the
+       web flow can serve org repos or the device flow stays as a fallback.
+   - **GitHub users.** `users(id, github_id UNIQUE, login, avatar_url,
+     created_at, last_seen)`. Rows come only from a completed sign-in.
+   - **Sessions** for GitHub users only: `sessions(token_hash PK, user_id,
+     created_at, last_seen, expires_at)`. Cookie `__Host-riff-session` (the
+     prefix is the browser-enforced one: Secure, `Path=/`, no Domain), random
+     32 bytes, HttpOnly, SameSite=Lax, 30 days sliding. The table holds the
+     hash, so sign-out really ends it. A new id at every sign-in.
+   - **Guests exist only inside a room.** No `users` row. Joining creates a
+     `room_members` row with a room-scoped secret (localStorage
+     `riff-member:<roomId>`, sent as the Hocuspocus `token` and in the relays'
+     hello, as the host capability is today). Names are unique per room
+     (case-insensitive, NFKC); a name held by a disconnected member can't be
+     taken over without its secret, or the log could be impersonated.
+   - **Web flow.** `GET /auth/github/start?purpose=identity|push&return=…`:
+     state + PKCE verifier in a signed `__Host-oauth` cookie (10 min,
+     `SESSION_SECRET`), explicit `redirect_uri` from `RIFF_ORIGIN/auth`, never
+     the Host header. Scope empty for identity, `repo` for push. `GET /auth`:
+     constant-time state check, exchange (secret, verifier, `redirect_uri`),
+     `GET /user`, upsert, new session. An identity token is discarded.
+   - **Push token in localStorage, encrypted by the server.** After a push
+     sign-in the server encrypts the token (AES-GCM, key from `SESSION_SECRET`
+     and the session id) and the page stores only the ciphertext. `POST
+     /api/github/token/unwrap` returns it to a valid session. Sign-out, session
+     expiry or a rotated secret kill it, and a copy of localStorage alone is
+     useless. Code running on our own origin can still call unwrap; storing
+     plaintext would have given it the token anyway, so this is accepted.
+     The server never stores the token.
+   - **Origin checks** on every WebSocket upgrade and POST, against
+     `RIFF_ORIGIN` (browsers send cookies on cross-site WebSocket opens).
+   - **Sweeper** at startup and hourly: expired sessions, events past 90
+     days, and later ADR 0003's pruning. Lookups treat an expired session as
+     absent, so the sweeper never needs to be on time.
+   - **Landing page.** "Sign in with GitHub" or "Continue as guest", then host
+     or join. Guests can host. "Connect GitHub for pushing" lives in host
+     setup. `githubDeviceProxy.mjs` goes once the web flow covers pushing.
+4. **Rooms and permissions** (ADR 0006; crit 10's written decision).
+   - `rooms(id, code, host_member_id, keep, locked, state, host_last_seen,
+     created_at, ended_at)`. `id` is permanent and random (128 bits) and
+     names the documents; `code` is short, case-insensitive, no 0/O/1/I.
+     `host_member_id` points at a `room_members` row for GitHub and guest
+     hosts alike.
+   - `room_members(room_id, id, user_id NULL, secret_hash NULL, name,
+     joined_at, last_seen, removed_at)`: exactly one of `user_id` and
+     `secret_hash` set. `PRAGMA foreign_keys = ON` per connection (SQLite
+     leaves it off).
+   - `POST /api/rooms` creates a room and makes the caller host.
+     `GET /api/rooms/by-code/:code` resolves live rooms only. Both rate-limited
+     per IP, since rooms are the one thing anyone can create.
+   - Roles come from the server on every connection: host or participant.
+     The terminal and preview relays use them instead of first-claim
+     capabilities. A second host socket replaces the first (reload).
+   - Two documents per room, because Hocuspocus can make a connection
+     read-only per document but has no per-key permissions:
+     `room/<id>/shared` (board, staged prompts; everyone writes) and
+     `room/<id>/control` (queue, settings, preview state, member list; host
+     writes, participants read). Participants propose to the queue with a
+     stateless message the server checks and applies. The member list is
+     written by the server, so a "verified" badge can't be faked from
+     awareness.
+   - Anyone in the room may edit or delete a staged prompt: drafts are
+     shared work, like a shared doc. The log shows who did it.
+   - **Removal, lock, rotate.** The host can remove a member (`removed_at`,
+     sockets dropped, credential refused). A removed GitHub user can be
+     invited back. A removed guest could rejoin with the code, so the host
+     can also rotate the code (old code stops resolving, members stay
+     connected) and lock the room (no new joins by code; members and invites
+     still get in). Order for a leaked code: rotate, remove, lock.
+   - Viewers of a kept, ended board: the host and its members (settles
+     ADR 0003's open question).
+5. **Who-did-what log.** `events(seq, at, room_id, member_id, action,
+   detail_json)`. `detail_json` is a flat object of scalars (ids, counts,
+   bytes, setting names, denial reasons), never content. Each event is also
+   printed to stdout as logfmt for `flyctl logs`:
+   `[audit] room=K7MQ2P member=12 guest="Ada" role=participant action=denied what=control.write`.
+   Actions: sign-in/out, room create/join/leave/end, queue propose/release/
+   remove, settings, host claim/reject, member remove, code rotate, lock,
+   denials. Edits are coalesced per connection and document about every 10 s.
+   Kept 90 days. `doc_updates.user_id` stays but compaction merges it away,
+   so it isn't the log.
+   - Specs (before the code): a socket with no credential is refused; a
+     cross-origin socket is refused; a participant's write to `control`
+     doesn't survive a reconnect; the host's does;
+     `/auth/github/start` redirects with state, PKCE and the exact
+     `redirect_uri`; `/auth` rejects a bad state.
+   - Old `riff-<code>` documents aren't migrated. Their links get a "this
+     room predates sign-in" page.
 6. **API proxy, so no secrets reach the guest.** Today the model token and
    GitHub token are in the guest's environment (`claudePod.ts:371-377`,
    `:603`), so `env` shows them live to the room.
@@ -197,11 +269,17 @@ README, PROCESS.md and the reflections are mine to write.
 
 ## Still open
 
+- **The host's preview runs Claude-written code on our origin, unsandboxed**
+  (`App.tsx:214`; participants' frames are sandboxed without
+  `allow-same-origin`). It can read localStorage and call `/api` with the
+  host's cookie. Accepted for now: the alternative routes the host's own
+  preview through the server and back. Revisit with the guest-preview
+  subdomain question.
 - **Phone hosts and the 5-minute grace.** Android suspends background tabs,
   so test on the Pixel before settling on 5 minutes.
-- **The course org's OAuth app restriction.** Personal repos only, or ask the
-  convenor.
-- **Who may view a kept, ended board.** Decided with crit 10's permissions.
+- **The course org's OAuth app restriction.** Being tested with the device
+  flow on our own app (P1.3); the convenor decides on approval.
+- ~~**Who may view a kept, ended board.**~~ The host and its members (P1.4).
 - ~~**How Claude Code reaches the build** (P1.1).~~ It doesn't: the browser derives it.
 - ~~**Build the client in the Docker image**, or keep committing `app/dist/`.~~ Built in the image.
 
