@@ -16,14 +16,32 @@ Reused code does not answer the brief. What I change, decide and justify does.
 
 ## Where we are
 
-Week 9. Crit 8 ("It's alive!") is today. Riff is deployed and room state
-persists on the server. First job after the crit: make the client build
-from `app/` (see Traps). Then crit 9 (real-time, plus one written decision on
-multi-user behaviour), crit 10 (a structured server log line for every user
-action, plus a live view), then A3 at noon on 9 November.
+Week 10. Crit 9 ("All at once") is today: real-time (already true via Yjs,
+now measured in `spec/realtime.test.ts`) plus one written decision about how
+the room behaves with several people in it. Next is crit 10 on 19 October:
+the server tells people apart, checks what each may see and change, and logs
+who did what in a way that outlives the crit. A3 is due at noon on 9 November.
 
 Update this section at each crit. A harness describing last week's project
 steers the agent into last week's work.
+
+## How we work: phases
+
+The project moves in phases, and the commit history should show it. Don't
+skip ahead to building something the current phase hasn't decided on.
+
+1. **Port** (done, `c8792b8..7af9c15`): the existing Riff deployed on fly,
+   with server-side persistence.
+2. **Assess and plan** (now): measure Riff against the brief and the README,
+   and settle priorities and architecture. Decisions are recorded as ADRs in
+   `docs/adr/`, with the options, the choice and its cost.
+3. **Implement**, in priority order. Each change goes: decision (an ADR if it
+   changes how people share a room), then a check in `spec/` where it can be
+   tested, then the change, then verification on the live app, then a commit.
+
+The README's definition of good is meant to change as the work teaches us
+what good is, up to 9 November. When it does, the "What good means" section
+below changes in the same commit.
 
 ## What good means
 
@@ -89,6 +107,8 @@ same commit. Each README quality turns into what it means for a change:
 - No local Docker. Build and deploy with `flyctl deploy --remote-only
   --ha=false -a comp4020-final-coreyweir`, run through `mise exec` from the
   repo root (the fly token lives in `mise.local.toml`).
+- Don't assume the host is on a desktop. Hosting works on a phone (tested on
+  a Pixel 6), so both roles have to work at 390×844.
 - Preview relaying routes on path prefixes (`/room-preview/`,
   `/preview-control/`). fly.dev can't do wildcard subdomains, so keep it that
   way.
