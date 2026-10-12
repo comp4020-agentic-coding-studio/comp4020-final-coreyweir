@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
+import { hangUp } from "./sockets.mjs";
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
@@ -151,13 +152,13 @@ export function createPreviewRelay({ authorize, onRefused } = {}) {
         if (!who || who.role !== "host") {
           onRefused?.(roomName, "preview.host", who);
           send(socket, { type: "error", code: "host-rejected" });
-          socket.close(4403, "host only");
+          hangUp(socket, 4403, "host only");
           return;
         }
         // The same host again (a reload) replaces the old socket.
         if (room.host && room.host !== socket) {
           send(room.host, { type: "error", code: "host-replaced" });
-          room.host.close(4409, "replaced");
+          hangUp(room.host, 4409, "replaced");
           room.generation = 0;
           rejectPending(room, 502, "Preview host reconnected");
         }
@@ -307,7 +308,7 @@ export function createPreviewRelay({ authorize, onRefused } = {}) {
     middleware,
     disconnectMember(roomName, memberId) {
       const host = rooms.get(roomName)?.host;
-      if (host?.who?.memberId === memberId) host.close(4403, "removed");
+      if (host?.who?.memberId === memberId) hangUp(host, 4403, "removed");
     },
     handleUpgrade(request, socket, head, roomName) {
       socketServer.handleUpgrade(request, socket, head, (websocket) => {

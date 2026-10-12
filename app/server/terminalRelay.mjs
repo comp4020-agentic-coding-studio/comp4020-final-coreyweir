@@ -1,4 +1,5 @@
 import { WebSocket, WebSocketServer } from "ws";
+import { hangUp } from "./sockets.mjs";
 
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const MAX_TAIL_BYTES = 1024 * 1024;
@@ -48,7 +49,7 @@ export function createTerminalRelay({ authorize, onRefused } = {}) {
         if (!who) {
           onRefused?.(roomName, "terminal");
           send(socket, { type: "error", code: "not-a-member" });
-          socket.close(4401, "not a member");
+          hangUp(socket, 4401, "not a member");
           return;
         }
         socket.who = who;
@@ -57,7 +58,7 @@ export function createTerminalRelay({ authorize, onRefused } = {}) {
           // The same host again (a reload) replaces the old socket.
           if (room.host && room.host !== socket) {
             send(room.host, { type: "error", code: "host-replaced" });
-            room.host.close(4409, "replaced");
+            hangUp(room.host, 4409, "replaced");
           }
           room.host = socket;
           socket.role = "host";
@@ -136,7 +137,7 @@ export function createTerminalRelay({ authorize, onRefused } = {}) {
     rooms,
     disconnectMember(roomName, memberId) {
       for (const client of rooms.get(roomName)?.clients ?? []) {
-        if (client.who?.memberId === memberId) client.close(4403, "removed");
+        if (client.who?.memberId === memberId) hangUp(client, 4403, "removed");
       }
     },
     handleUpgrade(request, socket, head, roomName) {

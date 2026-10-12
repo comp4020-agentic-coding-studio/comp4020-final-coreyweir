@@ -7,6 +7,7 @@ import { statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { Hocuspocus } from "@hocuspocus/server";
 import { WebSocketServer } from "ws";
+import { hangUp } from "./sockets.mjs";
 import * as Y from "yjs";
 
 // Compact once the rows since the last snapshot outweigh the snapshot itself
@@ -51,6 +52,27 @@ function contextFrom(origin) {
 // y-protocols sync message type for an incremental update.
 const MESSAGE_YJS_UPDATE = 2;
 
+// Hocuspocus's wire format: varString(document) varUint(type) payload. An
+// Auth message (2) of kind PermissionDenied (1) with a reason is what the
+// provider gets when onAuthenticate refuses; it fires authenticationFailed.
+function varUint(value) {
+  const bytes = [];
+  while (value > 0x7f) {
+    bytes.push((value & 0x7f) | 0x80);
+    value >>>= 7;
+  }
+  bytes.push(value);
+  return bytes;
+}
+
+function varString(text) {
+  const utf8 = new TextEncoder().encode(text);
+  return [...varUint(utf8.length), ...utf8];
+}
+
+const permissionDenied = (documentName, reason) =>
+  new Uint8Array([...varString(documentName), ...varUint(2), ...varUint(1), ...varString(reason)]);
+
 // Without an `authorize`, every document is open to everyone (the
 // collaboration-store test runs that way). With one, it is called for each
 // document a socket asks for, and returns { context, readOnly } or throws.
@@ -70,6 +92,7 @@ export function createCollaboration({
   const socketsById = new Map();
   const socketsByMember = new Map();
   const memberBySocket = new Map();
+  const documentsBySocket = new Map();
 
   const statements = {
     rows: db.prepare("SELECT data FROM doc_updates WHERE doc = ? ORDER BY seq"),
@@ -177,6 +200,9 @@ export function createCollaboration({
         if (!ids) socketsByMember.set(memberId, (ids = new Set()));
         ids.add(payload.socketId);
         memberBySocket.set(payload.socketId, memberId);
+        let documents = documentsBySocket.get(payload.socketId);
+        if (!documents) documentsBySocket.set(payload.socketId, (documents = new Set()));
+        documents.add(payload.documentName);
       }
       return context;
     },
@@ -210,6 +236,7 @@ export function createCollaboration({
         socketsById.delete(client.socketId);
         const memberId = memberBySocket.get(client.socketId);
         memberBySocket.delete(client.socketId);
+        documentsBySocket.delete(client.socketId);
         const ids = socketsByMember.get(memberId);
         ids?.delete(client.socketId);
         if (ids?.size === 0) socketsByMember.delete(memberId);
@@ -239,8 +266,10 @@ export function createCollaboration({
     };
   }
 
-  // Close every socket a member has open. Their provider reconnects, asks
-  // again, and `authorize` now refuses it.
+  // Tell every socket a member has open that each of its documents is now
+  // refused, then close it; if their provider reconnects, `authorize`
+  // refuses it again. The message matters: fly's proxy can hold the
+  // browser's side of a closed socket open for seconds.
   function disconnectMember(memberId) {
     const ids = socketsByMember.get(memberId);
     if (!ids) return 0;
@@ -249,7 +278,10 @@ export function createCollaboration({
     for (const id of ids) {
       const websocket = socketsById.get(id);
       if (!websocket) continue;
-      websocket.close(4403, "removed");
+      for (const documentName of documentsBySocket.get(id) ?? []) {
+        websocket.send(permissionDenied(documentName, "removed"));
+      }
+      hangUp(websocket, 4403, "removed");
       closed += 1;
     }
     return closed;
