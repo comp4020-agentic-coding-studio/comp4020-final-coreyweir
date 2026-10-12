@@ -60,6 +60,13 @@ README, PROCESS.md and the reflections are mine to write.
    - Open: build the client in the Docker image instead of committing
      `app/dist/`? That would remove the "dist out of date" trap, at the cost
      of a slower deploy.
+   - ~~Guest `curl http://…` got a 502 on the live site~~ (an https page
+     blocks plain-http `fetch()` as mixed content; only images, audio and video
+     are auto-upgraded). Fixed with CSP `upgrade-insecure-requests` in nginx,
+     checked by `spec/headers.test.ts`, and verified with the curl smoke against
+     the live bundle. Hosts who want real plain http can allow "Insecure
+     content" for the site in Chrome. CORS still limits the guest to origins
+     that allow cross-origin reads, over either scheme.
 2. **SQLite + Hocuspocus** (ADR 0002).
    - Replace y-websocket and y-leveldb.
    - Write each update as a row from `onChange`, with `user_id`. Compact by

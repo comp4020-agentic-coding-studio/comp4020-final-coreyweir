@@ -102,8 +102,11 @@ same commit. Each README quality turns into what it means for a change:
   `deploy/start.sh` pins node to 8093. Don't "simplify" that away.
 - Every HTML and JS response needs COOP `same-origin` and COEP `require-corp`,
   or SharedArrayBuffer disappears and the host can't start Claude Code. A new
-  nginx `location` that serves app files needs the headers too. `spec/` checks
-  `/`, not every path.
+  nginx `location` that serves app files needs the headers too, plus CSP
+  `upgrade-insecure-requests` (without it the guest's plain-http requests are
+  blocked as mixed content). `spec/headers.test.ts` checks the page, a room
+  link and one script, not every path. Never add that CSP to Vite's dev
+  server: on `http://127.0.0.1` it upgrades the page's own assets.
 - y-websocket keeps an empty room **in memory** whether or not persistence is
   on. A room that survives a reconnect proves nothing about a restart. Prove
   persistence with `flyctl machine restart` and then read the room back.
