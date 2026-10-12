@@ -78,7 +78,8 @@ same commit. Each README quality turns into what it means for a change:
 
 - `app/`: the Riff tree (an npm project; its own `package.json` and lockfile).
   `app/server/` holds the node relays. `app/src/` is the client.
-- `app/dist/`: the **prebuilt** client, committed. Deployed as-is.
+- `app/dist/`: build output, gitignored. The Docker image builds the client
+  itself (first stage of `Dockerfile`), so a deploy always ships the source.
 - `deploy/`: nginx config and the start script. `Dockerfile` at the root.
 - Root `package.json` (pnpm) is the course harness only: `spec/` and the
   checks. Never mix the two package managers or their lockfiles.
@@ -92,12 +93,13 @@ same commit. Each README quality turns into what it means for a change:
   holds the launcher and Mithic files. Nothing may point outside the repo
   again (`file:../../…`, a `publicDir` or `fs.allow` beyond `app/`). A fork
   change is made in its own repo, packed, and installed per
-  `app/vendor/README.md`. Never hand-edit `app/dist/`.
+  `app/vendor/README.md`.
 - **Claude Code is never in the repo or the build.** The browser derives it
   from the npm tarball (`app/src/claudeBundle.ts`). Don't copy
   `claude-booted*` into `app/public/`, whatever `nodepod_wasm_wip` does.
-- **Changing the client without rebuilding changes nothing that's deployed.**
-  Check that `app/dist/` matches the source change before calling it done.
+- **`.dockerignore` patterns match from the context root.** Write
+  `**/node_modules`, not `node_modules`, or 200 MB of `app/node_modules`
+  uploads with every deploy.
 - fly.toml sets `PORT=8080` for nginx. The node server also reads `PORT`, so
   `deploy/start.sh` pins node to 8093. Don't "simplify" that away.
 - Every HTML and JS response needs COOP `same-origin` and COEP `require-corp`,

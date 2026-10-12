@@ -1,8 +1,15 @@
 # syntax = docker/dockerfile:1
 
-# The client is prebuilt and committed (app/dist). It builds from app/ alone
-# (the forks are vendored), so building it here instead is possible; see
-# PLAN.md. For now the image only serves it and runs the node relays.
+# The client is built here, from app/ alone (the forks are vendored in
+# app/vendor). The final image only serves app/dist and runs the node relays.
+
+FROM docker.io/library/node:24-slim AS client
+WORKDIR /build/app
+COPY app/package.json app/package-lock.json ./
+COPY app/vendor/ ./vendor/
+RUN npm ci --no-audit --no-fund
+COPY app/ ./
+RUN npm run build
 
 FROM docker.io/library/node:24-slim
 RUN apt-get update \
@@ -14,7 +21,7 @@ COPY app/server/package.json app/server/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 COPY app/server/*.mjs ./
 
-COPY app/dist/ /srv/www/
+COPY --from=client /build/app/dist/ /srv/www/
 COPY placeholder/readme.html README.md /tmp/readme/
 # README.md goes into the page HTML-escaped, in place of @README@
 RUN mkdir -p /srv/www/readme \

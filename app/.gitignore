@@ -1,5 +1,6 @@
 node_modules/
-# dist/ is committed: see ../Dockerfile
+# dist/ is built in the Docker image (../Dockerfile), never committed.
+dist/
 # Claude tarball replayed by the claude-bundle smokes.
 .cache/
 *.tsbuildinfo

@@ -1,5 +1,5 @@
 #!/bin/bash
-# nginx (public, :8080) serves the prebuilt client and proxies the relays to
+# nginx (public, :8080) serves the client (built in the image) and proxies the relays to
 # node (private, :8093), which also runs the Yjs server persisted to the fly
 # volume. If either process exits, the machine exits and fly restarts it.
 set -eu

@@ -2,8 +2,8 @@
 # of this, so it only matters for a deploy run from your own machine; without
 # it, node_modules and any local data ship to the builder.
 .git
-node_modules
-dist
+**/node_modules
+**/dist
 *.log
 .env
 .env.*

@@ -57,9 +57,14 @@ README, PROCESS.md and the reflections are mine to write.
    - Left behind: `scripts/git-sync-smoke.mjs` and
      `scripts/claude-stream-smoke.mjs` still import from `nodepod_wasm_wip`.
      They're research smokes, not part of the build.
-   - Open: build the client in the Docker image instead of committing
-     `app/dist/`? That would remove the "dist out of date" trap, at the cost
-     of a slower deploy.
+   - ~~Build the client in the Docker image instead of committing
+     `app/dist/`?~~ Done. Measured on the fly remote builder: 38 s for a cold
+     build with a fresh `npm ci` (the client build itself 14 s), 7 s when
+     nothing changed. The first image-built `dist/` hit the layer cache of
+     the previous image's committed `dist/`, so the two were byte-identical.
+     `app/dist/` is now gitignored. `.dockerignore` only matched
+     `node_modules` at the root, so every deploy had also been uploading
+     `app/node_modules`; it now says `**/node_modules`.
    - ~~Guest `curl http://…` got a 502 on the live site~~ (an https page
      blocks plain-http `fetch()` as mixed content; only images, audio and video
      are auto-upgraded). Fixed with CSP `upgrade-insecure-requests` in nginx,
@@ -178,7 +183,7 @@ README, PROCESS.md and the reflections are mine to write.
   convenor.
 - **Who may view a kept, ended board.** Decided with crit 10's permissions.
 - ~~**How Claude Code reaches the build** (P1.1).~~ It doesn't: the browser derives it.
-- **Build the client in the Docker image**, or keep committing `app/dist/`.
+- ~~**Build the client in the Docker image**, or keep committing `app/dist/`.~~ Built in the image.
 
 ## Measuring claims
 
