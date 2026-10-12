@@ -197,11 +197,34 @@ README, PROCESS.md and the reflections are mine to write.
    denials. Edits are coalesced per connection and document about every 10 s.
    Kept 90 days. `doc_updates.user_id` stays but compaction merges it away,
    so it isn't the log.
-   - Specs (before the code): a socket with no credential is refused; a
-     cross-origin socket is refused; a participant's write to `control`
-     doesn't survive a reconnect; the host's does;
-     `/auth/github/start` redirects with state, PKCE and the exact
-     `redirect_uri`; `/auth` rejects a bad state.
+   - ~~Specs (before the code)~~ written, red against today's server for
+     the expected reason (no API yet): `spec/permissions.test.ts`,
+     `spec/sign-in.test.ts`, and `spec/realtime.test.ts` and
+     `spec/persistence.test.ts` moved onto real rooms (host creates, guest
+     joins by code). Helpers in `spec/riff.ts`. They pin down this contract:
+     - `POST /api/rooms {name}` → 201 `{room: {id, code}, member: {id, name,
+       host, secret}}`; `POST /api/rooms/join {code, name}` → same shape, 404
+       unknown code, 409 name taken (case-insensitive, host's too), 423
+       locked; `GET /api/rooms/by-code/:code` → `{id, …}` or 404, any case.
+     - Host only (`Authorization: Bearer <secret>` or the session cookie;
+       401 without, 403 for a participant): `POST /api/rooms/:id/code` →
+       `{code}`; `POST /api/rooms/:id/lock {locked}`; `DELETE
+       /api/rooms/:id/members/:memberId` → 204, and the member's open socket
+       is shut out.
+     - One socket at `/collaboration` (no document in the path); Origin
+       missing or foreign → 403 at the upgrade. Today nginx only proxies
+       `/collaboration/`, so the bare path falls through to the SPA. Any
+       document that isn't `room/<id>/shared|control` is refused.
+     - `/auth`: bad or missing state, or a tampered `__Host-oauth` cookie →
+       400 before contacting GitHub; GitHub refusing the code → 403; no
+       client secret → 503. `return` must be a same-origin path. `GET
+       /api/me` → `{user: null}` when signed out.
+     - CI starts the container with `RIFF_ORIGIN`, the public
+       `GITHUB_CLIENT_ID` and a throwaway `SESSION_SECRET`.
+     - When the code lands, prove each check can fail: switch off the
+       read-only flag, the origin check and the removal, one at a time.
+     - Not checkable from outside: a GitHub user's path (needs a real
+       sign-in), and the log (read with `flyctl logs`).
    - Old `riff-<code>` documents aren't migrated. Their links get a "this
      room predates sign-in" page.
 6. **API proxy, so no secrets reach the guest.** Today the model token and

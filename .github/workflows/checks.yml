@@ -32,10 +32,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build and start the app
         # the same image Fly deploys, with a throwaway /data in place of the
-        # volume; the spec runs against it
+        # volume; the spec runs against it. The app is told its own origin
+        # and the OAuth app's public client id (spec/sign-in.test.ts), and a
+        # throwaway session secret. No client secret: CI never finishes a
+        # GitHub sign-in.
         run: |
           docker build -t app .
-          docker run -d --init --name app -p 8080:8080 -e PORT=8080 --tmpfs /data app
+          docker run -d --init --name app -p 8080:8080 -e PORT=8080 --tmpfs /data \
+            -e RIFF_ORIGIN=http://localhost:8080 \
+            -e GITHUB_CLIENT_ID=Ov23liF1O4v3obY6vdCc \
+            -e SESSION_SECRET="$(openssl rand -hex 32)" \
+            app
       - name: Run the spec
         run: pnpm check
         env:

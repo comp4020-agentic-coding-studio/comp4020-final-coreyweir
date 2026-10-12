@@ -1,6 +1,6 @@
 import { expect, inject, it } from "vitest";
 import * as Y from "yjs";
-import { joinRoom, timeUntil, uniqueRoom } from "./yjs-room";
+import { createRoom, joinRoom, openPart, timeUntil } from "./riff";
 
 // Crit 9 / A3 real-time: a change one person makes reaches every other open
 // session within about a second, with no action by the viewer. Two headless
@@ -14,9 +14,15 @@ import { joinRoom, timeUntil, uniqueRoom } from "./yjs-room";
 const baseUrl = inject("baseUrl");
 const BUDGET_MS = 1_000;
 
+// A host and a guest, each with a session on the room's shared document.
+async function twoPeople() {
+  const host = await createRoom(baseUrl);
+  const guest = await joinRoom(baseUrl, host.code);
+  return Promise.all([openPart(baseUrl, host, "shared"), openPart(baseUrl, guest, "shared")]);
+}
+
 it("a change in one session reaches another within a second", async () => {
-  const room = uniqueRoom("spec-realtime");
-  const [writer, viewer] = await Promise.all([joinRoom(baseUrl, room), joinRoom(baseUrl, room)]);
+  const [writer, viewer] = await twoPeople();
   try {
     const marker = `staged at ${new Date().toISOString()}`;
     const arrived = timeUntil(viewer.doc, () => viewer.doc.getMap("spec").get("marker") === marker, 5_000);
@@ -32,8 +38,7 @@ it("a change in one session reaches another within a second", async () => {
 // edit is lost, and both sessions settle on the same text without a reload.
 // This is the "two people acting at once" case the top band asks about.
 it("simultaneous edits to one prompt merge, and both sessions converge", async () => {
-  const room = uniqueRoom("spec-concurrent");
-  const [alice, bob] = await Promise.all([joinRoom(baseUrl, room), joinRoom(baseUrl, room)]);
+  const [alice, bob] = await twoPeople();
   try {
     const seeded = timeUntil(bob.doc, () => bob.doc.getText("prompt").toString() === "make the header ", 5_000);
     alice.doc.getText("prompt").insert(0, "make the header ");
