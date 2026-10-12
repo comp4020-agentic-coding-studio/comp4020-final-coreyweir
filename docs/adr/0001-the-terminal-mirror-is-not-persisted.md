@@ -86,6 +86,14 @@ The durable record of what happened lives elsewhere, and is safer:
   it sent, so until the screen next changes, a latecomer sees nothing. The
   fix is to forget the last snapshot when the relay accepts the host again.
   It's small but needs a client rebuild, so it's queued behind the build fix.
+- **This limits keeping, not seeing.** Today the host's model token and
+  GitHub token are in the guest's environment (`claudePod.ts`: `ANTHROPIC_*`,
+  `GITHUB_TOKEN`, `GH_TOKEN`). If Claude runs `env`, both go out live to
+  everyone in the room. The fix is planned, and it worked in `nodepod_poc`:
+  a proxy for the model API and the GitHub API, so neither token enters the
+  guest. The guest gets a placeholder, and the real credential is added
+  outside the guest, beyond anything Claude or bash can read. With that in
+  place, the two worst secrets can't reach the terminal at all.
 - **A tradeoff against the README.** "Information durability" doesn't cover
   the terminal, and CLAUDE.md now says so, so the rule against server-memory
   state doesn't get "fixed" by a future agent.
