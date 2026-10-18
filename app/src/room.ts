@@ -214,6 +214,8 @@ export function useRoom(access: Access) {
     keep: roomInfo.has("keep") ? roomInfo.get("keep") === true : access.room.keep,
     state: (["live", "away", "ended"].includes(String(roomInfo.get("state"))) ? roomInfo.get("state") : access.room.state) as RoomState,
     endsAt: roomInfo.has("endsAt") ? (typeof roomInfo.get("endsAt") === "number" ? Number(roomInfo.get("endsAt")) : null) : access.room.endsAt,
+    full: roomInfo.has("full") ? roomInfo.get("full") === true : access.room.full,
+    limitBytes: typeof roomInfo.get("limitBytes") === "number" ? Number(roomInfo.get("limitBytes")) : access.room.limitBytes,
     previewLive: roomState.get("previewLive") === true,
     previewGeneration: Number(roomState.get("previewGeneration") ?? 0),
     roomState,

@@ -7,7 +7,8 @@ import {
   type Colleagues, type ListedRoom, type RoomInfo, type RoomList,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
 } from "./api";
-import { useBoardSync } from "./boardSync";
+import * as Y from "yjs";
+import { type BoardLimit, useBoardSync } from "./boardSync";
 import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
 import type { HostConfig } from "./claudePod";
 import { previewRelayUrl } from "./previewChannel";
@@ -43,6 +44,10 @@ function goToRoom(roomId: string) {
 // words everywhere someone decides whether to draw.
 function boardFate(keep: boolean) {
   return keep ? "The server keeps this board after the room ends." : "The server deletes this board when the room ends.";
+}
+
+function megabytes(bytes: number) {
+  return `${(bytes / 1024 / 1024).toFixed(bytes < 1024 * 1024 ? 2 : 1).replace(/\.0+$/, "")} MB`;
 }
 
 function countdown(until: number, now: number) {
@@ -434,22 +439,24 @@ function Staging({ prompts, canQueue, readOnly, onAdd, onQueue, onDelete }: {
   );
 }
 
-function BoardView({ store, selected, readOnly, onSelection, onStageSelection }: {
+function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection }: {
   store: ReturnType<typeof useQuickdrawStore>;
-  readOnly: boolean;
+  readOnly: string | null;
+  notice: string | null;
   selected: string[];
   onSelection: (ids: string[]) => void;
   onStageSelection: () => void;
 }) {
   return (
     <section className="board-wrap">
-      <div className="board-actions">{readOnly ? <span>The room has ended: you can look, but not change anything.</span> : <><span>Draw, write, paste images, or move things around.</span><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button></>}</div>
+      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span>Draw, write, paste images, or move things around.</span><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button></>}</div>
+      {notice && <p className="board-notice" role="alert">{notice}</p>}
       <Quickdraw
         className="quickdraw-surface"
         store={store}
         grid="dots"
         theme="light"
-        readonly={readOnly}
+        readonly={readOnly !== null}
         styles={{ dash: "solid" }}
         themeToggle={false}
         watermark={false}
@@ -459,9 +466,11 @@ function BoardView({ store, selected, readOnly, onSelection, onStageSelection }:
   );
 }
 
-function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, onSend, onDelete, onPreviewUrlChange }: {
+function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, full, onSend, onDelete, onPreviewUrlChange }: {
   roomId: string;
   ended: boolean;
+  // A full room's queue is read-only for the host too.
+  full: boolean;
   token: string | null;
   queued: QueuedPrompt[];
   facilitator: boolean;
@@ -479,7 +488,7 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, o
       <article className="queue">
         <header className="section-title"><h2>Up next</h2><span>{queued.length}</span></header>
         <div className="queue-list">
-          {queued.map((prompt, index) => <div className="queue-row" key={prompt.id}><span>{index + 1}</span><p>{prompt.text}</p><small>{prompt.author}</small>{facilitator && <button className="load-prompt" onClick={() => { if (terminalRef.current?.loadPrompt(prompt.text)) onSend(prompt.id); }}>Load</button>}{facilitator && <button onClick={() => onDelete(prompt.id)} aria-label="Remove queued prompt">&times;</button>}</div>)}
+          {queued.map((prompt, index) => <div className="queue-row" key={prompt.id}><span>{index + 1}</span><p>{prompt.text}</p><small>{prompt.author}</small>{facilitator && !full && <button className="load-prompt" onClick={() => { if (terminalRef.current?.loadPrompt(prompt.text)) onSend(prompt.id); }}>Load</button>}{facilitator && !full && <button onClick={() => onDelete(prompt.id)} aria-label="Remove queued prompt">&times;</button>}</div>)}
           {!queued.length && <p className="empty">The host hasn't queued anything yet.</p>}
         </div>
       </article>
@@ -602,6 +611,16 @@ function RoomBanner({ state, endsAt, keep, facilitator }: { state: RoomInfo["sta
   );
 }
 
+// A full room is read-only for everyone, the host included, and stays that
+// way (docs/adr/0003, amendment). Claude and the terminal carry on.
+function FullBanner({ limitBytes }: { limitBytes: number | null }) {
+  return (
+    <p className="room-banner full" role="status">
+      This board is full{limitBytes ? ` (${megabytes(limitBytes)})` : ""}, so nothing more can be added to it, the prompts or the queue. Claude and the terminal still work. To keep going together, start a new room.
+    </p>
+  );
+}
+
 // The host can end the room for everyone. Ending isn't undone by anyone
 // but the host coming back, so it asks first and says what happens.
 function EndRoom({ access, code, keep }: { access: Access; code: string; keep: boolean }) {
@@ -632,6 +651,29 @@ function EndRoom({ access, code, keep }: { access: Access; code: string; keep: b
   );
 }
 
+// About what the server stores for the room: both documents, as this page
+// has them. Recounted at most once a second while they change.
+function useRoomBytes(docs: Y.Doc[]) {
+  const [bytes, setBytes] = useState(0);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const count = () => {
+      timer = null;
+      setBytes(docs.reduce((sum, doc) => sum + Y.encodeStateAsUpdate(doc).byteLength, 0));
+    };
+    const changed = () => {
+      timer ??= setTimeout(count, 1000);
+    };
+    count();
+    docs.forEach((doc) => doc.on("update", changed));
+    return () => {
+      if (timer) clearTimeout(timer);
+      docs.forEach((doc) => doc.off("update", changed));
+    };
+  }, docs);
+  return bytes;
+}
+
 // Who's in the room, as the server says. The host also gets the room's
 // controls: a new code, the lock, and removing someone.
 function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnType<typeof useRoom>; onClose: () => void }) {
@@ -639,6 +681,7 @@ function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnTy
   const host = access.member.host;
   const online = new Set(room.participants.map((participant) => participant.memberId));
   const present = room.members.filter((member) => !member.removed);
+  const bytes = useRoomBytes([room.doc, room.control]);
 
   async function act(action: () => Promise<unknown>) {
     setError(null);
@@ -674,6 +717,7 @@ function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnTy
         <p>{boardFate(room.keep)}</p>
         {host && <button onClick={() => changeKeep(!room.keep)}>{room.keep ? "Stop keeping it" : "Keep it"}</button>}
       </div>
+      {room.limitBytes && <p className="board-size">{room.full ? "Full: it holds" : "It holds"} {megabytes(bytes)} of the {megabytes(room.limitBytes)} a room can.</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
         {present.map((member) => (
@@ -697,12 +741,12 @@ function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnTy
 // Shut out of a room: removed by the host, or the room ended and the server
 // didn't keep its board.
 function RoomClosed({ reason }: { reason: string }) {
-  const ended = reason === "room-ended";
+  const ended = reason === "room-ended" || reason === "board-pruned";
   return (
     <main className="landing">
       <section className="entry-card">
         <h2>{ended ? "This room has ended" : reason === "removed" ? "The host removed you from this room" : "You're no longer in this room"}</h2>
-        <p>{ended ? "The server doesn't keep this board." : reason === "removed" ? "You can't open it again unless they invite you back." : "The host removed you, or the room has ended."}</p>
+        <p>{reason === "board-pruned" ? "The server deleted this board to make space." : ended ? "The server doesn't keep this board." : reason === "removed" ? "You can't open it again unless they invite you back." : "The host removed you, or the room has ended."}</p>
         <button className="primary" onClick={() => location.assign(location.pathname)}>Back to start</button>
       </section>
     </main>
@@ -722,11 +766,30 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
   const [preview, setPreview] = useState<{ url: string; revision: number } | null>(null);
   const store = useQuickdrawStore();
   const room = useRoom(access);
-  // An ended room that keeps its board can still be looked at; the server
-  // refuses writes, so the page doesn't offer them.
-  const readOnly = room.state === "ended" && !facilitator;
+  // An ended room that keeps its board can still be looked at, and a full
+  // one by everyone; the server refuses writes, so the page doesn't offer them.
+  const readOnly = room.full
+    ? "This board is full: you can look, but nothing more fits."
+    : room.state === "ended" && !facilitator ? "The room has ended: you can look, but not change anything." : null;
+  const [notice, setNotice] = useState<string | null>(null);
+  // Refuse an image that wouldn't fit before it reaches the server, which
+  // would turn the whole room read-only (docs/adr/0003, amendment).
+  const limit = useRef<BoardLimit>({ limitBytes: null, bytesUsed: () => 0, onTooBig: () => {} });
+  limit.current = {
+    limitBytes: room.limitBytes,
+    bytesUsed: () => Y.encodeStateAsUpdate(room.doc).byteLength + Y.encodeStateAsUpdate(room.control).byteLength,
+    onTooBig: (bytes) => {
+      const left = Math.max(0, (room.limitBytes ?? 0) - limit.current.bytesUsed());
+      setNotice(`That image (${megabytes(bytes)}) doesn't fit: this room holds ${megabytes(room.limitBytes ?? 0)} and has about ${megabytes(left)} left.`);
+    },
+  };
+  useBoardSync(room.doc, store, limit);
 
-  useBoardSync(room.doc, store);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   function stageSelected() {
     const records = selected.map((id) => store.get(id)).filter((record): record is ShapeRecord => record?.typeName === "shape");
@@ -771,12 +834,12 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
         <button className="share" onClick={copyRoomLink}>{copied ? "Copied" : "Share room"}</button>
       </header>
 
-      <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} />
+      {room.full ? <FullBanner limitBytes={room.limitBytes} /> : <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} />}
       <main className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
-        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} onSelection={setSelected} onStageSelection={stageSelected} />}
-        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
+        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} />}
+        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} full={room.full} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
-        {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly} onAdd={(text) => addPrompt(room.doc, room.prompts, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
+        {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.prompts, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {people && <PeoplePanel access={access} room={room} onClose={() => setPeople(false)} />}
       </main>
     </div>
@@ -827,7 +890,8 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
     );
   }
   const facilitator = state.access.member.host;
-  if (!facilitator && state.access.room.state === "ended" && !state.access.room.keep) return <RoomClosed reason="room-ended" />;
+  const { room: entered } = state.access;
+  if (!facilitator && entered.state === "ended" && (!entered.keep || entered.pruned)) return <RoomClosed reason={entered.pruned ? "board-pruned" : "room-ended"} />;
   const storedConfig = facilitator ? savedHostConfig() : null;
   const { githubToken, pushLost } = state;
   // A host who meant to push (a repository, or a token that has since

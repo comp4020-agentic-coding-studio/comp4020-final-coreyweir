@@ -57,7 +57,8 @@
     "test:audit-log": "node --test --test-force-exit scripts/audit-log.test.mjs",
     "test:rooms": "node --test --test-force-exit scripts/rooms.test.mjs",
     "test:rooms-browser": "node scripts/rooms-browser-smoke.mjs",
-    "test:lifecycle-browser": "node scripts/lifecycle-browser-smoke.mjs"
+    "test:lifecycle-browser": "node scripts/lifecycle-browser-smoke.mjs",
+    "test:limits-browser": "node scripts/limits-browser-smoke.mjs"
   },
   "dependencies": {
     "@hocuspocus/provider": "^4.7.0",

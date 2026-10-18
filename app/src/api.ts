@@ -4,8 +4,21 @@
 
 // `keep`: whether the server keeps the board after the room ends. `state`
 // and `endsAt` follow the host: away rooms end at `endsAt` (docs/adr/0003).
+// A room holds `limitBytes`; once a write would cross it the room is `full`
+// and read-only for good. `pruned`: the server deleted an ended board to
+// make space.
 export type RoomState = "live" | "away" | "ended";
-export type RoomInfo = { id: string; code: string; locked: boolean; keep: boolean; state: RoomState; endsAt: number | null };
+export type RoomInfo = {
+  id: string;
+  code: string;
+  locked: boolean;
+  keep: boolean;
+  state: RoomState;
+  endsAt: number | null;
+  limitBytes: number | null;
+  full: boolean;
+  pruned: boolean;
+};
 // previewKey goes in the preview relay's path: the participant's iframe
 // can't send the secret, so the relay checks this instead.
 export type MemberInfo = { id: number; name: string; host: boolean; previewKey: string; secret?: string };
