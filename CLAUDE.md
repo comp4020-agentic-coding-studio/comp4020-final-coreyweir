@@ -36,7 +36,7 @@ an item, and update it when the item lands.
 
 1. **Port** (done, `c8792b8..7af9c15`): the existing Riff deployed on fly,
    with server-side persistence.
-2. **Assess and plan** (done, ADRs 0001–0006 and `PLAN.md`): measure Riff
+2. **Assess and plan** (done, ADRs 0001–0006 and `PLAN.md`; later ADRs come with the work): measure Riff
    against the brief and the README, and settle priorities and
    architecture. Decisions are recorded as ADRs in `docs/adr/`, with the
    options, the choice and its cost.
@@ -159,6 +159,12 @@ same commit. Each README quality turns into what it means for a change:
   wait times out on live while passing on dev.
 - Type-check the client with `npm run typecheck` (`tsc -b`). `tsc -p .`
   checks nothing, because the root tsconfig only holds references.
+- **No real credential goes into the guest** (its environment, files or
+  launcher), whatever is convenient. The guest gets a placeholder from
+  `app/src/credentials.ts` and `app/public/riff-sw.js` swaps it in on the
+  way out, for that credential's origins only (`docs/adr/0007`). Nodepod
+  must keep booting with `swUrl: "/riff-sw.js"`, and a new credential needs
+  its own origins. `npm run test:credentials-browser` checks it.
 - Preview relaying routes on path prefixes (`/room-preview/`,
   `/preview-control/`). fly.dev can't do wildcard subdomains, so keep it that
   way.

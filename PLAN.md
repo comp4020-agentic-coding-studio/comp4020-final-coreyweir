@@ -38,6 +38,7 @@ README, PROCESS.md and the reflections are mine to write.
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
 | [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes (`389ffff`, `4acb32b`; push token in the client 18 Oct) |
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
+| [0007](docs/adr/0007-credentials-stay-in-the-tab.md) | The host's tokens stay in the page; the guest holds placeholders, swapped by our service worker (P1.6) | Yes (18 Oct) |
 
 ## Work, in order
 
@@ -48,7 +49,7 @@ README, PROCESS.md and the reflections are mine to write.
 ### P1: before crit 10 (19 Oct)
 
 Left, in order (18 Oct): ~~the push token on the client (3)~~, ~~Load leaving
-the queue with `queue.send` (5)~~, the API proxy (6), then deleting
+the queue with `queue.send` (5)~~, ~~the API proxy (6)~~, then deleting
 `/data/yjs` and the old `riff-*` rows.
 
 1. ~~**Fix the client build.**~~ Done. The forks are packed archives in
@@ -298,15 +299,24 @@ the queue with `queue.send` (5)~~, the API proxy (6), then deleting
        sign-in), and the log (read with `flyctl logs`).
    - Old `riff-<code>` documents aren't migrated. Their links get a "this
      room predates sign-in" page.
-6. **API proxy, so no secrets reach the guest.** Today the model token and
-   GitHub token are in the guest's environment (`claudePod.ts:371-377`,
-   `:603`), so `env` shows them live to the room.
-   - Model it on the curl path. The net gateway already terminates guest TLS
-     inside the tab, using a CA the browser generates (`netGatewayBrowser.ts`; design
-     notes in `collab_riff/nodepod_wasix_fs_research/archive/completed-investigations/CURL_VIRTUAL_NET_GATEWAY.md`). So the tab can add the real credential
-     to requests for the model API and GitHub.
-   - The guest holds only a placeholder. Don't add the credential inside
-     the guest (as in `nodepod_poc`'s `run.cjs`), where Claude can read it.
+6. ~~**API proxy, so no secrets reach the guest.**~~ Done 18 Oct, ADR 0007.
+   The model token and GitHub token were in the guest's environment, so
+   `env` showed them live to the room.
+   - ~~Model it on the curl path.~~ Measured otherwise: Claude's model calls
+     and Nodepod's `git` are the browser's `fetch` from Nodepod's workers,
+     and only WASIX programs use the gateway. So the swap is in a service
+     worker (`app/public/riff-sw.js`, wrapping Nodepod's `/__sw__.js`),
+     which sees both.
+   - The guest holds only a placeholder, new each boot. The real values
+     stay in the host's page (`app/src/credentials.ts`) and only go to
+     their own origins.
+   - Built: `app/public/riff-sw.js`, `app/src/credentials.ts`, `claudePod.ts`
+     (placeholders in both environments, `swUrl`). Checked by
+     `npm run test:credentials-browser` (dev; two mutations red) and by
+     running Claude Code against a mock endpoint, which received the real
+     token and streamed its reply to the terminal.
+   - Left: run the smoke against live (`ECHO_BASE=https://httpbin.org`), and
+     a real model call and a real push from a room on live.
 
 ### P2: toward A3
 

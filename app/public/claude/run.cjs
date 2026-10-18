@@ -483,9 +483,11 @@ require('./shim.cjs');
     // ignore
   }
 
-  // Anthropic/LiteLLM guest interceptor (better than a page SW here: Claude's
-  // outbound calls run in Nodepod process workers, where a host SW is unreliable
-  // and would fight Nodepod's own /__sw__.js).
+  // Anthropic/LiteLLM guest interceptor. It runs in the guest, so it must
+  // never hold a credential: the guest only has placeholders, and the page's
+  // service worker (public/riff-sw.js, wrapping Nodepod's /__sw__.js) swaps
+  // the real token in. That worker does see these process workers' requests
+  // (measured 2026-10-18, scripts/credentials-browser-smoke.mjs).
   //
   // 1) Stub /api/hello — LiteLLM doesn't implement Anthropic's warmup/preflight
   //    route; the fire-and-forget HEAD can sit on a ~10s AbortSignal timeout.

@@ -112,8 +112,8 @@ app is pending; pulling from org repos already works.
   calling unwrap with the host's cookie. Storing plaintext would have handed
   it the token directly. The host's preview frame is such code: Claude
   writes it, and it isn't sandboxed (`App.tsx:214`). That risk is accepted
-  for now; it's in PLAN.md's open questions. The token also reaches the
-  guest's environment until the API proxy (PLAN P1.6) keeps it out.
+  for now; it's in PLAN.md's open questions. The token no longer reaches
+  the guest's environment (ADR 0007, 2026-10-18).
 - **Old rooms aren't migrated.** Links to `riff-<code>` documents get a
   "this room predates sign-in" page.
 - **Two flows until the web flow covers pushing.** Then the device flow and

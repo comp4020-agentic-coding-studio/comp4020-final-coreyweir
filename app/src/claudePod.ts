@@ -15,6 +15,7 @@ import { SIGINT, WASIX_SESSION_CONTROL_DIR, WasixSession, type WasixSessionComma
 import { attachNetGatewayBrowser, type NetGatewayBrowserHandle } from "./netGatewayBrowser";
 import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
+import { credentialFor, GITHUB_ORIGINS, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
 import bridgeStubUrl from "./assets/wasmer/bridge-stub.wasm?url";
@@ -190,6 +191,11 @@ export class ClaudePodController {
   private wasmerProvider: Promise<WasmerCommandProvider> | null = null;
   private wasixSession: WasixSession | null = null;
   private netGateway: NetGatewayBrowserHandle | null = null;
+  // The guest only ever sees these placeholders; the real values stay in
+  // this page and public/riff-sw.js swaps them in (docs/adr/0007).
+  private modelCredential: Credential | null = null;
+  private githubCredential: Credential | null = null;
+  private stopServingCredentials: (() => void) | null = null;
   private wasixShell: Promise<unknown> | null = null;
   /** Exec id of the interactive shell, so Ctrl-C can target it alone. */
   private wasixShellExecId: number | null = null;
@@ -366,16 +372,23 @@ export class ClaudePodController {
       NODEPOD_EXTERNAL_COMMANDS: "wasm-fs-probe:python:bash",
       ANTHROPIC_BASE_URL: this.config.baseUrl,
     };
-    if (new URL(this.config.baseUrl).hostname === "api.anthropic.com") env.ANTHROPIC_API_KEY = this.config.token;
-    else env.ANTHROPIC_AUTH_TOKEN = this.config.token;
-    if (this.config.githubToken) {
-      env.GITHUB_TOKEN = this.config.githubToken;
-      env.GH_TOKEN = this.config.githubToken;
+    const model = credentialFor("model", this.config.token, [new URL(this.config.baseUrl).origin]);
+    const github = this.config.githubToken ? credentialFor("github", this.config.githubToken, GITHUB_ORIGINS) : null;
+    this.modelCredential = model;
+    this.githubCredential = github;
+    this.stopServingCredentials = serveCredentials(github ? [model, github] : [model]);
+    if (new URL(this.config.baseUrl).hostname === "api.anthropic.com") env.ANTHROPIC_API_KEY = model.placeholder;
+    else env.ANTHROPIC_AUTH_TOKEN = model.placeholder;
+    if (github) {
+      env.GITHUB_TOKEN = github.placeholder;
+      env.GH_TOKEN = github.placeholder;
     }
 
     this.report("Booting browser workspace");
     this.pod = await Nodepod.boot({
       serviceWorker: true,
+      // Nodepod's worker plus the credential swap (public/riff-sw.js).
+      swUrl: "/riff-sw.js",
       workerUrl: NODEPOD_WORKER_URL,
       workdir: "/work/repo",
       files: {
@@ -591,10 +604,10 @@ export class ClaudePodController {
       // server. The subsequent browser fetch performs real-origin TLS checks.
       CURL_CA_BUNDLE: "/work/repo/.wasix-session/ca.pem",
       // Bridged processes inherit the guest env verbatim (ProcessContext
-      // env is replace-not-merge), so auth tokens must ride the session
-      // env for `git push` et al to work. Same pair Claude mode sets.
-      ...(this.config.githubToken
-        ? { GITHUB_TOKEN: this.config.githubToken, GH_TOKEN: this.config.githubToken }
+      // env is replace-not-merge), so the GitHub placeholder must ride the
+      // session env for `git push` et al to work. Same pair Claude mode sets.
+      ...(this.githubCredential
+        ? { GITHUB_TOKEN: this.githubCredential.placeholder, GH_TOKEN: this.githubCredential.placeholder }
         : {}),
       ...bridge.pipeEnv,
       // Prepend the bridge stub dir to the WASIX runtime default PATH
@@ -939,5 +952,9 @@ export class ClaudePodController {
     if (wasmerProvider) await (await wasmerProvider).dispose();
     this.pod?.teardown();
     this.pod = null;
+    this.stopServingCredentials?.();
+    this.stopServingCredentials = null;
+    this.modelCredential = null;
+    this.githubCredential = null;
   }
 }

@@ -28,10 +28,23 @@ mise exec -- npx vite --host 127.0.0.1 --port 8093 --strictPort
 or a pasted token (which must belong to the signed-in user). The server
 seals the token with a key from the session and the browser keeps only the
 ciphertext (`riff-github-push` in localStorage); the host's page opens it
-at room start (`POST /api/github/token/unwrap`) and passes it to the pod as
-`GITHUB_TOKEN` and `GH_TOKEN`. Signing out or the session ending makes the
-stored copy useless, and the room tells the host before Claude starts
-without it. `npm run test:github-push-browser` checks the page's side.
+at room start (`POST /api/github/token/unwrap`). Signing out or the session
+ending makes the stored copy useless, and the room tells the host before
+Claude starts without it. `npm run test:github-push-browser` checks the
+page's side.
+
+### Credentials stay in the page
+
+Neither the model token nor the GitHub token enters the guest
+(`docs/adr/0007` at the repo root). The pod's `ANTHROPIC_AUTH_TOKEN` (or
+`ANTHROPIC_API_KEY`), `GITHUB_TOKEN` and `GH_TOKEN` hold placeholders
+(`riff-placeholder-<kind>-<hex>`, new each boot). Nodepod boots with
+`public/riff-sw.js` as its service worker, which wraps Nodepod's own
+`/__sw__.js`: a request carrying a placeholder gets the real value from the
+host's page (`src/credentials.ts`), only if it is going to that
+credential's own origins (the model endpoint; `api.github.com`,
+`github.com`, `uploads.github.com`), and streams the reply back.
+`npm run test:credentials-browser` (dev server) checks it end to end.
 
 ## Implemented
 
@@ -47,6 +60,7 @@ without it. `npm run test:github-push-browser` checks the page's side.
 - Facilitator-owned interactive Claude Code terminal running in browser Nodepod
 - Live read-only xterm output for participants with periodic recovery checkpoints
 - GitHub sign-in (web flow); a push token, OAuth or pasted, sealed by the server for the host's browser
+- Model and GitHub tokens kept out of the guest: placeholders in its environment, swapped by the page's service worker
 
 ## Intentional boundaries
 
@@ -82,6 +96,7 @@ npm run test:collaboration
 npm run test:audit-log             # the who-did-what log, read back from SQLite
 npm run test:terminal-relay
 npm run test:github-push-browser   # needs the dev server
+npm run test:credentials-browser   # needs the dev server; ECHO_BASE=https://httpbin.org against live
 npm run test:claude-bundle
 ```
 

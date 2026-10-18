@@ -94,6 +94,8 @@ The durable record of what happened lives elsewhere, and is safer:
   guest. The guest gets a placeholder, and the real credential is added
   outside the guest, beyond anything Claude or bash can read. With that in
   place, the two worst secrets can't reach the terminal at all.
+  **Done 2026-10-18 (ADR 0007):** the guest holds placeholders and the
+  page's service worker adds the real values.
 - **A tradeoff against the README.** "Information durability" doesn't cover
   the terminal, and CLAUDE.md now says so, so the rule against server-memory
   state doesn't get "fixed" by a future agent.
