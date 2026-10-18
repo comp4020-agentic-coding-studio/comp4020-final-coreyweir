@@ -14,12 +14,17 @@ const image = (bytes: number) => "data:image/jpeg;base64," + randomBytes(Math.fl
 
 const me = async (who: Member) => (await (await api(baseUrl, `/api/rooms/${who.roomId}/me`, { secret: who.secret })).json()).room;
 
-// A write either comes back acknowledged or refused; register both first,
-// since the answer can arrive before the next line runs.
+// A write either comes back acknowledged or refused. Write first: saved()
+// resolves at once while nothing is unsynced, and the provider counts the
+// write synchronously, while the server's answer can't arrive before the
+// next await.
 async function outcome(session: Session, write: () => void): Promise<"saved" | "refused"> {
+  write();
   const refused = session.refused().then(() => "refused" as const);
   const saved = session.saved().then(() => "saved" as const);
-  write();
+  // the loser times out later; that isn't a failure of this test
+  refused.catch(() => {});
+  saved.catch(() => {});
   return Promise.race([refused, saved]);
 }
 
