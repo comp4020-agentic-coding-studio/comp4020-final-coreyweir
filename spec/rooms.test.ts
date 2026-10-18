@@ -76,6 +76,10 @@ describe("a room that has ended", () => {
     const guest = await joinRoom(baseUrl, host.code);
     const watch = await watchRooms(baseUrl, [{ roomId: guest.roomId, secret: guest.secret }]);
     const open = await openPart(baseUrl, guest, "shared");
+    // A second socket that doesn't try to write while the room is ended. The
+    // first one can't show the revival: its refused write is never acked, so
+    // it stays unsynced, and its later edits build on what the server lacks.
+    const idle = await openPart(baseUrl, guest, "shared");
     try {
       await watch.until((list) => list.rooms.length === 1);
       open.doc.getText("prompt").insert(0, "before it ended");
@@ -102,18 +106,24 @@ describe("a room that has ended", () => {
         later.leave();
       }
 
-      // the host opening the room revives it, and the open socket can write again
+      // the host opening the room revives it, and a socket already open can write again
       const hostSession = await openPart(baseUrl, host, "shared");
       try {
         await watch.until((list) => list.rooms.length === 1, 3_000);
-        open.doc.getText("prompt").delete(0, open.doc.getText("prompt").length);
-        open.doc.getText("prompt").insert(0, "after the revival");
-        await open.saved();
+        idle.doc.getText("after").insert(0, "after the revival");
+        await idle.saved();
       } finally {
         hostSession.leave();
       }
+      const reread = await openPart(baseUrl, guest, "shared");
+      try {
+        expect(reread.doc.getText("after").toString()).toBe("after the revival");
+      } finally {
+        reread.leave();
+      }
     } finally {
       open.leave();
+      idle.leave();
       watch.close();
     }
   }, 45_000);
