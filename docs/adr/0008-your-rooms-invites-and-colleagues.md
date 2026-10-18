@@ -110,8 +110,10 @@ working out diffs.
 ### Log
 
 `invite.add`, `invite.cancel`, `invite.accept`, `invite.decline` with the
-invited account's id, `room.away`, `room.end`, `room.revive`. Colleague
-changes are personal, not room events, and aren't logged.
+invited account's id, `room.away`, `room.end`, `room.revive`.
+`colleague.add` and `colleague.remove` are logged too, as user events with
+no room (like sign-in): the user and the colleague's login and id. Like
+every event they go after 90 days; the list itself doesn't.
 
 ## Consequences
 

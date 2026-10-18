@@ -84,10 +84,73 @@ export async function joinRoom(baseUrl: string, code: string, name = uniqueName(
   return member(await api(baseUrl, "/api/rooms/join", { body: { code, name } }), `joining ${code}`);
 }
 
-export function collaborationUrl(baseUrl: string) {
-  const url = new URL("/collaboration", baseUrl);
+export function socketUrl(baseUrl: string, path: string) {
+  const url = new URL(path, baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.href;
+}
+
+export const collaborationUrl = (baseUrl: string) => socketUrl(baseUrl, "/collaboration");
+
+// "Your rooms" (ADR 0008), live: `/api/rooms/watch` takes a hello with the
+// member secrets this browser holds (and the session cookie, if signed in),
+// then sends the whole list on connect and again whenever it changes.
+export type ListedRoom = {
+  id: string;
+  code: string;
+  role: "host" | "participant";
+  state: "live" | "away";
+  hostName: string;
+};
+
+export type RoomList = { rooms: ListedRoom[]; invites: unknown[] };
+
+export type Watch = {
+  latest: () => RoomList | null;
+  // resolves with the first list (already received or still to come) that
+  // passes `check`
+  until: (check: (list: RoomList) => boolean, timeoutMs?: number) => Promise<RoomList>;
+  close: () => void;
+};
+
+export function watchRooms(
+  baseUrl: string,
+  secrets: Array<{ roomId: string; secret: string }>,
+  options: { cookie?: string } = {},
+): Promise<Watch> {
+  return new Promise((resolve, reject) => {
+    const headers: Record<string, string> = options.cookie ? { cookie: options.cookie } : {};
+    const ws = new WebSocket(socketUrl(baseUrl, "/api/rooms/watch"), { origin: originOf(baseUrl), headers });
+    let latest: RoomList | null = null;
+    const waiting = new Set<() => void>();
+    const timer = setTimeout(() => reject(new Error("the watch never sent a list")), 10_000);
+    const until = (check: (list: RoomList) => boolean, timeoutMs = 5_000) =>
+      new Promise<RoomList>((done, fail) => {
+        const attempt = () => {
+          if (!latest || !check(latest)) return false;
+          waiting.delete(attempt);
+          clearTimeout(giveUp);
+          done(latest);
+          return true;
+        };
+        const giveUp = setTimeout(() => {
+          waiting.delete(attempt);
+          fail(new Error(`the room list never matched; last: ${JSON.stringify(latest)}`));
+        }, timeoutMs);
+        if (!attempt()) waiting.add(attempt);
+      });
+    ws.on("open", () => ws.send(JSON.stringify({ type: "hello", secrets })));
+    ws.on("message", (raw: RawData) => {
+      const message = JSON.parse(new TextDecoder().decode(toBytes(raw)));
+      if (message.type !== "rooms") return;
+      latest = { rooms: message.rooms, invites: message.invites };
+      for (const attempt of [...waiting]) attempt();
+      clearTimeout(timer);
+      resolve({ latest: () => latest, until, close: () => ws.close() });
+    });
+    ws.on("unexpected-response", (_req, res) => reject(new Error(`watch refused: ${res.statusCode}`)));
+    ws.on("error", reject);
+  });
 }
 
 // A session on one document. `saved()` resolves once the server has
@@ -195,9 +258,9 @@ export const openPart = (baseUrl: string, who: Member, part: Part) =>
 
 // What happens at the HTTP upgrade itself, before Hocuspocus: the status the
 // server answered with, or 101 if it accepted the socket.
-export function upgradeStatus(baseUrl: string, origin: string | null): Promise<number> {
+export function upgradeStatus(baseUrl: string, origin: string | null, path = "/collaboration"): Promise<number> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(collaborationUrl(baseUrl), origin ? { origin } : {});
+    const ws = new WebSocket(socketUrl(baseUrl, path), origin ? { origin } : {});
     const timer = setTimeout(() => {
       ws.terminate();
       reject(new Error("the server never answered the upgrade"));
