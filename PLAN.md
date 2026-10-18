@@ -37,7 +37,7 @@ README, PROCESS.md and the reflections are mine to write.
 | [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import | No |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
 | [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes, except the client's use of the push token (`389ffff`, `4acb32b`) |
-| [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision | Yes, except queue proposals (`389ffff`, `4acb32b`, `f78b367`) |
+| [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
 
 ## Work, in order
 
@@ -46,6 +46,10 @@ README, PROCESS.md and the reflections are mine to write.
 - [ ] PROCESS.md update and `reflections/crit-9.md` (mine).
 
 ### P1: before crit 10 (19 Oct)
+
+Left, in order (18 Oct): the push token on the client (3), Load leaving
+the queue with `queue.send` (5), the API proxy (6), then deleting
+`/data/yjs` and the old `riff-*` rows.
 
 1. ~~**Fix the client build.**~~ Done. The forks are packed archives in
    `app/vendor/` (`wasmer-sdk-0.10.0-riff.e56540d`,
@@ -65,9 +69,8 @@ README, PROCESS.md and the reflections are mine to write.
      place of Mithic's `/bin/bash` never fired. Nodepod checks exact external
      commands before PATH, for sync spawns too. Boot no longer fetches its
      604 KB. Its two smokes went with it.
-     - Unmeasured since: a dev server Claude starts with a wrapped
-       `pnpm run dev` staying up under WASIX bash (the Mithic smoke was the
-       only check). Test it before a crit relies on a Claude-started preview.
+     - ~~Unmeasured since: a dev server Claude starts with a wrapped
+       `pnpm run dev` staying up under WASIX bash.~~ Fine in use (18 Oct).
      - Hypothesis: `execFileSync("/bin/bash", ["--version"])` fails with
        "not found" in the pod, Mithic or not. Claude's shell probe uses the
        async path, so it doesn't bite today.
@@ -106,8 +109,9 @@ README, PROCESS.md and the reflections are mine to write.
    client); the ADR's "Implementation" section has the differences.
    - Left: the host page reading the sealed push token (`#push=…`) and
      "Connect GitHub for pushing" in host setup; then the device flow goes.
-   - Left: sign in with a real GitHub account on the live site and check
-     the session, `/api/me`, a GitHub member's badge, and sign-out.
+   - ~~Left: sign in with a real GitHub account on the live site and check
+     the session, `/api/me`, a GitHub member's badge, and sign-out.~~ Done
+     by hand on live, 18 Oct.
 
    Design agreed 12 Oct:
    - ~~Device flow on our own OAuth app first~~ (`43f34f6`): client id
@@ -159,13 +163,18 @@ README, PROCESS.md and the reflections are mine to write.
    and two browser profiles at 1920×1080 and 390×844 through join, a
    refused duplicate name, staging, queueing, the People panel, a new code,
    a reload, and removal (shut out in about 20 ms).
-   - Left: participants proposing to the queue (stateless message).
+   - ~~Left: participants proposing to the queue (stateless message).~~
+     Dropped 18 Oct (ADR 0006 "Amendment"): with automatic release it would
+     let a participant's prompt reach Claude unapproved. Staging is the
+     proposal; the host's Queue is the approval.
    - ~~Left: gate the preview's HTTP side (`/room-preview/<id>/…`) to
      members.~~ Done 18 Oct: a per-member key in the path (HMAC, nothing
      stored), as a stop-gap until the separate-origin question is settled.
      Options and cost in ADR 0006's "Implementation".
-   - Left: a "this room predates sign-in" page for old `riff-<code>` links
-     (today they reach the join form and "no live room").
+   - ~~Left: a "this room predates sign-in" page for old `riff-<code>`
+     links.~~ Dropped 18 Oct: nobody is using those rooms (crit-day tests
+     and spec runs), and an old link already reaches the join form and
+     "no live room", which is true. Their rows go with `/data/yjs`.
    - ~~The browser smokes that drive a room haven't been run since.~~
      `terminal-browser-smoke.mjs` now hosts through the landing page and
      joins from the share link alone; it passes on dev and live (18 Oct).
@@ -230,8 +239,10 @@ README, PROCESS.md and the reflections are mine to write.
    records so far is listed in ADR 0006's "Implementation". Since 18 Oct it
    also logs connect and disconnect, and staged and queued prompts added
    and deleted, with who, read on dev and live. Left: end (with ADR 0003),
-   queue release (with ADR 0004; Load never reaches the server today), a
-   rehearsal of crit 10's narration from `flyctl logs`.
+   a rehearsal of crit 10's narration from `flyctl logs`.
+   - Left (next): Load takes the prompt out of the queue and the log says
+     `queue.send`, so a sent prompt is told apart from a removed one. Today
+     Load only types into the host's terminal and the prompt stays queued.
 
    Plan as agreed: `events(seq, at, room_id, member_id, action,
    detail_json)`. `detail_json` is a flat object of scalars (ids, counts,
@@ -284,18 +295,11 @@ README, PROCESS.md and the reflections are mine to write.
      the guest (as in `nodepod_poc`'s `run.cjs`), where Claude can read it.
 
 ### P2: toward A3
-- **Room lifecycle** (ADR 0003):
-  - room records: state, the host's last-seen time, and a permanent id
-    beside the join code;
-  - a grace timer that survives restarts;
-  - the "host away" and "ended" banners;
-  - read-only connections for kept ended rooms, refused ones for not-kept;
-  - pruning (oldest opened first, past a volume threshold) and a per-room
-    size cap.
-- **Local copies:**
-  - file y-indexeddb copies under the permanent id;
-  - "Rooms you hosted" and "Boards you've been in" lists, with delete;
-  - copies never pushed back to an ended room, except the host reviving it.
+
+In this order (agreed 18 Oct): room list and invites, room lifecycle, board
+export and import, OPFS and workspace export, the terminal redeploy gap.
+The rest after.
+
 - **Room list:**
   - live rooms you can join, plus rooms you hosted, and whether this
     browser still has their workspace in OPFS;
@@ -306,9 +310,19 @@ README, PROCESS.md and the reflections are mine to write.
     accounts, they've been invited");
   - invites last only as long as the room;
   - "colleagues" means people you've been in a room with.
-- **OPFS workspace.**
-  - The host's filesystem survives a reload or crash, one workspace per repo.
-  - Check: reload mid-task, and unpushed edits are still there.
+- **Room lifecycle** (ADR 0003):
+  - ~~room records: state, the host's last-seen time, and a permanent id
+    beside the join code~~ (the columns exist since P1.4; nothing sets
+    `state` or `host_last_seen` yet);
+  - a grace timer that survives restarts;
+  - the "host away" and "ended" banners;
+  - read-only connections for kept ended rooms, refused ones for not-kept;
+  - pruning (oldest opened first, past a volume threshold) and a per-room
+    size cap.
+- **Local copies:**
+  - file y-indexeddb copies under the permanent id;
+  - "Rooms you hosted" and "Boards you've been in" lists, with delete;
+  - copies never pushed back to an ended room, except the host reviving it.
 - **Export:**
   - Room file: quickdraw `getSnapshot()` JSON with images as they are, plus
     the prompts and metadata. Optionally a PNG via `exportImage()`.
@@ -320,6 +334,9 @@ README, PROCESS.md and the reflections are mine to write.
   - If time allows: check each image decodes, matches its type
     (PNG, JPEG, WebP or GIF, no SVG) and fits within 2048px.
   - Transcripts: allowed, with warnings on both export and import.
+- **OPFS workspace.**
+  - The host's filesystem survives a reload or crash, one workspace per repo.
+  - Check: reload mid-task, and unpushed edits are still there.
 - **Queue release** (ADR 0004):
   - Send submits with newlines intact; an auto toggle, visible to the room.
   - Planned mechanism: a Claude Code mod. That needs the bundle upgraded
@@ -346,15 +363,18 @@ README, PROCESS.md and the reflections are mine to write.
 ## Still open
 
 - **The host's preview runs Claude-written code on our origin, unsandboxed**
+  (to revisit after the first P2 items)
   (`App.tsx:214`; participants' frames are sandboxed without
   `allow-same-origin`). It can read localStorage and call `/api` with the
   host's cookie. Accepted for now: the alternative routes the host's own
   preview through the server and back. Revisit with the guest-preview
   subdomain question.
 - **Phone hosts and the 5-minute grace.** Android suspends background tabs,
-  so test on the Pixel before settling on 5 minutes.
-- **The course org's OAuth app restriction.** Being tested with the device
-  flow on our own app (P1.3); the convenor decides on approval.
+  and how soon may vary by device and settings. Worth measuring on the
+  Pixel before settling on 5 minutes; not urgent.
+- **The course org's OAuth app restriction.** Still unapproved (18 Oct),
+  and not blocking: course-org repos can be pulled, and any other repo
+  pushed. Good enough.
 - ~~**Who may view a kept, ended board.**~~ The host and its members (P1.4).
 - ~~**How Claude Code reaches the build** (P1.1).~~ It doesn't: the browser derives it.
 - ~~**Build the client in the Docker image**, or keep committing `app/dist/`.~~ Built in the image.

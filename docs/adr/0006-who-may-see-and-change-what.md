@@ -1,6 +1,7 @@
 # 6. Who may see and change what, and the log of who did
 
-- Status: accepted, implemented 2026-10-12 except queue proposals (see "Implementation" below)
+- Status: accepted, implemented 2026-10-12; amended 2026-10-18 (participants
+  don't queue, see "Amendment" below)
 - Date: 2026-10-12
 
 ## Context
@@ -55,8 +56,7 @@ It can't permit some keys of a document and refuse others.
 |---|---|---|---|
 | Board | `room/<id>/shared` | write | write |
 | Staged prompts: write, edit, delete | `room/<id>/shared` | write | write |
-| Queue: order, Send, remove | `room/<id>/control` | write | read |
-| Proposing a prompt for the queue | stateless message, server checks | yes | yes |
+| Queue: add, order, Send, remove | `room/<id>/control` | write | read |
 | Settings: auto release, keep the board | `room/<id>/control` | write | read |
 | Preview state | `room/<id>/control` | write | read |
 | Member list (names, GitHub logins, verified) | `room/<id>/control`, written by the server | read | read |
@@ -65,6 +65,9 @@ It can't permit some keys of a document and refuse others.
 
 - **Staged prompts are shared work.** Anyone in the room may edit or delete
   any draft, as in a shared doc. The log shows who did.
+- **Staging is how a participant proposes; the host queueing is the
+  approval.** Only the host moves a prompt into the queue, and only the queue
+  reaches Claude.
 - **The member list is written by the server.** So the "verified GitHub
   user" badge can't be faked by typing a name into awareness.
 - **A participant who writes `control` anyway** (from the console, say) has
@@ -114,7 +117,7 @@ It can't permit some keys of a document and refuse others.
 - **Logged actions:**
   - sign-in and sign-out;
   - room create, join, leave and end;
-  - queue propose, send (host or auto, ADR 0004) and remove;
+  - queue add, send (host or auto, ADR 0004) and remove;
   - settings changes;
   - member remove, code rotate, lock and unlock;
   - host connect and refusals;
@@ -127,9 +130,8 @@ It can't permit some keys of a document and refuse others.
 ## Consequences
 
 - **Moving a prompt into the queue crosses documents.** The prompt leaves
-  `shared` and appears in `control`. A participant proposes; the server
-  checks the proposal and applies it as itself. The host's client does the
-  move directly.
+  `shared` and appears in `control`. Only the host does it, from its own
+  client, which can write both.
 - **Two documents per room,** over one socket (a shared
   `HocuspocusProviderWebsocket`). The client's IndexedDB copy, export and
   import (ADR 0003) handle both.
@@ -170,9 +172,9 @@ control document read-only for anyone but the host; both relays take the
 same credential, and a second host socket replaces the first. Where it
 differs from the plan, or stops short:
 
-- **Participants can't propose to the queue yet.** The stateless proposal
-  isn't built; the Queue button is the host's only. Queueing copies the
-  prompt's text into `control` and deletes it from `shared`.
+- **The Queue button is the host's only.** Queueing copies the prompt's
+  text into `control` and deletes it from `shared`. (The plan also had
+  participants proposing to the queue; that was dropped, see "Amendment".)
 - **The control document also carries the room's code and lock state**,
   written by the server beside the member list, so a rotated code reaches
   every member at once.
@@ -234,3 +236,24 @@ differs from the plan, or stops short:
   resolving, the relays treating anyone as host. The log was read in
   `flyctl logs` after a spec run and a two-browser run.
 
+
+## Amendment (2026-10-18): participants don't queue
+
+The table had a row letting participants propose a prompt for the queue: a
+stateless message the server checks and applies. It was never built, and it
+won't be. All the server could check is that the sender is a member, so a
+"proposal" would really be a participant queueing their own prompt. With
+ADR 0004's automatic release, that means a participant's text is typed into
+the host's Claude with nobody approving it, which is the thing making
+`control` host-only was for. The host's browser holds the model key, the
+GitHub token and the Claude session, so the host decides what reaches it.
+
+The approval flow already exists: staging a prompt is the proposal, the
+host's Queue is the approval, Send is the release. The log names both
+people (`prompt.add` by the participant, `queue.add` by the host, same id).
+A separate "proposed" list would duplicate the staged prompts.
+
+The case against: the host becomes a bottleneck in a busy room. Our answer:
+that's the cost of the host keeping control, and a host who trusts the room
+can queue quickly; a setting that lets everyone queue could come later as
+the host's explicit choice.
