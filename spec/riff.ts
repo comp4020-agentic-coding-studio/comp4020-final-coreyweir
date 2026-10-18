@@ -76,8 +76,10 @@ async function member(res: Response, what: string): Promise<Member> {
   };
 }
 
-export async function createRoom(baseUrl: string, name = uniqueName("host")): Promise<Member> {
-  return member(await api(baseUrl, "/api/rooms", { body: { name } }), "creating a room");
+// `options.keep: false` makes a room whose board the server deletes when it
+// ends (ADR 0003); left out, the server keeps it.
+export async function createRoom(baseUrl: string, name = uniqueName("host"), options: { keep?: boolean } = {}): Promise<Member> {
+  return member(await api(baseUrl, "/api/rooms", { body: { name, ...options } }), "creating a room");
 }
 
 export async function joinRoom(baseUrl: string, code: string, name = uniqueName("guest")): Promise<Member> {
@@ -287,22 +289,30 @@ export function relayHello(
   roomId: string,
   hello: Record<string, unknown>,
   listenMs = 1_000,
+  // runs once the hello is sent; listening goes on for listenMs after it
+  meanwhile: () => Promise<unknown> = async () => {},
 ): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const url = `${collaborationUrl(baseUrl).replace(/\/collaboration$/, "")}/${relay}/${encodeURIComponent(roomId)}`;
     const ws = new WebSocket(url, { origin: originOf(baseUrl) });
     const heard: string[] = [];
-    ws.on("open", () => ws.send(JSON.stringify(hello)));
+    ws.on("open", () => {
+      ws.send(JSON.stringify(hello));
+      meanwhile().then(() => setTimeout(finish, listenMs), reject);
+    });
     ws.on("message", (raw: RawData) => {
       const message = JSON.parse(toBytes(raw).length ? new TextDecoder().decode(toBytes(raw)) : "{}");
       heard.push(message.code ? `${message.type}:${message.code}` : message.type);
     });
     ws.on("close", (code) => heard.push(`closed:${code}`));
     ws.on("error", reject);
-    setTimeout(() => {
+    let done = false;
+    function finish() {
+      if (done) return;
+      done = true;
       ws.terminate();
       resolve(heard);
-    }, listenMs);
+    }
   });
 }
 
