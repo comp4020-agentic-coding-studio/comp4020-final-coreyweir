@@ -1,6 +1,6 @@
 # 8. Your rooms, invites by GitHub username, and colleagues
 
-- Status: accepted, not yet implemented
+- Status: accepted, implemented 2026-10-18 (see Implementation)
 - Date: 2026-10-18
 
 ## Context
@@ -132,6 +132,51 @@ every event they go after 90 days; the list itself doesn't.
 - The signed-in paths can't be checked from `spec/`, which can't sign in
   with GitHub. An in-process test (`app/scripts`) inserts a user and session
   directly, as `test:audit-log` does.
+
+## Implementation (2026-10-18)
+
+- Server (`a0bee0f`, `ef1401f`): tables `invites` (room, GitHub id, login,
+  inviter) and `colleagues` (user, GitHub id, login) in
+  `app/server/store.mjs`; room state and invites in `app/server/rooms.mjs`;
+  the GitHub lookup in `app/server/github.mjs`; colleagues in
+  `app/server/colleagues.mjs`; the watch socket in `app/server/watch.mjs`
+  (session from the cookie, secrets in the hello, the full list again on any
+  change, debounced 50 ms). A room starts **away** and turns live when the
+  host's first socket arrives. Ending flips the open non-host connections to
+  read-only in place, and the terminal relay refuses participants with
+  `room-ended`. The room's state and the time an away room ends also go into
+  the control document, for the lifecycle item's banners.
+- Client (`79a008f`): "Your rooms" on the landing page, invites with Join
+  and Decline (and a name prompt when the name is taken), a Colleagues
+  panel behind the account line, and an invite box in the host's People
+  panel with colleagues and recent co-workers as suggestions and the
+  pending invites below it.
+- A Hocuspocus 4.7.0 bug turned up on the way (`7e6023e`). A server write
+  (a direct connection) unloads the document twice: once at once, once on a
+  timer. The timer checks the document by name, so if a client opened a
+  fresh copy in between, the timer dropped that copy, and the client stayed
+  attached to a document no later server write reached. The host's People
+  panel froze while the browser said "connected". `beforeUnloadDocument`
+  now refuses to unload a copy that is no longer the current one.
+
+Checked:
+
+- `spec/rooms.test.ts` (guests' lists, state, ending and revival, invites
+  refused to non-hosts and bad logins), against dev and live.
+- `npm run test:rooms` (in `app/`): the signed-in paths in-process, with a
+  stub GitHub lookup: an invite reaching only the invitee, the same reply
+  for Riff and non-Riff accounts, accepting past a lock, the grace timer
+  ending a room and dropping its invites, a restart turning live rooms
+  away, colleagues private and logged. Three mutations (invites shown to
+  everyone, a restart keeping the old last-seen time, ending without
+  deleting invites) each turned one test red.
+- `npm run test:collaboration`: the Hocuspocus bug, red before the fix.
+- `npm run test:rooms-browser` (dev only: it writes a signed-in user into
+  the dev database): two browsers, invite by username, accept with a taken
+  name, colleagues, the host leaving, at 1920×1080 and 390×844.
+
+Not checked: a real GitHub account inviting another on live (the lookup is
+stubbed in tests; the live spec covers only the refusals).
 
 ## The case for the options we didn't pick
 

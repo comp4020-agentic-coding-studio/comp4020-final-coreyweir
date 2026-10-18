@@ -39,7 +39,7 @@ README, PROCESS.md and the reflections are mine to write.
 | [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes (`389ffff`, `4acb32b`; push token in the client 18 Oct) |
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
 | [0007](docs/adr/0007-credentials-stay-in-the-tab.md) | The host's tokens stay in the page; the guest holds placeholders, swapped by our service worker (P1.6) | Yes (18 Oct) |
-| [0008](docs/adr/0008-your-rooms-invites-and-colleagues.md) | Your rooms (members' and invited rooms only, live over a websocket), host-only invites by GitHub id, colleagues you keep; the room state half of 0003 | Not yet |
+| [0008](docs/adr/0008-your-rooms-invites-and-colleagues.md) | Your rooms (members' and invited rooms only, live over a websocket), host-only invites by GitHub id, colleagues you keep; the room state half of 0003 | Yes (`a0bee0f`, `ef1401f`, `7e6023e`, `79a008f`, 18 Oct) |
 
 ## Work, in order
 
@@ -331,20 +331,13 @@ export and import, OPFS and workspace export, the terminal redeploy gap.
 The rest after. The host's preview (Still open) comes soon, and before
 auto-release at the latest.
 
-- **Your rooms, invites and colleagues** (ADR 0008):
-  - room state on the server: live, away (host gone), ended after 5 minutes;
-    timer every 30 s, restart-safe; ended rooms read-only, host revives;
-  - "Your rooms" on the landing page: invites, then live rooms you're in
-    (signed in: by user; guest: by this browser's member secrets);
-  - invites: host only, username looked up on GitHub with the app's
-    credentials (5000/h, measured) and stored by numeric id; same reply
-    whether or not they use Riff; get past a lock; gone when used,
-    declined, cancelled or the room ends; pending ones in the People panel;
-  - recently worked together (derived) and colleagues (kept, private);
-  - live over `/api/rooms/watch`;
-  - checks: `spec/` for guests and room state, an in-process test for the
-    signed-in paths;
-  - the OPFS column ("this browser still has the workspace") comes with
+- ~~**Your rooms, invites and colleagues** (ADR 0008)~~. Built 18 Oct
+  (`a0bee0f`, `ef1401f`, `79a008f`); see the ADR's Implementation section.
+  On the way: a Hocuspocus bug that cut a client off from server writes
+  (`7e6023e`). Checked by `spec/rooms.test.ts` (live), `npm run test:rooms`,
+  `npm run test:rooms-browser` (dev, both sizes).
+  - Left: one real GitHub account inviting another on live.
+  - The OPFS column ("this browser still has the workspace") comes with
     OPFS. Never a public directory.
 - **Room lifecycle** (ADR 0003):
   - ~~room records: state, the host's last-seen time, and a permanent id

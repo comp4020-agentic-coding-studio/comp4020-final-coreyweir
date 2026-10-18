@@ -22,7 +22,8 @@ Next is crit 10 on 19 October: the server tells people apart, checks what
 each may see and change, and logs who did what in a way that outlives the
 crit. That is built (`docs/adr/0005`, `docs/adr/0006`, checked in
 `spec/permissions.test.ts`); what's left of it is in `PLAN.md`. A3 is due at
-noon on 9 November.
+noon on 9 November. Toward A3, "Your rooms", invites and colleagues are
+built (`docs/adr/0008`); next in `PLAN.md`'s P2 is the room lifecycle.
 
 Update this section at each crit. A harness describing last week's project
 steers the agent into last week's work.
@@ -124,6 +125,13 @@ same commit. Each README quality turns into what it means for a change:
   persistence with `flyctl machine restart` and read the room back; the log
   line `doc <name> loaded: N rows` shows it came from disk.
   `npm run test:collaboration` (in `app/`) covers SIGKILL and compaction.
+- A server write to a room document (`change()` in
+  `app/server/collaboration.mjs`) unloads it afterwards, and Hocuspocus
+  4.7.0 does that twice, by name. The `beforeUnloadDocument` guard there
+  stops the second one dropping a copy a client opened in between. Don't
+  remove it; `npm run test:collaboration` checks it. When a client "stops
+  receiving" server writes while still connected, suspect a document that
+  was unloaded under it before suspecting the client.
 - spec/ can't read the log of a deployed app. A change to what the log
   records gets a check in `npm run test:audit-log` (in `app/`), which reads
   the `events` table back, and a look at `flyctl logs` after deploying.
