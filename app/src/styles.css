@@ -19,3 +19,39 @@
 .entry-card>button.link{margin:16px 26px 26px;padding:0;border:0;background:none;color:#315efb;font-size:10px;text-decoration:underline;cursor:pointer;justify-self:start}
 /* A card on its own (finding the room, the GitHub gate, errors) */
 .landing>.entry-card:only-child{grid-column:1/-1;grid-row:1/-1;align-self:center;justify-self:center;width:min(480px,100%);margin:24px 0}
+/* Your rooms, invites and colleagues (docs/adr/0008) */
+.account .link+.link{margin-left:0}
+.your-rooms,.colleagues{padding:14px 26px;border-bottom:1px solid #ededE8;font-size:10px}
+.your-rooms h2,.colleagues h2{margin:0;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#666}
+.colleagues h3{margin:14px 0 0;font-size:9px;font-weight:600;color:#666}
+.your-rooms ul,.colleagues ul{margin:8px 0 0;padding:0;list-style:none;display:grid;gap:2px;max-height:168px;overflow:auto}
+.your-rooms li,.colleagues li{min-height:34px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;border-bottom:1px solid #f0f0ec}
+.your-rooms li:last-child,.colleagues li:last-child{border-bottom:0}
+.your-rooms code,.people-panel code{font-family:"SFMono-Regular",Consolas,monospace;letter-spacing:.08em}
+.your-rooms .room-link{padding:0;border:0;background:none;color:#191919;font-size:10px;text-decoration:underline;text-underline-offset:2px}
+.your-rooms li small{margin-left:auto;display:flex;align-items:center;gap:5px;color:#777;font-size:9px}
+.your-rooms li small i{width:6px;height:6px;border-radius:50%;background:#c99231}
+.your-rooms li small i.live{background:#4d9c55}
+.your-rooms .invite{padding:6px 0}
+.your-rooms .invite .actions,.your-rooms .invite form{margin-left:auto;display:flex;align-items:center;gap:10px}
+.your-rooms .invite form input{width:130px;height:28px;font-size:10px}
+.your-rooms button:not(.link):not(.room-link),.colleagues form button,.invite-box button,.pending-invites button{padding:5px 9px;border:1px solid #d5d5cf;border-radius:3px;background:white;font-size:9px}
+.your-rooms .link,.colleagues .link{padding:0;border:0;background:none;color:#315efb;font-size:10px;text-decoration:underline}
+.colleagues header{display:flex;align-items:center;justify-content:space-between}
+.colleagues>p{margin:8px 0 10px;color:#777;font-size:9px;line-height:1.45}
+.entry-card .colleagues form,.entry-card .your-rooms form{padding:0;display:flex;gap:8px}
+.colleagues form input,.your-rooms form input{flex:1}
+.your-rooms li form{flex-basis:100%;padding-bottom:8px}
+.your-rooms li form input{height:30px}
+.colleagues form input{height:32px}
+.colleagues li .link{margin-left:auto}
+.colleagues .form-error{margin-top:8px}
+.invite-box{margin:4px 16px 12px;display:grid;gap:8px}
+.invite-box form{display:grid;gap:6px}
+.invite-box label{font-size:9px;font-weight:600}
+.invite-box form span{display:flex;gap:6px}
+.invite-box input{flex:1;min-width:0;height:30px;padding:0 9px;border:1px solid #d5d5cf;border-radius:3px;background:white;font-size:10px}
+.invite-sent{margin:0;color:#3f7d46;font-size:9px;line-height:1.4}
+.pending-invites{margin:0!important;padding:0!important}
+.pending-invites li{min-height:28px!important}
+.pending-invites li button{margin-left:auto}

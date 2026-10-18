@@ -109,6 +109,105 @@ export function removeMember(access: Access, memberId: number) {
   return call<void>(`/api/rooms/${access.room.id}/members/${memberId}`, { method: "DELETE", token: access.token });
 }
 
+// Your rooms, invites and colleagues (docs/adr/0008).
+
+export type PendingInvite = { githubId: number; login: string };
+export type ListedRoom = {
+  id: string;
+  code: string;
+  role: "host" | "participant";
+  state: "live" | "away";
+  hostName: string;
+  hostLastSeen: number | null;
+  endsAt: number | null;
+  locked: boolean;
+  // Only in the host's own entry.
+  invites?: PendingInvite[];
+};
+export type Invitation = { roomId: string; code: string; invitedBy: string; at: number };
+export type RoomList = { rooms: ListedRoom[]; invites: Invitation[] };
+export type Colleague = { githubId: number; login: string; avatarUrl: string | null };
+export type Colleagues = { colleagues: Colleague[]; recent: (Colleague & { lastRoomAt: number; colleague: boolean })[] };
+
+// Every room this browser holds a guest secret for. The server ignores
+// secrets it doesn't accept, so a stale one costs nothing.
+function storedSecrets() {
+  const secrets: { roomId: string; secret: string }[] = [];
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index) ?? "";
+    if (!key.startsWith("riff-member:")) continue;
+    const secret = localStorage.getItem(key);
+    if (secret) secrets.push({ roomId: key.slice("riff-member:".length), secret });
+  }
+  return secrets;
+}
+
+// The list as the server keeps it, live: a websocket that receives the
+// whole list each time it changes. The secrets go in the first message,
+// not the URL, so they stay out of logs. Reconnects until closed.
+export function watchRooms(onList: (list: RoomList) => void) {
+  let socket: WebSocket | null = null;
+  let closed = false;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let delay = 1000;
+
+  function connect() {
+    socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/rooms/watch`);
+    socket.onopen = () => {
+      delay = 1000;
+      socket?.send(JSON.stringify({ type: "hello", secrets: storedSecrets() }));
+    };
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data));
+        if (message.type === "rooms") onList({ rooms: message.rooms ?? [], invites: message.invites ?? [] });
+      } catch {
+        // Not ours; ignore.
+      }
+    };
+    socket.onclose = () => {
+      if (closed) return;
+      retry = setTimeout(connect, delay);
+      delay = Math.min(delay * 2, 30_000);
+    };
+  }
+
+  connect();
+  return () => {
+    closed = true;
+    clearTimeout(retry);
+    socket?.close();
+  };
+}
+
+export function inviteToRoom(access: Access, login: string) {
+  return call<{ invited: PendingInvite }>(`/api/rooms/${access.room.id}/invites`, { method: "POST", body: { login }, token: access.token });
+}
+
+export function cancelInvite(access: Access, githubId: number) {
+  return call<void>(`/api/rooms/${access.room.id}/invites/${githubId}`, { method: "DELETE", token: access.token });
+}
+
+export async function acceptInvite(roomId: string, name?: string) {
+  return accessFrom(await call(`/api/invites/${encodeURIComponent(roomId)}/accept`, { method: "POST", body: name ? { name } : {} }));
+}
+
+export function declineInvite(roomId: string) {
+  return call<void>(`/api/invites/${encodeURIComponent(roomId)}/decline`, { method: "POST", body: {} });
+}
+
+export function listColleagues() {
+  return call<Colleagues>("/api/me/colleagues");
+}
+
+export function addColleague(login: string) {
+  return call<{ colleague: Colleague }>("/api/me/colleagues", { method: "POST", body: { login } });
+}
+
+export function removeColleague(githubId: number) {
+  return call<void>(`/api/me/colleagues/${githubId}`, { method: "DELETE" });
+}
+
 // GitHub for pushing (docs/adr/0005). The browser keeps only what the
 // server sealed with a key from this session: after a push sign-in it
 // arrives in the URL fragment, and a pasted token is sealed on request.

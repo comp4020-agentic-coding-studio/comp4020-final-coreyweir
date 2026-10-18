@@ -3,6 +3,8 @@ import { Quickdraw, useQuickdrawStore, type ShapeRecord } from "@quickdrawjs/rea
 import { addPrompt, replaceYText, saveName, savedName, type PromptSnapshot, type QueuedPrompt, type RoomMember, useRoom } from "./room";
 import {
   type Access, ApiError, createRoom, currentUser, enterRoom, joinRoom, removeMember, roomByCode, rotateCode, setLocked,
+  acceptInvite, addColleague, cancelInvite, declineInvite, inviteToRoom, listColleagues, removeColleague, watchRooms,
+  type Colleagues, type ListedRoom, type RoomList,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
 } from "./api";
 import { useBoardSync } from "./boardSync";
@@ -37,9 +39,15 @@ function goToRoom(roomId: string) {
   location.assign(`${location.pathname}?${new URLSearchParams({ id: roomId })}`);
 }
 
-function problem(error: unknown) {
+function problem(error: unknown, login?: string) {
   if (!(error instanceof ApiError)) return "Couldn't reach Riff. Check your connection and try again.";
   switch (error.code) {
+    case "no_such_github_user": return `No GitHub user called ${login ?? "that"}.`;
+    case "bad_login": return "That isn't a GitHub username.";
+    case "that_is_you": return "That's you.";
+    case "github_unreachable": return "Couldn't reach GitHub to look that up. Try again in a moment.";
+    case "no_such_invite": return "That invite has gone: the host cancelled it, or the room ended.";
+    case "signed_out": return "Sign in with GitHub first.";
     case "no_such_room": return "There's no live room with that code. Check it with the host.";
     case "name_taken": return "Someone in that room already goes by that name. Pick another.";
     case "locked": return "The host has locked that room. Ask them for an invite.";
@@ -58,7 +66,7 @@ function useUser() {
   return user;
 }
 
-function Account({ user }: { user: User | null | undefined }) {
+function Account({ user, onColleagues }: { user: User | null | undefined; onColleagues?: () => void }) {
   if (user === undefined) return <p className="account">&nbsp;</p>;
   if (!user) {
     return (
@@ -72,6 +80,7 @@ function Account({ user }: { user: User | null | undefined }) {
     <p className="account">
       {user.avatarUrl && <img src={user.avatarUrl} alt="" width={20} height={20} crossOrigin="anonymous" />}
       <span>Signed in as <strong>@{user.login}</strong></span>
+      {onColleagues && <button className="link" onClick={onColleagues}>Colleagues</button>}
       <button className="link" onClick={() => signOut().then(() => location.reload())}>Sign out</button>
     </p>
   );
@@ -132,6 +141,153 @@ function GitHubPush({ user, beforeLeaving, back }: { user: User | null | undefin
   );
 }
 
+// The rooms list as the server keeps it, live (docs/adr/0008).
+function useRoomList() {
+  const [list, setList] = useState<RoomList | null>(null);
+  useEffect(() => watchRooms(setList), []);
+  return list;
+}
+
+function useNow(every = 30_000) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), every);
+    return () => clearInterval(timer);
+  }, [every]);
+  return now;
+}
+
+function minutesSince(at: number | null, now: number) {
+  return Math.max(1, Math.round((now - (at ?? now)) / 60_000));
+}
+
+function hostPresence(room: ListedRoom, now: number) {
+  if (room.state === "live") return room.role === "host" ? "You're hosting it" : `${room.hostName} is hosting`;
+  const away = `away for ${minutesSince(room.hostLastSeen, now)} min`;
+  return room.role === "host" ? `You host it · ${away}` : `Host ${away}`;
+}
+
+// Invites first, then the rooms you're in: by GitHub account when signed
+// in, by this browser's guest secrets otherwise. Never anyone else's.
+function YourRooms({ name }: { name: string }) {
+  const list = useRoomList();
+  const now = useNow();
+  const [renaming, setRenaming] = useState<{ roomId: string; name: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (!list || (!list.rooms.length && !list.invites.length)) return null;
+
+  async function accept(roomId: string, chosen?: string) {
+    setBusy(roomId);
+    setError(null);
+    try {
+      const access = await acceptInvite(roomId, chosen?.trim() || undefined);
+      goToRoom(access.room.id);
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.code === "name_taken") setRenaming({ roomId, name: chosen ?? name });
+      setError(problem(failure));
+      setBusy(null);
+    }
+  }
+
+  async function decline(roomId: string) {
+    setError(null);
+    try {
+      await declineInvite(roomId);
+    } catch (failure) {
+      setError(problem(failure));
+    }
+  }
+
+  return (
+    <section className="your-rooms" aria-label="Your rooms">
+      <h2>Your rooms</h2>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <ul>
+        {list.invites.map((invite) => (
+          <li key={`invite-${invite.roomId}`} className="invite">
+            <span><strong>{invite.invitedBy}</strong> invited you to <code>{invite.code}</code></span>
+            {renaming?.roomId === invite.roomId ? (
+              <form onSubmit={(event) => { event.preventDefault(); void accept(invite.roomId, renaming.name); }}>
+                <input aria-label="Your name in that room" required maxLength={40} value={renaming.name} onChange={(event) => setRenaming({ roomId: invite.roomId, name: event.target.value })} />
+                <button disabled={busy === invite.roomId || !renaming.name.trim()}>Join</button>
+              </form>
+            ) : (
+              <span className="actions">
+                <button disabled={busy === invite.roomId} onClick={() => void accept(invite.roomId, name)}>{busy === invite.roomId ? "Joining..." : "Join"}</button>
+                <button className="link" onClick={() => void decline(invite.roomId)}>Decline</button>
+              </span>
+            )}
+          </li>
+        ))}
+        {list.rooms.map((room) => (
+          <li key={room.id}>
+            <button className="room-link" onClick={() => goToRoom(room.id)}>Room <code>{room.code}</code></button>
+            <small><i className={room.state}></i>{hostPresence(room, now)}</small>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// Your colleagues: private and one-way. Adding someone tells them nothing
+// and lets them into nothing; they become suggestions when you invite.
+function ColleaguesPanel({ onClose }: { onClose: () => void }) {
+  const [data, setData] = useState<Colleagues | null>(null);
+  const [login, setLogin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () => listColleagues().then(setData, (failure) => setError(problem(failure)));
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function act(action: () => Promise<unknown>, typed?: string) {
+    setError(null);
+    try {
+      await action();
+      setLogin("");
+      await refresh();
+    } catch (failure) {
+      setError(problem(failure, typed));
+    }
+  }
+
+  const recent = data?.recent.filter((person) => !person.colleague) ?? [];
+  return (
+    <section className="colleagues" aria-label="Colleagues">
+      <header><h2>Colleagues</h2><button className="link" onClick={onClose}>Done</button></header>
+      <p>Only you see this list. Adding someone doesn't tell them or let them into anything; it puts them first when you invite.</p>
+      <form onSubmit={(event) => { event.preventDefault(); const typed = login.trim().replace(/^@/, ""); if (typed) void act(() => addColleague(typed), typed); }}>
+        <input aria-label="GitHub username" value={login} onChange={(event) => setLogin(event.target.value)} placeholder="GitHub username" autoComplete="off" autoCapitalize="none" />
+        <button disabled={!login.trim()}>Add</button>
+      </form>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {!data ? <small>Loading...</small> : (
+        <>
+          <ul>
+            {data.colleagues.map((person) => (
+              <li key={person.githubId}><span>@{person.login}</span><button className="link" onClick={() => void act(() => removeColleague(person.githubId))}>Remove</button></li>
+            ))}
+            {!data.colleagues.length && <li><small>No colleagues yet.</small></li>}
+          </ul>
+          {recent.length > 0 && (
+            <>
+              <h3>Recently worked together</h3>
+              <ul>
+                {recent.map((person) => (
+                  <li key={person.githubId}><span>@{person.login}</span><button className="link" onClick={() => void act(() => addColleague(person.login))}>Add</button></li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function Landing({ code: sharedCode = "" }: { code?: string }) {
   const user = useUser();
   const [mode, setMode] = useState<"join" | "host">(() => new URLSearchParams(location.search).get("setup") === "host" ? "host" : "join");
@@ -140,6 +296,7 @@ function Landing({ code: sharedCode = "" }: { code?: string }) {
   const [config, setConfig] = useState(savedHostConfig);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [colleagues, setColleagues] = useState(false);
   // Signed in, your GitHub login is the default name.
   const shownName = name || (user?.login ?? "");
 
@@ -168,7 +325,9 @@ function Landing({ code: sharedCode = "" }: { code?: string }) {
         <p>Sketch ideas, shape prompts, follow the agent’s work, and discuss the site as it changes.</p>
       </section>
       <section className="entry-card">
-        <Account user={user} />
+        <Account user={user} onColleagues={() => setColleagues((open) => !open)} />
+        {colleagues ? <ColleaguesPanel onClose={() => setColleagues(false)} /> : <>
+        <YourRooms name={shownName} />
         <nav><button className={mode === "join" ? "active" : ""} onClick={() => setMode("join")}>Join</button><button className={mode === "host" ? "active" : ""} onClick={() => setMode("host")}>Host</button></nav>
         {mode === "join" ? (
           <form onSubmit={(event) => {
@@ -199,6 +358,7 @@ function Landing({ code: sharedCode = "" }: { code?: string }) {
             <button className="primary" disabled={busy}>{busy ? "Creating..." : "Create room"}</button>
           </form>
         )}
+        </>}
       </section>
     </main>
   );
@@ -328,6 +488,77 @@ function PreviewView({ roomId, previewKey, live, generation, facilitator, previe
   );
 }
 
+// The host invites by GitHub username. The reply is the same whether or
+// not that person has ever used Riff, so it can't be used to find out.
+// Colleagues and recent co-workers are suggestions; invites still pending
+// come from the live rooms list and can be cancelled.
+function InviteBox({ access, members }: { access: Access; members: RoomMember[] }) {
+  const user = useUser();
+  const list = useRoomList();
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [login, setLogin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pending = list?.rooms.find((room) => room.id === access.room.id)?.invites ?? [];
+
+  useEffect(() => {
+    if (!user) return;
+    listColleagues().then(({ colleagues, recent }) => {
+      setSuggestions([...new Set([...colleagues, ...recent].map((person) => person.login))]);
+    }, () => {});
+  }, [user]);
+
+  const here = new Set(members.filter((member) => !member.removed && member.login).map((member) => member.login!.toLowerCase()));
+  const offered = suggestions.filter((suggestion) => !here.has(suggestion.toLowerCase()));
+
+  async function invite(typed: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const { invited } = await inviteToRoom(access, typed);
+      setLogin("");
+      setMessage(`Invited @${invited.login}. They'll see it when they sign in.`);
+    } catch (failure) {
+      setError(problem(failure, typed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancel(githubId: number) {
+    setError(null);
+    try {
+      await cancelInvite(access, githubId);
+    } catch (failure) {
+      setError(problem(failure));
+    }
+  }
+
+  return (
+    <div className="invite-box">
+      <form onSubmit={(event) => { event.preventDefault(); const typed = login.trim().replace(/^@/, ""); if (typed) void invite(typed); }}>
+        <label htmlFor="riff-invite">Invite by GitHub username</label>
+        <span>
+          <input id="riff-invite" list="riff-invite-suggestions" value={login} onChange={(event) => setLogin(event.target.value)} placeholder="username" autoComplete="off" autoCapitalize="none" />
+          <button disabled={busy || !login.trim()}>{busy ? "Inviting..." : "Invite"}</button>
+        </span>
+        <datalist id="riff-invite-suggestions">{offered.map((suggestion) => <option key={suggestion} value={suggestion} />)}</datalist>
+      </form>
+      {message && <p className="invite-sent" role="status">{message}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {pending.length > 0 && (
+        <ul className="pending-invites" aria-label="Invited, not joined yet">
+          {pending.map((invite) => (
+            <li key={invite.githubId}><span>@{invite.login}</span><small>invited</small><button onClick={() => void cancel(invite.githubId)}>Cancel</button></li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Who's in the room, as the server says. The host also gets the room's
 // controls: a new code, the lock, and removing someone.
 function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnType<typeof useRoom>; onClose: () => void }) {
@@ -373,6 +604,7 @@ function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnTy
           </li>
         ))}
       </ul>
+      {host && <InviteBox access={access} members={room.members} />}
       {host && <p className="local-note">If a code leaks: give the room a new code, remove anyone who shouldn't be here, then lock it.</p>}
     </aside>
   );
