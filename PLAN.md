@@ -49,8 +49,8 @@ README, PROCESS.md and the reflections are mine to write.
 ### P1: before crit 10 (19 Oct)
 
 Left, in order (18 Oct): ~~the push token on the client (3)~~, ~~Load leaving
-the queue with `queue.send` (5)~~, ~~the API proxy (6)~~, then deleting
-`/data/yjs` and the old `riff-*` rows.
+the queue with `queue.send` (5)~~, ~~the API proxy (6)~~, ~~then deleting
+`/data/yjs` and the old `riff-*` rows~~ (all done 18 Oct).
 
 1. ~~**Fix the client build.**~~ Done. The forks are packed archives in
    `app/vendor/` (`wasmer-sdk-0.10.0-riff.e56540d`,
@@ -104,8 +104,8 @@ the queue with `queue.send` (5)~~, ~~the API proxy (6)~~, then deleting
      compaction), `pnpm check` live (the realtime and persistence specs now
      wait on the server's ack), `flyctl machine restart` with a marker read
      back, and two browser profiles plus a headless client on the live room.
-   - Left: `/data/yjs` (36 KB) is still on the volume; delete it once
-     nobody needs an old room.
+   - ~~Left: `/data/yjs` (36 KB) is still on the volume.~~ Deleted over
+     `flyctl ssh` on 18 Oct.
 3. ~~**Identity** (ADR 0005).~~ Built 12 Oct (`389ffff` server, `4acb32b`
    client); the ADR's "Implementation" section has the differences.
    - ~~Left: the host page reading the sealed push token (`#push=…`) and
@@ -180,7 +180,7 @@ the queue with `queue.send` (5)~~, ~~the API proxy (6)~~, then deleting
    - ~~Left: a "this room predates sign-in" page for old `riff-<code>`
      links.~~ Dropped 18 Oct: nobody is using those rooms (crit-day tests
      and spec runs), and an old link already reaches the join form and
-     "no live room", which is true. Their rows go with `/data/yjs`.
+     "no live room", which is true. Their rows were deleted with `/data/yjs` (item 5).
    - ~~The browser smokes that drive a room haven't been run since.~~
      `terminal-browser-smoke.mjs` now hosts through the landing page and
      joins from the share link alone; it passes on dev and live (18 Oct).
@@ -297,8 +297,10 @@ the queue with `queue.send` (5)~~, ~~the API proxy (6)~~, then deleting
        read-only flag, the origin check and the removal, one at a time.
      - Not checkable from outside: a GitHub user's path (needs a real
        sign-in), and the log (read with `flyctl logs`).
-   - Old `riff-<code>` documents aren't migrated. Their links get a "this
-     room predates sign-in" page.
+   - Old `riff-<code>` documents aren't migrated. ~~Their links get a "this
+     room predates sign-in" page.~~ Dropped 18 Oct (no real users). Their 14
+     rows (and 6 `spec-*` documents, <1 KB in all) were deleted on the
+     volume over `flyctl ssh` the same day, along with `/data/yjs`.
 6. ~~**API proxy, so no secrets reach the guest.**~~ Done 18 Oct, ADR 0007.
    The model token and GitHub token were in the guest's environment, so
    `env` showed them live to the room.
@@ -315,8 +317,10 @@ the queue with `queue.send` (5)~~, ~~the API proxy (6)~~, then deleting
      `npm run test:credentials-browser` (dev; two mutations red) and by
      running Claude Code against a mock endpoint, which received the real
      token and streamed its reply to the terminal.
-   - Left: run the smoke against live (`ECHO_BASE=https://httpbin.org`), and
-     a real model call and a real push from a room on live.
+   - ~~Run the smoke against live.~~ Passed 18 Oct with
+     `ECHO_BASE=https://httpbin.org` and the built chunk: httpbin saw the
+     real token, the guest's `env` showed only placeholders.
+   - Left: a real model call and a real push from a room on live.
 
 ### P2: toward A3
 
