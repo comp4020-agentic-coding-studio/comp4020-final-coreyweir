@@ -1,8 +1,8 @@
 # 3. Room lifecycle and board retention
 
 - Status: accepted; lifecycle, keeping and End room implemented 2026-10-18;
-  pruning and the size cap decided 2026-10-18 (amendment below), not yet
-  built; local copies and export not yet
+  pruning and the size cap decided and implemented 2026-10-18 (amendment
+  below); local copies and export not yet
 - Date: 2026-10-12
 
 ## Context
@@ -317,3 +317,55 @@ room is then strokes and text, and the cap becomes a disk limit. Until then,
 moves the limit; the next person who pastes enough images finds it again.
 **Images out of the document straight away**: the right end state, but a
 bigger change than closing the crash, which can't wait.
+
+### Implementation of the amendment (2026-10-18)
+
+Spec first (`3e54ceb`, fixed in `b3df0f2`), then the server (`f512b5a`) and
+the client (`7d27daa`).
+
+- **Counting.** The server counts a room's stored bytes per document: the
+  snapshot plus updates since, in memory while a document is loaded, from
+  SQLite otherwise. Before accepting a sync or update message for a room's
+  document (Hocuspocus's `beforeSync`, which it awaits before checking the
+  connection is read-only), it adds the message's size. Over the limit, it
+  compacts the room's open documents first, so edits since undone don't
+  count, and only then refuses. Refusing marks the connection read-only for
+  that message, sets `rooms.full_at`, logs `room.full` with both sizes, and
+  turns every connection to the room read-only.
+- **One rule for read-only.** `riff.mjs` decides every connection's access
+  with one function: full, ended, or a participant on the control document.
+  Ending, reviving and filling a room all reapply it to open connections.
+- **Pruning** follows the decision. A pruned room's members are turned away
+  with the reason `board-pruned`; its log line is `room.prune` with the
+  bytes freed.
+- **The page.** Its check counts both documents as it has them
+  (`Y.encodeStateAsUpdate`), which is about what the server stores. A
+  pasted or dropped image that would cross the limit is taken back off the
+  board and out of the undo history, and the page says how big it was and
+  how much room is left. The People panel shows how much the room holds.
+- **Deviations.** The banner says "This board is full (4 MB), so nothing
+  more can be added to it, the prompts or the queue. Claude and the
+  terminal still work. To keep going together, start a new room." It
+  doesn't say "Export it" because export isn't built; it will when it is.
+  A full room's control document is read-only for the host too, so the
+  queue stops (Load and remove are hidden: Load would leave the prompt
+  queued for everyone else), and so does the preview's live flag: a host
+  who starts a dev server after the room filled has a working preview
+  relay, but participants aren't told it's live. That follows from "read-only
+  for everyone"; we accepted it rather than carve out the control document.
+- **Checked.** `spec/limits.test.ts` (live): accepted writes stay under 4 MB,
+  the write that crosses is refused, the room is full for host and guest,
+  control writes stop, a 9 MB message closes with 1009 and stores nothing.
+  `npm run test:rooms`: undone edits don't count, full survives a restart,
+  pruning order, a pruned room refused then revived by its host.
+  `npm run test:limits-browser` (dev and live, both viewports): an image
+  that fits reaches the room; one that doesn't is turned away with the
+  message and the room stays writable; a crossing write turns both pages
+  read-only, still after a reload. On live, node peaked at 127 MB while
+  that smoke filled rooms to the limit (`/proc` `VmHWM`), the same as the
+  4 MB measurement above.
+- **Not checked.** The page's check only knows what has reached it: an
+  image pasted before someone else's large change arrives can still cross
+  the limit, and the server then fills the room (the smoke waits for the
+  People panel's count for this reason). Pruning has only run against a
+  stand-in for the disk; the volume is at 7%.

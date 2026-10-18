@@ -23,8 +23,8 @@ each may see and change, and logs who did what in a way that outlives the
 crit. That is built (`docs/adr/0005`, `docs/adr/0006`, checked in
 `spec/permissions.test.ts`); what's left of it is in `PLAN.md`. A3 is due at
 noon on 9 November. Toward A3, "Your rooms", invites and colleagues are
-built (`docs/adr/0008`), and so is the room lifecycle apart from pruning
-and the size cap (`docs/adr/0003`); next in `PLAN.md`'s P2 is local copies
+built (`docs/adr/0008`), and so is the room lifecycle with its 4 MB size
+cap and pruning (`docs/adr/0003`); next in `PLAN.md`'s P2 is local copies
 and export.
 
 Update this section at each crit. A harness describing last week's project
@@ -137,6 +137,13 @@ same commit. Each README quality turns into what it means for a change:
 - spec/ can't read the log of a deployed app. A change to what the log
   records gets a check in `npm run test:audit-log` (in `app/`), which reads
   the `events` table back, and a look at `flyctl logs` after deploying.
+- **A room holds 4 MB, and a full room is read-only for everyone for
+  good** (`docs/adr/0003`, amendment): 16 MB ran the 256 MB machine out of
+  memory. Don't raise it without measuring node's memory on the machine.
+  A smoke or spec that fills rooms should use rooms that aren't kept and
+  end them, so the board is deleted. Room creation is rate-limited per IP
+  (60 per 10 minutes): many smoke runs against dev end in 429
+  `slow_down`; restart the dev server.
 - The client still keeps its own IndexedDB copy of each room. "It persisted"
   has to say which store it came from.
 - `/readme/` is generated from `README.md` at image build time. Editing the
