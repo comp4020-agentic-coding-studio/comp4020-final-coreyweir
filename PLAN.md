@@ -337,6 +337,13 @@ The rest after.
 - **OPFS workspace.**
   - The host's filesystem survives a reload or crash, one workspace per repo.
   - Check: reload mid-task, and unpushed edits are still there.
+- **Clone the host's repository automatically.** The host form's "Git
+  repository" field is never used to clone: today it only makes the room
+  ask for GitHub (`App.tsx`, `RoomGate`), and Claude has to be told to
+  clone. Clone it into `/work/repo` at boot with the push token (or
+  anonymously for a public repo). Goes with the OPFS workspace, which is
+  keyed by the same repository: an existing workspace is opened, not
+  re-cloned.
 - **Queue release** (ADR 0004):
   - Send submits with newlines intact; an auto toggle, visible to the room.
   - Planned mechanism: a Claude Code mod. That needs the bundle upgraded
