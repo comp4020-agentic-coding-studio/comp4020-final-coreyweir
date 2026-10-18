@@ -124,6 +124,9 @@ same commit. Each README quality turns into what it means for a change:
   persistence with `flyctl machine restart` and read the room back; the log
   line `doc <name> loaded: N rows` shows it came from disk.
   `npm run test:collaboration` (in `app/`) covers SIGKILL and compaction.
+- spec/ can't read the log of a deployed app. A change to what the log
+  records gets a check in `npm run test:audit-log` (in `app/`), which reads
+  the `events` table back, and a look at `flyctl logs` after deploying.
 - The client still keeps its own IndexedDB copy of each room. "It persisted"
   has to say which store it came from.
 - `/readme/` is generated from `README.md` at image build time. Editing the

@@ -74,19 +74,25 @@ export function createRiff({
   // queued one is logged one by one, with who did it: anyone may delete a
   // staged prompt (ADR 0006) because the log shows who did. Ids only, never
   // the text. The server's own writes (the member list) have no member.
+  // A queued prompt leaves the queue two ways: the host loads it into the
+  // terminal, or removes it. Loading names the prompt in `roomState.lastSent`
+  // in the same transaction as the delete, so the log can tell them apart.
+  // That is the host's own claim: the terminal runs in the host's browser,
+  // and the server never sees what was typed into it.
   function watchDocument(documentName, document, whoOf) {
     const part = DOCUMENT.exec(documentName)?.[2];
-    const watch = (map, subject) =>
+    const sentNow = (id) => document.getMap("roomState").get("lastSent") === id;
+    const watch = (map, subject, deleted = () => `${subject}.delete`) =>
       map.observe((event) => {
         const who = whoOf(event.transaction.origin);
         if (!who) return;
         for (const [id, change] of event.changes.keys) {
           if (change.action === "add") audit.record(who, `${subject}.add`, { id });
-          if (change.action === "delete") audit.record(who, `${subject}.delete`, { id });
+          if (change.action === "delete") audit.record(who, deleted(id), { id });
         }
       });
     if (part === "shared") watch(document.getMap("prompts"), "prompt");
-    if (part === "control") watch(document.getMap("queue"), "queue");
+    if (part === "control") watch(document.getMap("queue"), "queue", (id) => (sentNow(id) ? "queue.send" : "queue.delete"));
   }
 
   // The relays' hello carries the same credential as the documents: a

@@ -184,6 +184,16 @@ export function useRoom(access: Access) {
     prompts.delete(prompt.id);
   }
 
+  // Once a queued prompt is in the host's terminal it leaves the queue.
+  // `lastSent` in the same transaction is how the server's log tells this
+  // apart from removing it.
+  function sendQueued(id: string) {
+    control.transact(() => {
+      roomState.set("lastSent", id);
+      queue.delete(id);
+    });
+  }
+
   return {
     doc,
     control,
@@ -197,6 +207,7 @@ export function useRoom(access: Access) {
     queue,
     queued,
     queuePrompt,
+    sendQueued,
     members: memberList,
     code: typeof roomInfo.get("code") === "string" ? String(roomInfo.get("code")) : access.room.code,
     locked: roomInfo.has("locked") ? roomInfo.get("locked") === true : access.room.locked,

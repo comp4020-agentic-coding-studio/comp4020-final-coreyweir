@@ -79,6 +79,7 @@ The collaboration test starts its own temporary relay, so the development server
 
 ```sh
 npm run test:collaboration
+npm run test:audit-log             # the who-did-what log, read back from SQLite
 npm run test:terminal-relay
 npm run test:github-push-browser   # needs the dev server
 npm run test:claude-bundle

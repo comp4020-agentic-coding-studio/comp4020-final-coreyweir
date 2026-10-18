@@ -227,14 +227,20 @@ differs from the plan, or stops short:
   sign-in state; repeated refusals are combined the same way, `times=N`).
   Queueing a prompt shows as `queue.add` then `prompt.delete` with the same
   id. Lines name the room by its current code, even for a socket that
-  connected before a rotation. Ending (ADR 0003) and queue releases
-  (ADR 0004) come with those features; today Load only reaches the host's
-  own terminal, so the server never sees it.
+  connected before a rotation. Since 18 Oct, Load takes the prompt out of
+  the queue and is logged as `queue.send`, removing it as `queue.delete`:
+  Load names the prompt in the control document's `roomState.lastSent` in
+  the same transaction as the delete. That is the host's own claim, since
+  the terminal runs in the host's browser. Ending (ADR 0003) comes with
+  that feature, and automatic release (ADR 0004) will log the same way.
 - **Checked:** `spec/permissions.test.ts`, 14 checks against the live app,
   including the relays. Mutations that turn them red, one at a time:
   control writable by everyone, no Origin check, removed members still
   resolving, the relays treating anyone as host. The log was read in
-  `flyctl logs` after a spec run and a two-browser run.
+  `flyctl logs` after a spec run and a two-browser run. Since 18 Oct,
+  `npm run test:audit-log` (in `app/`) reads the `events` table back after a
+  host and a guest stage, queue, send and remove prompts, which the spec/
+  checks can't do against a deployed app.
 
 
 ## Amendment (2026-10-18): participants don't queue

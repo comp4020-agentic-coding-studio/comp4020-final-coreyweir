@@ -91,13 +91,32 @@ try {
     { timeout: 30_000 },
   );
 
+  // A prompt's whole trip: the participant stages it, the host queues it,
+  // and Load types it into the host's terminal and takes it out of the
+  // queue on both screens. The queue only lets go once loadPrompt says the
+  // text went to Claude's process; Claude itself is still on its bypass
+  // permissions dialog here, so the text isn't checked on screen.
+  await participant.type(".new-prompt textarea", "riff queue smoke");
+  await participant.click(".new-prompt button");
+  await host.waitForFunction(() => [...document.querySelectorAll(".prompt-card textarea")].some((element) => element.value === "riff queue smoke"), { timeout: 10_000 });
+  await host.evaluate(() => {
+    const card = [...document.querySelectorAll(".prompt-card")].find((element) => element.querySelector("textarea")?.value === "riff queue smoke");
+    card.querySelector("footer button").click();
+  });
+  const queuedOn = (page) => page.waitForFunction(() => [...document.querySelectorAll(".queue-row p")].some((element) => element.textContent === "riff queue smoke"), { timeout: 10_000 });
+  await Promise.all([queuedOn(host), queuedOn(participant)]);
+  assert.equal(await participant.$(".load-prompt"), null);
+  await host.click(".load-prompt");
+  const emptyOn = (page) => page.waitForFunction(() => document.querySelectorAll(".queue-row").length === 0, { timeout: 10_000 });
+  await Promise.all([emptyOn(host), emptyOn(participant)]);
+
   assert.equal(await participant.$eval(".terminal-heading", (element) => element.textContent.includes("Host terminal live")), true);
   assert.equal(await participant.$eval(".readonly-terminal", (element) => getComputedStyle(element).overflow), "hidden");
   await participant.waitForFunction(() => [...document.querySelectorAll(".participants span")].some((element) => element.getAttribute("title") === "Browser Participant"));
   assert.equal((await participant.$$(".terminal-controls")).length, 0);
   await participantContext.close();
   assert.deepEqual(pageErrors, []);
-  console.log("Tab layouts, one-click Claude rendering, and live participant data passed.");
+  console.log("Tab layouts, one-click Claude rendering, live participant data, and a prompt from staging to Load passed.");
 } finally {
   await browser.close();
 }

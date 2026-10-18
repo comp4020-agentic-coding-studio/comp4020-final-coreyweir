@@ -279,13 +279,14 @@ function BoardView({ store, selected, onSelection, onStageSelection }: {
   );
 }
 
-function RoomView({ roomId, token, queued, facilitator, config, hidden, onDelete, onPreviewUrlChange }: {
+function RoomView({ roomId, token, queued, facilitator, config, hidden, onSend, onDelete, onPreviewUrlChange }: {
   roomId: string;
   token: string | null;
   queued: QueuedPrompt[];
   facilitator: boolean;
   config: HostConfig | null;
   hidden: boolean;
+  onSend: (id: string) => void;
   onDelete: (id: string) => void;
   onPreviewUrlChange: (url: string | null, generation: number) => void;
 }) {
@@ -296,7 +297,7 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, onDelete
       <article className="queue">
         <header className="section-title"><h2>Up next</h2><span>{queued.length}</span></header>
         <div className="queue-list">
-          {queued.map((prompt, index) => <div className="queue-row" key={prompt.id}><span>{index + 1}</span><p>{prompt.text}</p><small>{prompt.author}</small>{facilitator && <button className="load-prompt" onClick={() => terminalRef.current?.loadPrompt(prompt.text)}>Load</button>}{facilitator && <button onClick={() => onDelete(prompt.id)} aria-label="Remove queued prompt">&times;</button>}</div>)}
+          {queued.map((prompt, index) => <div className="queue-row" key={prompt.id}><span>{index + 1}</span><p>{prompt.text}</p><small>{prompt.author}</small>{facilitator && <button className="load-prompt" onClick={() => { if (terminalRef.current?.loadPrompt(prompt.text)) onSend(prompt.id); }}>Load</button>}{facilitator && <button onClick={() => onDelete(prompt.id)} aria-label="Remove queued prompt">&times;</button>}</div>)}
           {!queued.length && <p className="empty">The host hasn't queued anything yet.</p>}
         </div>
       </article>
@@ -447,7 +448,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 
       <main className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
         {view === "board" && <BoardView store={store} selected={selected} onSelection={setSelected} onStageSelection={stageSelected} />}
-        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
+        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} onAdd={(text) => addPrompt(room.doc, room.prompts, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {people && <PeoplePanel access={access} room={room} onClose={() => setPeople(false)} />}

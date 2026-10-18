@@ -47,8 +47,8 @@ README, PROCESS.md and the reflections are mine to write.
 
 ### P1: before crit 10 (19 Oct)
 
-Left, in order (18 Oct): ~~the push token on the client (3)~~, Load leaving
-the queue with `queue.send` (5), the API proxy (6), then deleting
+Left, in order (18 Oct): ~~the push token on the client (3)~~, ~~Load leaving
+the queue with `queue.send` (5)~~, the API proxy (6), then deleting
 `/data/yjs` and the old `riff-*` rows.
 
 1. ~~**Fix the client build.**~~ Done. The forks are packed archives in
@@ -245,9 +245,18 @@ the queue with `queue.send` (5), the API proxy (6), then deleting
    also logs connect and disconnect, and staged and queued prompts added
    and deleted, with who, read on dev and live. Left: end (with ADR 0003),
    a rehearsal of crit 10's narration from `flyctl logs`.
-   - Left (next): Load takes the prompt out of the queue and the log says
-     `queue.send`, so a sent prompt is told apart from a removed one. Today
-     Load only types into the host's terminal and the prompt stays queued.
+   - ~~Load takes the prompt out of the queue and the log says
+     `queue.send`~~ (18 Oct). Load sets `roomState.lastSent` to the prompt's
+     id in the same transaction as the delete, and the server's watcher
+     reads it to log `queue.send` instead of `queue.delete`. That is the
+     host's claim; the server never sees the terminal. Checked by
+     `npm run test:audit-log` (in `app/`): the server in-process on a
+     throwaway database, a host and a guest staging, queueing, sending and
+     removing, every row read back from `events` (who, action, id, and no
+     prompt text). Mutation: logging every queue delete as `queue.delete`
+     turns it red. `terminal-browser-smoke.mjs` now carries a prompt from
+     a participant's staging to the host's Load, gone from both queues; the
+     dev log showed `queue.add` then `queue.send` for it.
 
    Plan as agreed: `events(seq, at, room_id, member_id, action,
    detail_json)`. `detail_json` is a flat object of scalars (ids, counts,
