@@ -55,3 +55,12 @@
 .pending-invites{margin:0!important;padding:0!important}
 .pending-invites li{min-height:28px!important}
 .pending-invites li button{margin-left:auto}
+/* Room lifecycle (docs/adr/0003) */
+.room-banner{flex:0 0 auto;margin:0;padding:8px 18px;border-bottom:1px solid #e6d9b8;background:#fbf4e2;color:#5d4a1c;font-size:10px;line-height:1.45}.room-banner.ended{border-color:#d9d9d3;background:#ededE8;color:#444}.room-banner strong{font-variant-numeric:tabular-nums}
+.room-name small.board-fate{color:#85857f}
+.people-panel .board-fate{margin:12px 16px 0;display:flex;align-items:center;gap:8px;font-size:9px;color:#666;line-height:1.4}.people-panel .board-fate p{margin:0;flex:1}.people-panel .board-fate button,.end-room button{padding:5px 8px;border:1px solid #d5d5cf;border-radius:3px;background:white;font-size:9px;white-space:nowrap}
+.end-room{margin:0 16px 16px;display:grid;gap:8px}.end-room>button{justify-self:start;color:#8b3e32}.end-room p{margin:0;font-size:9px;line-height:1.45;color:#444}.end-room span{display:flex;gap:8px}.end-room button.danger{border-color:#b75243;background:#b75243;color:white}
+.entry-card label.check{display:flex;align-items:flex-start;gap:9px;font-weight:600}.entry-card label.check input{width:15px;height:15px;margin:1px 0 0;flex:0 0 auto}.entry-card label.check span{display:grid;gap:3px}.entry-card label.check small{margin:0;color:#888;font-weight:400;line-height:1.4}
+.entry-card .board-fate{margin:-8px 0 0}
+.ended-note{margin:0;padding:10px 26px;border-bottom:1px solid #ededE8;background:#f5f5f1;font-size:10px;color:#444}
+.people-panel .form-error{margin:12px 16px 0}.staging .section-title+.prompt-list{padding-top:12px}

@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { Awareness } from "y-protocols/awareness";
-import type { Access } from "./api";
+import type { Access, RoomState } from "./api";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -211,6 +211,9 @@ export function useRoom(access: Access) {
     members: memberList,
     code: typeof roomInfo.get("code") === "string" ? String(roomInfo.get("code")) : access.room.code,
     locked: roomInfo.has("locked") ? roomInfo.get("locked") === true : access.room.locked,
+    keep: roomInfo.has("keep") ? roomInfo.get("keep") === true : access.room.keep,
+    state: (["live", "away", "ended"].includes(String(roomInfo.get("state"))) ? roomInfo.get("state") : access.room.state) as RoomState,
+    endsAt: roomInfo.has("endsAt") ? (typeof roomInfo.get("endsAt") === "number" ? Number(roomInfo.get("endsAt")) : null) : access.room.endsAt,
     previewLive: roomState.get("previewLive") === true,
     previewGeneration: Number(roomState.get("previewGeneration") ?? 0),
     roomState,

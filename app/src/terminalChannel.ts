@@ -36,6 +36,8 @@ export function useTerminalChannel(roomId: string, token: string | null, facilit
   useEffect(() => {
     let active = true;
     let reconnectTimer = 0;
+    // The relay's refusals are final: asking again gets the same answer.
+    let refused = false;
 
     function connect() {
       if (!active) return;
@@ -64,14 +66,16 @@ export function useTerminalChannel(roomId: string, token: string | null, facilit
         } else if (message.type === "host-accepted") {
           setHostConnected(true);
         } else if (message.type === "error") {
-          setError(String(message.code ?? "terminal-relay-error"));
+          const code = String(message.code ?? "terminal-relay-error");
+          if (code === "room-ended" || code === "not-a-member") refused = true;
+          setError(code);
         }
       });
       socket.addEventListener("close", () => {
         if (socketRef.current === socket) socketRef.current = null;
         setConnected(false);
         if (facilitator) setHostConnected(false);
-        if (active) reconnectTimer = window.setTimeout(connect, 1200);
+        if (active && !refused) reconnectTimer = window.setTimeout(connect, 1200);
       });
       socket.addEventListener("error", () => setError("connection-error"));
     }

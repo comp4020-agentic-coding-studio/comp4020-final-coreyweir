@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Quickdraw, useQuickdrawStore, type ShapeRecord } from "@quickdrawjs/react";
 import { addPrompt, replaceYText, saveName, savedName, type PromptSnapshot, type QueuedPrompt, type RoomMember, useRoom } from "./room";
 import {
-  type Access, ApiError, createRoom, currentUser, enterRoom, joinRoom, removeMember, roomByCode, rotateCode, setLocked,
+  type Access, ApiError, createRoom, currentUser, endRoom, enterRoom, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
   acceptInvite, addColleague, cancelInvite, declineInvite, inviteToRoom, listColleagues, removeColleague, watchRooms,
-  type Colleagues, type ListedRoom, type RoomList,
+  type Colleagues, type ListedRoom, type RoomInfo, type RoomList,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
 } from "./api";
 import { useBoardSync } from "./boardSync";
@@ -39,6 +39,17 @@ function goToRoom(roomId: string) {
   location.assign(`${location.pathname}?${new URLSearchParams({ id: roomId })}`);
 }
 
+// What happens to the board when the room ends (docs/adr/0003). The same
+// words everywhere someone decides whether to draw.
+function boardFate(keep: boolean) {
+  return keep ? "The server keeps this board after the room ends." : "The server deletes this board when the room ends.";
+}
+
+function countdown(until: number, now: number) {
+  const seconds = Math.max(0, Math.ceil((until - now) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 function problem(error: unknown, login?: string) {
   if (!(error instanceof ApiError)) return "Couldn't reach Riff. Check your connection and try again.";
   switch (error.code) {
@@ -54,6 +65,7 @@ function problem(error: unknown, login?: string) {
     case "removed": return "The host removed you from that room.";
     case "bad_name": return "Names need 1 to 40 visible characters.";
     case "slow_down": return "Too many attempts from here. Wait a few minutes and try again.";
+    case "others_joined": return "Someone else has been in this room, so it can't start keeping the board now: they joined when it wasn't kept.";
     default: return `Something went wrong (${error.code}).`;
   }
 }
@@ -288,8 +300,10 @@ function ColleaguesPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Landing({ code: sharedCode = "" }: { code?: string }) {
+function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; keep?: boolean }) {
   const user = useUser();
+  const [keepBoard, setKeepBoard] = useState(true);
+  const ended = new URLSearchParams(location.search).get("ended")?.replace(/[^A-Z0-9]/gi, "").slice(0, 16);
   const [mode, setMode] = useState<"join" | "host">(() => new URLSearchParams(location.search).get("setup") === "host" ? "host" : "join");
   const [code, setCode] = useState(sharedCode);
   const [name, setName] = useState(savedName);
@@ -326,6 +340,7 @@ function Landing({ code: sharedCode = "" }: { code?: string }) {
       </section>
       <section className="entry-card">
         <Account user={user} onColleagues={() => setColleagues((open) => !open)} />
+        {ended && <p className="ended-note" role="status">Room <code>{ended}</code> has ended.</p>}
         {colleagues ? <ColleaguesPanel onClose={() => setColleagues(false)} /> : <>
         <YourRooms name={shownName} />
         <nav><button className={mode === "join" ? "active" : ""} onClick={() => setMode("join")}>Join</button><button className={mode === "host" ? "active" : ""} onClick={() => setMode("host")}>Host</button></nav>
@@ -338,6 +353,7 @@ function Landing({ code: sharedCode = "" }: { code?: string }) {
           }}>
             <label>Your name<input autoFocus={!sharedCode || undefined} required maxLength={40} value={shownName} onChange={(event) => setName(event.target.value)} placeholder="e.g. Corey" /></label>
             <label>Room code<input required maxLength={16} value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="e.g. K7MQ2P" autoCapitalize="characters" autoComplete="off" /></label>
+            {sharedKeep !== undefined && code === sharedCode && <p className="local-note board-fate">{boardFate(sharedKeep)}</p>}
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="primary" disabled={busy || !code.trim() || !shownName.trim()}>{busy ? "Joining..." : "Join room"}</button>
           </form>
@@ -346,13 +362,14 @@ function Landing({ code: sharedCode = "" }: { code?: string }) {
             event.preventDefault();
             saveName(name);
             localStorage.setItem("riff-host-config", JSON.stringify(config));
-            void submit(() => createRoom(shownName.trim()));
+            void submit(() => createRoom(shownName.trim(), keepBoard));
           }}>
             <label>Your name<input required maxLength={40} value={shownName} onChange={(event) => setName(event.target.value)} placeholder="e.g. Corey" /></label>
             <label>Claude base URL<input type="url" required value={config.baseUrl} onChange={(event) => updateConfig("baseUrl", event.target.value)} /></label>
             <label>API token<input type="password" required value={config.token} onChange={(event) => updateConfig("token", event.target.value)} placeholder="Stored on this device" /></label>
             <label>Git repository <small>Optional</small><input value={config.repo} onChange={(event) => updateConfig("repo", event.target.value)} placeholder="https://github.com/group/project.git" /></label>
             <GitHubPush user={user} back="/?setup=host" beforeLeaving={() => { saveName(name); localStorage.setItem("riff-host-config", JSON.stringify(config)); }} />
+            <label className="check"><input type="checkbox" checked={keepBoard} onChange={(event) => setKeepBoard(event.target.checked)} /><span>Keep the board after the room ends<small>{keepBoard ? "Kept on the server while space allows, read-only. Everyone who joins is told." : "Deleted from the server when the room ends. Everyone who joins is told."}</small></span></label>
             <p className="local-note">These settings stay in this browser and are never included in the room link.</p>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="primary" disabled={busy}>{busy ? "Creating..." : "Create room"}</button>
@@ -364,7 +381,7 @@ function Landing({ code: sharedCode = "" }: { code?: string }) {
   );
 }
 
-function PromptCard({ prompt, canQueue, onQueue, onDelete }: { prompt: PromptSnapshot; canQueue: boolean; onQueue: () => void; onDelete: () => void }) {
+function PromptCard({ prompt, canQueue, readOnly, onQueue, onDelete }: { prompt: PromptSnapshot; canQueue: boolean; readOnly: boolean; onQueue: () => void; onDelete: () => void }) {
   const [, render] = useState(0);
 
   useEffect(() => {
@@ -378,17 +395,18 @@ function PromptCard({ prompt, canQueue, onQueue, onDelete }: { prompt: PromptSna
       <header>
         <span className="author-dot">{prompt.author.slice(0, 1).toUpperCase()}</span><span>{prompt.author}</span>
         {prompt.sourceId && <small>From board</small>}
-        <button onClick={onDelete} aria-label="Delete prompt">&times;</button>
+        {!readOnly && <button onClick={onDelete} aria-label="Delete prompt">&times;</button>}
       </header>
-      <textarea value={prompt.text.toString()} onChange={(event) => replaceYText(prompt.text, event.target.value)} aria-label={`Prompt by ${prompt.author}`} />
-      <footer><span>Shared draft</span><button disabled={!canQueue} title={canQueue ? "Add to queue" : "Only the host can queue prompts"} onClick={onQueue}>Queue</button></footer>
+      <textarea readOnly={readOnly} value={prompt.text.toString()} onChange={(event) => replaceYText(prompt.text, event.target.value)} aria-label={`Prompt by ${prompt.author}`} />
+      <footer><span>Shared draft</span><button disabled={!canQueue || readOnly} title={canQueue ? "Add to queue" : "Only the host can queue prompts"} onClick={onQueue}>Queue</button></footer>
     </article>
   );
 }
 
-function Staging({ prompts, canQueue, onAdd, onQueue, onDelete }: {
+function Staging({ prompts, canQueue, readOnly, onAdd, onQueue, onDelete }: {
   prompts: PromptSnapshot[];
   canQueue: boolean;
+  readOnly: boolean;
   onAdd: (text: string) => void;
   onQueue: (prompt: PromptSnapshot) => void;
   onDelete: (id: string) => void;
@@ -399,7 +417,7 @@ function Staging({ prompts, canQueue, onAdd, onQueue, onDelete }: {
   return (
     <aside className="staging">
       <header className="section-title"><h2>Staging</h2><span>{staged.length}</span></header>
-      <form className="new-prompt" onSubmit={(event) => {
+      {!readOnly && <form className="new-prompt" onSubmit={(event) => {
         event.preventDefault();
         if (!draft.trim()) return;
         onAdd(draft.trim());
@@ -407,29 +425,31 @@ function Staging({ prompts, canQueue, onAdd, onQueue, onDelete }: {
       }}>
         <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Add a thought for the group..." />
         <button disabled={!draft.trim()}>Stage prompt</button>
-      </form>
+      </form>}
       <div className="prompt-list">
-        {staged.map((prompt) => <PromptCard key={prompt.id} prompt={prompt} canQueue={canQueue} onQueue={() => onQueue(prompt)} onDelete={() => onDelete(prompt.id)} />)}
+        {staged.map((prompt) => <PromptCard key={prompt.id} prompt={prompt} canQueue={canQueue} readOnly={readOnly} onQueue={() => onQueue(prompt)} onDelete={() => onDelete(prompt.id)} />)}
         {!staged.length && <p className="empty">Ideas staged from the board will appear here.</p>}
       </div>
     </aside>
   );
 }
 
-function BoardView({ store, selected, onSelection, onStageSelection }: {
+function BoardView({ store, selected, readOnly, onSelection, onStageSelection }: {
   store: ReturnType<typeof useQuickdrawStore>;
+  readOnly: boolean;
   selected: string[];
   onSelection: (ids: string[]) => void;
   onStageSelection: () => void;
 }) {
   return (
     <section className="board-wrap">
-      <div className="board-actions"><span>Draw, write, paste images, or move things around.</span><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button></div>
+      <div className="board-actions">{readOnly ? <span>The room has ended: you can look, but not change anything.</span> : <><span>Draw, write, paste images, or move things around.</span><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button></>}</div>
       <Quickdraw
         className="quickdraw-surface"
         store={store}
         grid="dots"
         theme="light"
+        readonly={readOnly}
         styles={{ dash: "solid" }}
         themeToggle={false}
         watermark={false}
@@ -439,8 +459,9 @@ function BoardView({ store, selected, onSelection, onStageSelection }: {
   );
 }
 
-function RoomView({ roomId, token, queued, facilitator, config, hidden, onSend, onDelete, onPreviewUrlChange }: {
+function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, onSend, onDelete, onPreviewUrlChange }: {
   roomId: string;
+  ended: boolean;
   token: string | null;
   queued: QueuedPrompt[];
   facilitator: boolean;
@@ -453,7 +474,8 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, onSend, 
   const terminalRef = useRef<TerminalPaneHandle>(null);
   return (
     <section className="crit-room" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
-      <TerminalPane ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} />
+      {/* A participant's terminal stops asking once the room ends; a new one starts if the host revives it. Never remount the host's: it runs Claude. */}
+      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} />
       <article className="queue">
         <header className="section-title"><h2>Up next</h2><span>{queued.length}</span></header>
         <div className="queue-list">
@@ -559,6 +581,57 @@ function InviteBox({ access, members }: { access: Access; members: RoomMember[] 
   );
 }
 
+// What the room's state means for the people in it (docs/adr/0003). The
+// host never sees these: their page is what keeps the room live.
+function RoomBanner({ state, endsAt, keep, facilitator }: { state: RoomInfo["state"]; endsAt: number | null; keep: boolean; facilitator: boolean }) {
+  const now = useNow(1000);
+  if (facilitator || state === "live") return null;
+  if (state === "away") {
+    const left = endsAt === null ? null : endsAt - now;
+    return (
+      <p className="room-banner away" role="status">
+        The host isn't connected, so there's no Claude or preview for now. The whiteboard still works.{" "}
+        {left === null ? null : left > 0 ? <>If they don't come back, the room ends in <strong>{countdown(endsAt!, now)}</strong>.</> : <>The room is ending.</>}
+      </p>
+    );
+  }
+  return (
+    <p className="room-banner ended" role="status">
+      This room has ended. {keep ? "The server keeps this board while space allows; you can look, but not change it." : "The server doesn't keep this board."}
+    </p>
+  );
+}
+
+// The host can end the room for everyone. Ending isn't undone by anyone
+// but the host coming back, so it asks first and says what happens.
+function EndRoom({ access, code, keep }: { access: Access; code: string; keep: boolean }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function end() {
+    setBusy(true);
+    setError(null);
+    try {
+      await endRoom(access);
+      // Leave at once: the host's page reconnecting would revive the room.
+      location.assign(`${location.pathname}?${new URLSearchParams({ ended: code })}`);
+    } catch (failure) {
+      setError(problem(failure));
+      setBusy(false);
+    }
+  }
+
+  if (!asking) return <div className="end-room"><button onClick={() => setAsking(true)}>End room</button></div>;
+  return (
+    <div className="end-room asking">
+      <p>End this room for everyone? Claude and the preview stop, and {keep ? "the board stays on the server, read-only, while space allows." : "the server deletes the board."}</p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <span><button className="danger" disabled={busy} onClick={() => void end()}>{busy ? "Ending..." : "End it"}</button><button disabled={busy} onClick={() => setAsking(false)}>Cancel</button></span>
+    </div>
+  );
+}
+
 // Who's in the room, as the server says. The host also gets the room's
 // controls: a new code, the lock, and removing someone.
 function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnType<typeof useRoom>; onClose: () => void }) {
@@ -576,6 +649,12 @@ function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnTy
     }
   }
 
+  function changeKeep(keep: boolean) {
+    const others = room.members.some((member) => !member.host);
+    if (!keep && others && !confirm("Stop keeping the board? With others in the room, you can't start keeping it again.")) return;
+    void act(() => setKeep(access, keep));
+  }
+
   function remove(member: RoomMember) {
     if (!confirm(`Remove ${member.name} from this room? They lose access straight away.`)) return;
     void act(() => removeMember(access, member.id));
@@ -591,6 +670,10 @@ function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnTy
           <button onClick={() => act(() => setLocked(access, !room.locked))} title="A locked room takes no new joins by code">{room.locked ? "Unlock" : "Lock"}</button>
         </div>
       )}
+      <div className="board-fate">
+        <p>{boardFate(room.keep)}</p>
+        {host && <button onClick={() => changeKeep(!room.keep)}>{room.keep ? "Stop keeping it" : "Keep it"}</button>}
+      </div>
       {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
         {present.map((member) => (
@@ -606,7 +689,23 @@ function PeoplePanel({ access, room, onClose }: { access: Access; room: ReturnTy
       </ul>
       {host && <InviteBox access={access} members={room.members} />}
       {host && <p className="local-note">If a code leaks: give the room a new code, remove anyone who shouldn't be here, then lock it.</p>}
+      {host && <EndRoom access={access} code={room.code} keep={room.keep} />}
     </aside>
+  );
+}
+
+// Shut out of a room: removed by the host, or the room ended and the server
+// didn't keep its board.
+function RoomClosed({ reason }: { reason: string }) {
+  const ended = reason === "room-ended";
+  return (
+    <main className="landing">
+      <section className="entry-card">
+        <h2>{ended ? "This room has ended" : reason === "removed" ? "The host removed you from this room" : "You're no longer in this room"}</h2>
+        <p>{ended ? "The server doesn't keep this board." : reason === "removed" ? "You can't open it again unless they invite you back." : "The host removed you, or the room has ended."}</p>
+        <button className="primary" onClick={() => location.assign(location.pathname)}>Back to start</button>
+      </section>
+    </main>
   );
 }
 
@@ -623,6 +722,9 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
   const [preview, setPreview] = useState<{ url: string; revision: number } | null>(null);
   const store = useQuickdrawStore();
   const room = useRoom(access);
+  // An ended room that keeps its board can still be looked at; the server
+  // refuses writes, so the page doesn't offer them.
+  const readOnly = room.state === "ended" && !facilitator;
 
   useBoardSync(room.doc, store);
 
@@ -653,22 +755,13 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
   }
 
   if (room.shutOut) {
-    return (
-      <main className="landing">
-        <section className="entry-card">
-          <h2>You're no longer in this room</h2>
-          <p>The host removed you, or the room has ended.</p>
-          <button className="primary" onClick={() => location.assign(location.pathname)}>Back to start</button>
-        </section>
-      </main>
-    );
+    return <RoomClosed reason={room.shutOut} />;
   }
-
   return (
     <div className="app">
       <header className="topbar">
         <button className="brand brand-button" onClick={() => location.assign(location.pathname)}>riff</button>
-        <div className="room-name"><i className={room.status}></i><span>Room {room.code}</span><small>{room.status}</small></div>
+        <div className="room-name"><i className={room.status}></i><span>Room {room.code}</span><small>{room.status}</small><small className="board-fate" title={boardFate(room.keep)}>· board {room.keep ? "kept" : "not kept"}</small></div>
         <nav>
           <button className={view === "board" ? "active" : ""} onClick={() => setView("board")}>Board</button>
           <button className={view === "room" ? "active" : ""} onClick={() => setView("room")}>Room</button>
@@ -678,11 +771,12 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
         <button className="share" onClick={copyRoomLink}>{copied ? "Copied" : "Share room"}</button>
       </header>
 
+      <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} />
       <main className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
-        {view === "board" && <BoardView store={store} selected={selected} onSelection={setSelected} onStageSelection={stageSelected} />}
-        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
+        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} onSelection={setSelected} onStageSelection={stageSelected} />}
+        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
-        {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} onAdd={(text) => addPrompt(room.doc, room.prompts, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
+        {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly} onAdd={(text) => addPrompt(room.doc, room.prompts, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {people && <PeoplePanel access={access} room={room} onClose={() => setPeople(false)} />}
       </main>
     </div>
@@ -693,14 +787,15 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 // connects: a shared link (?room=CODE) for someone already in the room goes
 // straight in; for anyone else it's the join form with the code filled in.
 function RoomGate({ roomId, code }: { roomId: string | null; code: string | null }) {
-  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean } | { join: string } | { error: string } | null>(null);
+  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean } | { join: string; keep?: boolean } | { error: string } | null>(null);
   const [withoutGitHub, setWithoutGitHub] = useState(false);
   const user = useUser();
 
   useEffect(() => {
     let active = true;
     (async () => {
-      const id = roomId ?? (await roomByCode(code ?? "")).id;
+      const found = roomId ? null : await roomByCode(code ?? "");
+      const id = roomId ?? found!.id;
       const access = await enterRoom(id);
       if (!active) return;
       if (access) {
@@ -711,7 +806,7 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
         if (!active) return;
         setState({ access, githubToken, pushLost: access.member.host && hadPush && !githubToken });
       } else {
-        setState(code ? { join: code } : { error: "This browser isn't in that room. Ask the host for the code." });
+        setState(code ? { join: code, keep: found?.keep } : { error: "This browser isn't in that room. Ask the host for the code." });
       }
     })().catch((failure) => active && setState(code && failure instanceof ApiError && failure.status === 404 ? { join: code } : { error: problem(failure) }));
     return () => {
@@ -720,7 +815,7 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
   }, [code, roomId]);
 
   if (!state) return <main className="landing"><section className="entry-card"><p>Finding the room...</p></section></main>;
-  if ("join" in state) return <Landing code={state.join} />;
+  if ("join" in state) return <Landing code={state.join} keep={state.keep} />;
   if ("error" in state) {
     return (
       <main className="landing">
@@ -732,6 +827,7 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
     );
   }
   const facilitator = state.access.member.host;
+  if (!facilitator && state.access.room.state === "ended" && !state.access.room.keep) return <RoomClosed reason="room-ended" />;
   const storedConfig = facilitator ? savedHostConfig() : null;
   const { githubToken, pushLost } = state;
   // A host who meant to push (a repository, or a token that has since

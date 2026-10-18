@@ -2,7 +2,10 @@
 // server/auth.mjs). The server decides every role; this only carries
 // credentials: a guest's room secret, or the session cookie it sends itself.
 
-export type RoomInfo = { id: string; code: string; locked: boolean };
+// `keep`: whether the server keeps the board after the room ends. `state`
+// and `endsAt` follow the host: away rooms end at `endsAt` (docs/adr/0003).
+export type RoomState = "live" | "away" | "ended";
+export type RoomInfo = { id: string; code: string; locked: boolean; keep: boolean; state: RoomState; endsAt: number | null };
 // previewKey goes in the preview relay's path: the participant's iframe
 // can't send the secret, so the relay checks this instead.
 export type MemberInfo = { id: number; name: string; host: boolean; previewKey: string; secret?: string };
@@ -66,8 +69,8 @@ function accessFrom({ room, member }: { room: RoomInfo; member: MemberInfo }): A
   return { room, member, token: member.secret ?? storedSecret(room.id) };
 }
 
-export async function createRoom(name: string) {
-  return accessFrom(await call("/api/rooms", { method: "POST", body: { name } }));
+export async function createRoom(name: string, keep = true) {
+  return accessFrom(await call("/api/rooms", { method: "POST", body: { name, keep } }));
 }
 
 export async function joinRoom(code: string, name: string) {
@@ -109,6 +112,18 @@ export function removeMember(access: Access, memberId: number) {
   return call<void>(`/api/rooms/${access.room.id}/members/${memberId}`, { method: "DELETE", token: access.token });
 }
 
+// Host only. Stopping keeping is always allowed; starting again answers
+// 409 others_joined once anyone else has been in the room.
+export function setKeep(access: Access, keep: boolean) {
+  return call<{ keep: boolean }>(`/api/rooms/${access.room.id}/keep`, { method: "POST", body: { keep }, token: access.token });
+}
+
+// Host only. The host's page must leave the room afterwards: the host
+// opening it again revives it.
+export function endRoom(access: Access) {
+  return call<{ state: "ended" }>(`/api/rooms/${access.room.id}/end`, { method: "POST", body: {}, token: access.token });
+}
+
 // Your rooms, invites and colleagues (docs/adr/0008).
 
 export type PendingInvite = { githubId: number; login: string };
@@ -117,6 +132,7 @@ export type ListedRoom = {
   code: string;
   role: "host" | "participant";
   state: "live" | "away";
+  keep: boolean;
   hostName: string;
   hostLastSeen: number | null;
   endsAt: number | null;
