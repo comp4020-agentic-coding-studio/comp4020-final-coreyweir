@@ -166,6 +166,8 @@ export type Session = {
   saved: () => Promise<void>;
   refused: () => Promise<void>;
   shutOut: Promise<string>;
+  // close codes of this session's sockets so far (1009: message too big)
+  closeCodes: () => number[];
   leave: () => void;
 };
 
@@ -187,10 +189,15 @@ export function open(baseUrl: string, document: string, options: OpenOptions = {
   const doc = new Y.Doc();
   const origin = options.origin === undefined ? originOf(baseUrl) : options.origin;
   const refusals: Array<() => void> = [];
-  const Socket = socketClass(origin, (bytes) => {
-    const status = syncStatus(bytes);
-    if (status && status.document === document && !status.applied) refusals.splice(0).forEach((f) => f());
-  });
+  const closes: number[] = [];
+  const Socket = socketClass(
+    origin,
+    (bytes) => {
+      const status = syncStatus(bytes);
+      if (status && status.document === document && !status.applied) refusals.splice(0).forEach((f) => f());
+    },
+    (code) => closes.push(code),
+  );
   let onAuthFailed: (reason: string) => void = () => {};
   const shutOut = new Promise<string>((resolve) => (onAuthFailed = resolve));
   const socket = new HocuspocusProviderWebsocket({
@@ -250,7 +257,7 @@ export function open(baseUrl: string, document: string, options: OpenOptions = {
       if (!state || synced) return;
       synced = true;
       clearTimeout(timer);
-      resolve({ doc, saved, refused, shutOut, leave });
+      resolve({ doc, saved, refused, shutOut, closeCodes: () => [...closes], leave });
     });
   });
 }
@@ -355,11 +362,12 @@ export function servePreview(baseUrl: string, host: Member, page: string): Promi
 
 // The `ws` client with a fixed Origin header (a browser always sends one;
 // node's built-in WebSocket can't), and a tap on what the server sends.
-function socketClass(origin: string | null, tap: (bytes: Uint8Array) => void) {
+function socketClass(origin: string | null, tap: (bytes: Uint8Array) => void, onClose: (code: number) => void = () => {}) {
   return class extends WebSocket {
     constructor(url: string | URL, protocols?: string | string[]) {
       super(url, protocols, origin ? { origin } : {});
       this.on("message", (data: RawData) => tap(toBytes(data)));
+      this.on("close", (code: number) => onClose(code));
     }
   };
 }
