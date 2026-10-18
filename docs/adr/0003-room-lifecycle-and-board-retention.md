@@ -1,8 +1,8 @@
 # 3. Room lifecycle and board retention
 
 - Status: accepted; lifecycle, keeping and End room implemented 2026-10-18;
-  pruning and the size cap decided and implemented 2026-10-18 (amendment
-  below); local copies and export not yet
+  pruning and the size cap decided and implemented 2026-10-18; local copies,
+  export and import decided 2026-10-19, not yet built (amendments below)
 - Date: 2026-10-12
 
 ## Context
@@ -369,3 +369,66 @@ the client (`7d27daa`).
   the limit, and the server then fills the room (the smoke waits for the
   People panel's count for this reason). Pruning has only run against a
   stand-in for the disk; the volume is at 7%.
+
+## Amendment (2026-10-19): local copies, export and import
+
+The Decision above settled what local copies, export and import are for.
+Building them raised five questions, settled on 19 October.
+
+What was already there: every browser that opens a room keeps that room's
+shared document (the board and the staged prompts) in IndexedDB, filed
+under the permanent room id (`app/src/room.ts`). Nothing listed those
+copies, nothing deleted them, and nothing recorded which room they were. So
+on a shared lab machine they were silent, which the Decision rules out. The
+queue lives in the control document, which isn't copied.
+
+### Decided
+
+- **One list, not two.** The landing page already has "Your rooms" (live
+  rooms, ADR 0008). Local copies go in a single "Boards on this browser"
+  list below it, each marked hosted or joined, with Open, Export and
+  Delete. That replaces "Rooms you hosted" and "Boards you've been in".
+  The list also shows copies made before this list existed, found by their
+  IndexedDB name, so none stays silent.
+- **This browser records each room when it opens it:** the id, the code,
+  whether it hosted, the host's name, and when it first and last opened it.
+  That's what the list shows; the copy itself is unchanged.
+- **Open** goes into the room if it's in "Your rooms". Otherwise (ended,
+  pruned, or this browser is no longer a member) it shows the copy
+  read-only, from IndexedDB alone, with no connection to the server, and
+  says it's this browser's copy and when it was last opened.
+- **Delete removes the copy and this browser's membership** of the room:
+  nothing of the room is left on the machine. A live room can be joined
+  again by its code; a member who joined with a GitHub account stays a
+  member through the account.
+- **Signing out offers to delete** the copies too ("Also delete the N
+  boards on this browser?"). Guests have no sign-out, so the list has
+  "Delete all".
+- **Export** is one JSON file, `riff-<code>-<date>.json`: a format name and
+  version, the export date, the room code, the board (quickdraw's records,
+  images as they are), the staged prompts, and the queue as everyone in the
+  room sees it. Participants can already read the queue, so including it
+  shows nothing new. Exporting from the list (a copy, not the room) has no
+  queue to include. The code is there as the room's name; a code only
+  joins a live, unlocked room, and the host can rotate it.
+- **Import is only into a new room**, an optional file in the host form.
+  Nothing overwrites or adds to a board people are already in. The file is
+  checked before the room is created: it must fit in a room (4 MB), and
+  only known record types and fields are copied (quickdraw's shapes and
+  image assets, and prompt author and text). The queue comes in as staged
+  prompts, so nothing is sent before the new host queues it. Images are
+  copied byte for byte.
+- **The full banner** says "Export it" from now on.
+
+### The case for the options we didn't pick
+
+**Two lists** match the Decision's wording, but with "Your rooms" above
+they'd make three lists of rooms on one page, and most rooms would be in
+two of them. **Deleting only the copy** would leave a room secret behind,
+and the copy would quietly come back the next time the room was opened.
+**Leaving copies at sign-out** keeps them for whoever uses the machine next;
+**always deleting** would surprise someone on their own laptop. **Import
+into a live room** is handy for a host who forgot to import at the start,
+but it would put a file's contents in front of people mid-session without
+them choosing it. **Leaving the queue out** would lose the prompts the host
+had already approved.
