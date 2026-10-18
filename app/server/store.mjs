@@ -71,6 +71,30 @@ export function migrate(db) {
     ) STRICT;
     CREATE INDEX IF NOT EXISTS events_by_room ON events (room_id, seq);
     CREATE INDEX IF NOT EXISTS events_by_at ON events (at);
+
+    -- An invite names a GitHub account by its numeric id, which a rename
+    -- doesn't change (docs/adr/0008). The account may not use Riff yet, so
+    -- it's not a users row. Invites go when the room ends.
+    CREATE TABLE IF NOT EXISTS invites (
+      room_id     TEXT    NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+      github_id   INTEGER NOT NULL,
+      login       TEXT    NOT NULL,
+      invited_by  INTEGER NOT NULL REFERENCES room_members (id),
+      created_at  INTEGER NOT NULL,
+      PRIMARY KEY (room_id, github_id)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS invites_by_account ON invites (github_id);
+
+    -- Someone's own list of colleagues: private, one-way, kept until they
+    -- remove it. Also by GitHub id, since you can add someone by username.
+    CREATE TABLE IF NOT EXISTS colleagues (
+      user_id     INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      github_id   INTEGER NOT NULL,
+      login       TEXT    NOT NULL,
+      avatar_url  TEXT,
+      added_at    INTEGER NOT NULL,
+      PRIMARY KEY (user_id, github_id)
+    ) STRICT;
   `);
 }
 
@@ -113,7 +137,44 @@ export function createStore(db) {
   const s = {
     roomById: q("SELECT * FROM rooms WHERE id = ?"),
     roomByCode: q("SELECT * FROM rooms WHERE code = ? AND state <> 'ended'"),
-    insertRoom: q("INSERT INTO rooms (id, code, created_at, host_last_seen) VALUES (?, ?, ?, ?)"),
+    // A new room is "away" until its host's first socket arrives.
+    insertRoom: q("INSERT INTO rooms (id, code, created_at, host_last_seen, state) VALUES (?, ?, ?, ?, 'away')"),
+    hostArrived: q("UPDATE rooms SET state = 'live', host_last_seen = ?, ended_at = NULL WHERE id = ?"),
+    hostLeft: q("UPDATE rooms SET state = 'away', host_last_seen = ? WHERE id = ? AND state = 'live'"),
+    endRoom: q("UPDATE rooms SET state = 'ended', ended_at = ? WHERE id = ? AND state <> 'ended'"),
+    reviveRoom: q("UPDATE rooms SET state = 'away', host_last_seen = ?, ended_at = NULL WHERE id = ? AND state = 'ended'"),
+    overdueRooms: q("SELECT id FROM rooms WHERE state = 'away' AND host_last_seen < ?"),
+    // After a restart nobody is connected, so a live room's host is away
+    // from that moment and gets the whole grace period to come back.
+    liveToAway: q("UPDATE rooms SET state = 'away', host_last_seen = ? WHERE state = 'live'"),
+    hostOf: q("SELECT * FROM room_members WHERE room_id = ? AND is_host"),
+    // The rooms a signed-in user is in, newest first.
+    roomsOfUser: q(`SELECT r.*, m.id AS member_id, m.is_host FROM room_members m JOIN rooms r ON r.id = m.room_id
+                    WHERE m.user_id = ? AND m.removed_at IS NULL AND r.state <> 'ended' ORDER BY r.created_at DESC`),
+    insertInvite: q(`INSERT INTO invites (room_id, github_id, login, invited_by, created_at) VALUES (?, ?, ?, ?, ?)
+                     ON CONFLICT (room_id, github_id) DO UPDATE SET login = excluded.login`),
+    invite: q("SELECT * FROM invites WHERE room_id = ? AND github_id = ?"),
+    deleteInvite: q("DELETE FROM invites WHERE room_id = ? AND github_id = ?"),
+    deleteRoomInvites: q("DELETE FROM invites WHERE room_id = ?"),
+    invitesOfRoom: q("SELECT github_id, login, created_at FROM invites WHERE room_id = ? ORDER BY created_at"),
+    invitesFor: q(`SELECT i.room_id, i.created_at, r.code, inviter.name AS invited_by FROM invites i
+                   JOIN rooms r ON r.id = i.room_id JOIN room_members inviter ON inviter.id = i.invited_by
+                   WHERE i.github_id = ? AND r.state <> 'ended' ORDER BY i.created_at DESC`),
+    userByGithubId: q("SELECT * FROM users WHERE github_id = ?"),
+    restoreMember: q("UPDATE room_members SET removed_at = NULL WHERE id = ?"),
+    colleagues: q("SELECT github_id, login, avatar_url, added_at FROM colleagues WHERE user_id = ? ORDER BY login COLLATE NOCASE"),
+    insertColleague: q(`INSERT INTO colleagues (user_id, github_id, login, avatar_url, added_at) VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT (user_id, github_id) DO UPDATE SET login = excluded.login, avatar_url = excluded.avatar_url`),
+    deleteColleague: q("DELETE FROM colleagues WHERE user_id = ? AND github_id = ?"),
+    // GitHub users who were in a room with this one, most recent first.
+    recentlyWorkedWith: q(`SELECT u.github_id, u.login, u.avatar_url, MAX(r.created_at) AS last_room_at
+                           FROM room_members me
+                           JOIN room_members them ON them.room_id = me.room_id AND them.user_id IS NOT NULL
+                                AND them.user_id <> me.user_id AND them.removed_at IS NULL
+                           JOIN users u ON u.id = them.user_id
+                           JOIN rooms r ON r.id = me.room_id
+                           WHERE me.user_id = ? AND me.removed_at IS NULL
+                           GROUP BY u.id ORDER BY last_room_at DESC LIMIT 30`),
     setCode: q("UPDATE rooms SET code = ? WHERE id = ?"),
     setLocked: q("UPDATE rooms SET locked = ? WHERE id = ?"),
     insertMember: q(`INSERT INTO room_members (room_id, user_id, secret_hash, is_host, name, name_key, joined_at, last_seen)

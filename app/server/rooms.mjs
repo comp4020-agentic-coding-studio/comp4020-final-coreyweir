@@ -9,9 +9,37 @@ const MINUTE = 60 * 1000;
 
 const PREVIEW_KEY = /^(\d{1,15})\.([\w-]{22})$/;
 
-export function createRooms({ store, auth, audit, origin, previewSecret, onRoomChanged = () => {}, onRemoved = () => {} }) {
+// What GitHub accepts as a username: letters, digits and single hyphens
+// between them, at most 39 characters. Anything else never reaches GitHub.
+export const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+
+export function createRooms({
+  store,
+  auth,
+  audit,
+  origin,
+  previewSecret,
+  // (login) => {id, login, avatarUrl} | null; throws if GitHub can't be asked
+  githubLookup,
+  // ADR 0003: how long a room waits for its host before it ends
+  hostGraceMs = 5 * MINUTE,
+  now = () => Date.now(),
+  onRoomChanged = () => {},
+  onRemoved = () => {},
+  // the room's state or invites changed: "your rooms" lists need resending
+  onListsChanged = () => {},
+  // the room ended or came back: open connections change what they may do
+  onEnded = () => {},
+  onRevived = () => {},
+  log = () => {},
+}) {
   if (!previewSecret) throw new Error("createRooms needs a previewSecret");
+  if (typeof githubLookup !== "function") throw new Error("createRooms needs githubLookup");
   const s = store.statements;
+
+  // After a restart nobody is connected yet (docs/adr/0008).
+  const restarted = s.liveToAway.run(now()).changes;
+  if (restarted) log(`${restarted} live rooms are away until their hosts reconnect`);
   // Rooms are the one thing anyone can create, so creating, joining and
   // looking up codes are limited per address. A full spec run makes about
   // fifteen rooms.
@@ -19,6 +47,8 @@ export function createRooms({ store, auth, audit, origin, previewSecret, onRoomC
     create: createRateLimit({ limit: 60, windowMs: 10 * MINUTE }),
     join: createRateLimit({ limit: 120, windowMs: 10 * MINUTE }),
     lookup: createRateLimit({ limit: 240, windowMs: 10 * MINUTE }),
+    // each invite is a GitHub API call on the app's 5000-an-hour allowance
+    invite: createRateLimit({ limit: 120, windowMs: 10 * MINUTE }),
   };
 
   function limit(name, request) {
@@ -41,10 +71,12 @@ export function createRooms({ store, auth, audit, origin, previewSecret, onRoomC
 
   // A credential for one room: a guest's secret, or the GitHub session
   // cookie of a user who is a member. Null for anything else, including a
-  // removed member, a secret for another room, or an ended room.
-  function resolve(roomId, { token, cookie }) {
-    const room = typeof roomId === "string" ? s.roomById.get(roomId) : undefined;
-    if (!room || room.state === "ended") return null;
+  // removed member or a secret for another room. A member of an ended room
+  // still resolves, with `state: "ended"`, so they can read the board
+  // (ADR 0008); the host resolving revives it, unless `revive` is false.
+  function resolve(roomId, { token, cookie }, { revive = true } = {}) {
+    let room = typeof roomId === "string" ? s.roomById.get(roomId) : undefined;
+    if (!room) return null;
     let member;
     if (token) {
       member = s.memberBySecret.get(hashToken(token));
@@ -54,7 +86,46 @@ export function createRooms({ store, auth, audit, origin, previewSecret, onRoomC
       if (current) member = s.memberByUser.get(room.id, current.user.id);
     }
     if (!member || member.removed_at !== null) return null;
-    return who(room, member);
+    if (room.state === "ended" && member.is_host && revive) {
+      reviveRoom(room, member);
+      room = s.roomById.get(room.id);
+    }
+    return { ...who(room, member), state: room.state };
+  }
+
+  // ---- the room's state (ADR 0008; the server half of ADR 0003) ----
+
+  // The host's first socket arriving, and their last one going.
+  function presence(actor, action) {
+    if (actor?.role !== "host") return;
+    if (action === "connect") s.hostArrived.run(now(), actor.roomId);
+    else if (s.hostLeft.run(now(), actor.roomId).changes) audit.record(actor, "room.away");
+    onListsChanged(actor.roomId);
+  }
+
+  function endRoom(roomId, reason, actor) {
+    if (!s.endRoom.run(now(), roomId).changes) return false;
+    const invites = s.deleteRoomInvites.run(roomId).changes;
+    const room = s.roomById.get(roomId);
+    audit.record(actor ?? { roomId, code: room.code }, "room.end", { reason, invites_dropped: invites || undefined });
+    onEnded(roomId);
+    onListsChanged(roomId);
+    return true;
+  }
+
+  function reviveRoom(room, hostMember) {
+    if (!s.reviveRoom.run(now(), room.id).changes) return;
+    audit.record(who(room, hostMember), "room.revive");
+    onRevived(room.id);
+    onListsChanged(room.id);
+  }
+
+  // Ends every room whose host has been away longer than the grace period.
+  // The state is in SQLite, so a restart doesn't reset anyone's clock.
+  function endOverdue() {
+    let ended = 0;
+    for (const { id } of s.overdueRooms.all(now() - hostGraceMs)) if (endRoom(id, "host_away")) ended += 1;
+    return ended;
   }
 
   // The preview loads in an iframe, which can't send a secret or (sandboxed
@@ -123,7 +194,7 @@ export function createRooms({ store, auth, audit, origin, previewSecret, onRoomC
     previewKey: previewKey(member),
     ...(secret ? { secret } : {}),
   });
-  const roomJson = (room) => ({ id: room.id, code: room.code, locked: Boolean(room.locked) });
+  const roomJson = (room) => ({ id: room.id, code: room.code, locked: Boolean(room.locked), state: room.state });
 
   async function create(request, response) {
     limit("create", request);
@@ -217,10 +288,160 @@ export function createRooms({ store, auth, audit, origin, previewSecret, onRoomC
     response.end();
   }
 
-  // Answers /api/rooms…; false for anything else.
+  function end(request, response, roomId) {
+    const actor = hostOf(request, roomId, "room.end");
+    endRoom(roomId, "host", actor);
+    sendJson(response, 200, { state: "ended" });
+  }
+
+  // ---- invites (ADR 0008) ----
+
+  async function invite(request, response, roomId) {
+    const actor = hostOf(request, roomId, "invite.add");
+    const body = await readJson(request);
+    const login = typeof body.login === "string" ? body.login.trim().replace(/^@/, "") : "";
+    if (!GITHUB_LOGIN.test(login)) throw new HttpError(400, "bad_login");
+    limit("invite", request);
+    let account;
+    try {
+      account = await githubLookup(login);
+    } catch (error) {
+      console.error("[riff] GitHub user lookup failed", error);
+      throw new HttpError(502, "github_unreachable");
+    }
+    // Whether a GitHub account exists is public; whether it uses Riff isn't,
+    // so the answer below is the same either way.
+    if (!account) throw new HttpError(404, "no_such_github_user");
+    s.insertInvite.run(roomId, account.id, account.login, actor.memberId, now());
+    audit.record(actor, "invite.add", { github_id: account.id, github_login: account.login });
+    onListsChanged(roomId);
+    sendJson(response, 200, { invited: { githubId: account.id, login: account.login } });
+  }
+
+  function cancelInvite(request, response, roomId, githubId) {
+    const actor = hostOf(request, roomId, "invite.cancel");
+    if (!s.deleteInvite.run(roomId, githubId).changes) throw new HttpError(404, "no_such_invite");
+    audit.record(actor, "invite.cancel", { github_id: githubId });
+    onListsChanged(roomId);
+    response.writeHead(204, { "cache-control": "no-store" });
+    response.end();
+  }
+
+  function signedIn(request, what) {
+    const current = auth.session(request);
+    if (!current) {
+      audit.record(null, "denied", { what, reason: "signed_out" });
+      throw new HttpError(401, "signed_out");
+    }
+    return current.user;
+  }
+
+  function invitedTo(request, roomId, what) {
+    const user = signedIn(request, what);
+    const account = s.userById.get(user.id);
+    const room = s.roomById.get(roomId);
+    const row = room && room.state !== "ended" ? s.invite.get(roomId, account.github_id) : undefined;
+    if (!row) throw new HttpError(404, "no_such_invite");
+    return { user, account, room };
+  }
+
+  // An invite gets you in past a lock, and brings back a removed GitHub user
+  // (ADR 0006): the host asked for exactly that person.
+  async function accept(request, response, roomId) {
+    const { user, account, room } = invitedTo(request, roomId, "invite.accept");
+    const body = await readJson(request);
+    let member = s.memberByUser.get(roomId, user.id);
+    let status = 200;
+    if (member && member.removed_at !== null) s.restoreMember.run(member.id);
+    else if (!member) {
+      const chosen = name(body, account.login);
+      if (s.memberByNameKey.get(roomId, chosen.key)) throw new HttpError(409, "name_taken");
+      try {
+        member = store.addMember({ roomId, name: chosen, userId: user.id }).member;
+      } catch (error) {
+        if (/UNIQUE/.test(String(error?.message))) throw new HttpError(409, "name_taken");
+        throw error;
+      }
+      status = 201;
+    }
+    member = s.memberById.get(member.id);
+    s.deleteInvite.run(roomId, account.github_id);
+    audit.record(who(room, member), "invite.accept", { github_id: account.github_id });
+    onRoomChanged(roomId);
+    onListsChanged(roomId);
+    sendJson(response, status, { room: roomJson(room), member: memberJson(member) });
+  }
+
+  function decline(request, response, roomId) {
+    const { user, account, room } = invitedTo(request, roomId, "invite.decline");
+    s.deleteInvite.run(roomId, account.github_id);
+    audit.record({ roomId, code: room.code, userId: user.id, login: account.login }, "invite.decline", {
+      github_id: account.github_id,
+    });
+    onListsChanged(roomId);
+    response.writeHead(204, { "cache-control": "no-store" });
+    response.end();
+  }
+
+  // ---- "your rooms" (ADR 0008) ----
+
+  // The member ids a browser's secrets stand for. Wrong or foreign secrets
+  // are dropped without a word, so a watch can't be used to test them.
+  function membersForSecrets(secrets) {
+    const ids = new Set();
+    if (!Array.isArray(secrets)) return ids;
+    for (const entry of secrets.slice(0, 100)) {
+      if (typeof entry?.roomId !== "string" || typeof entry?.secret !== "string") continue;
+      const member = s.memberBySecret.get(hashToken(entry.secret));
+      if (member && member.room_id === entry.roomId) ids.add(member.id);
+    }
+    return ids;
+  }
+
+  // What one person's list shows: the live rooms they're in (by GitHub user
+  // and by this browser's secrets) and the invites waiting for them.
+  // Recomputed from the tables every time, so it can't drift from them.
+  function listFor({ userId, memberIds }) {
+    const rooms = new Map();
+    const add = (room, isHost) => {
+      if (rooms.has(room.id) || room.state === "ended") return;
+      const host = s.hostOf.get(room.id);
+      rooms.set(room.id, {
+        id: room.id,
+        code: room.code,
+        role: isHost ? "host" : "participant",
+        state: room.state,
+        hostName: host?.name ?? null,
+        hostLastSeen: room.host_last_seen,
+        locked: Boolean(room.locked),
+        ...(isHost
+          ? { invites: s.invitesOfRoom.all(room.id).map((row) => ({ githubId: row.github_id, login: row.login })) }
+          : {}),
+      });
+    };
+    if (userId) for (const row of s.roomsOfUser.all(userId)) add(row, Boolean(row.is_host));
+    for (const id of memberIds ?? []) {
+      const member = s.memberById.get(id);
+      if (!member || member.removed_at !== null) continue;
+      const room = s.roomById.get(member.room_id);
+      if (room) add(room, Boolean(member.is_host));
+    }
+    const account = userId ? s.userById.get(userId) : undefined;
+    const invites = account
+      ? s.invitesFor.all(account.github_id).map((row) => ({
+          roomId: row.room_id,
+          code: row.code,
+          invitedBy: row.invited_by,
+          at: row.created_at,
+        }))
+      : [];
+    return { rooms: [...rooms.values()], invites };
+  }
+
+  // Answers /api/rooms… and /api/invites…; false for anything else.
   async function handle(request, response, url) {
     const path = url.pathname;
-    if (!path.startsWith("/api/rooms")) return false;
+    if (!path.startsWith("/api/rooms") && !path.startsWith("/api/invites/")) return false;
     if (request.method !== "GET" && !sameOrigin(request, origin)) {
       audit.record(null, "denied", { what: "api", reason: "cross_origin" });
       throw new HttpError(403, "cross_origin");
@@ -233,6 +454,11 @@ export function createRooms({ store, auth, audit, origin, previewSecret, onRoomC
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/code$/.exec(path))) rotate(request, response, m[1]);
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/lock$/.exec(path))) await lock(request, response, m[1]);
     else if (request.method === "DELETE" && (m = /^\/api\/rooms\/([\w-]+)\/members\/(\d+)$/.exec(path))) remove(request, response, m[1], Number(m[2]));
+    else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/end$/.exec(path))) end(request, response, m[1]);
+    else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/invites$/.exec(path))) await invite(request, response, m[1]);
+    else if (request.method === "DELETE" && (m = /^\/api\/rooms\/([\w-]+)\/invites\/(\d+)$/.exec(path))) cancelInvite(request, response, m[1], Number(m[2]));
+    else if (request.method === "POST" && (m = /^\/api\/invites\/([\w-]+)\/accept$/.exec(path))) await accept(request, response, m[1]);
+    else if (request.method === "POST" && (m = /^\/api\/invites\/([\w-]+)\/decline$/.exec(path))) decline(request, response, m[1]);
     else throw new HttpError(404, "not_found");
     return true;
   }
@@ -251,5 +477,5 @@ export function createRooms({ store, auth, audit, origin, previewSecret, onRoomC
     return { room: roomJson(room), members };
   }
 
-  return { handle, resolve, resolvePreview, summary };
+  return { handle, resolve, resolvePreview, summary, presence, endOverdue, membersForSecrets, listFor };
 }

@@ -254,7 +254,9 @@ export function createCollaboration({
         ids?.delete(client.socketId);
         if (ids?.size === 0) {
           socketsByMember.delete(memberId);
-          if (who) onPresence(who, "disconnect");
+          // Shutting down isn't anyone leaving: a restart treats live rooms
+          // as away anyway, and the database may already be closed.
+          if (who && !closing) onPresence(who, "disconnect");
         }
         client.handleClose({ code, reason: reason.toString() });
       });
@@ -304,6 +306,22 @@ export function createCollaboration({
     return closed;
   }
 
+  // A room ended or came back (docs/adr/0008): what members' open
+  // connections may do changes in place. Hocuspocus checks a connection's
+  // `readOnly` on every message, so nobody has to reconnect. Participants
+  // never write the control document, ended or not; the host is untouched.
+  function setRoomEnded(roomId, ended) {
+    for (const part of ["shared", "control"]) {
+      const document = hocuspocus.documents.get(`room/${roomId}/${part}`);
+      if (!document) continue;
+      for (const connection of document.getConnections()) {
+        const who = connection.context?.who;
+        if (!who || who.role === "host") continue;
+        connection.readOnly = part === "control" ? true : ended;
+      }
+    }
+  }
+
   // A change made by the server itself (the member list), stored like any
   // other update.
   async function change(documentName, transaction) {
@@ -315,12 +333,14 @@ export function createCollaboration({
     }
   }
 
+  let closing = false;
   function close() {
+    closing = true;
     hocuspocus.closeConnections();
     for (const websocket of sockets.clients) websocket.terminate();
     sockets.close();
     if (!givenDb) db.close();
   }
 
-  return { handleUpgrade, stats, close, disconnectMember, change, hocuspocus, db };
+  return { handleUpgrade, stats, close, disconnectMember, setRoomEnded, change, hocuspocus, db };
 }

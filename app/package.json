@@ -54,7 +54,8 @@
     "test:git-sync-browser": "node scripts/git-sync-browser-smoke.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test:wasix-concurrent-bash-browser": "node scripts/wasix-concurrent-bash-browser-smoke.mjs",
-    "test:audit-log": "node --test --test-force-exit scripts/audit-log.test.mjs"
+    "test:audit-log": "node --test --test-force-exit scripts/audit-log.test.mjs",
+    "test:rooms": "node --test --test-force-exit scripts/rooms.test.mjs"
   },
   "dependencies": {
     "@hocuspocus/provider": "^4.7.0",

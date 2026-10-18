@@ -9,7 +9,8 @@ function send(socket, message) {
 }
 
 // `authorize(roomName, hello, request)` returns who the socket belongs to,
-// with a server-resolved role ("host" or "participant"), or null.
+// with a server-resolved role ("host" or "participant"), or null. It may
+// instead return `{ refused: code }` to say why (an ended room).
 export function createTerminalRelay({ authorize, onRefused } = {}) {
   if (typeof authorize !== "function") throw new Error("createTerminalRelay needs authorize");
   const socketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_SNAPSHOT_BYTES });
@@ -46,10 +47,11 @@ export function createTerminalRelay({ authorize, onRefused } = {}) {
       if (message.type === "hello") {
         if (socket.who) return;
         const who = authorize(roomName, message, request);
-        if (!who) {
-          onRefused?.(roomName, "terminal");
-          send(socket, { type: "error", code: "not-a-member" });
-          hangUp(socket, 4401, "not a member");
+        if (!who || who.refused) {
+          const code = who?.refused ?? "not-a-member";
+          onRefused?.(roomName, "terminal", null, code);
+          send(socket, { type: "error", code });
+          hangUp(socket, 4401, code);
           return;
         }
         socket.who = who;

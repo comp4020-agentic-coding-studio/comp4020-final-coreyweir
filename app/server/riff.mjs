@@ -9,10 +9,14 @@ import { createAuth } from "./auth.mjs";
 import { createRooms } from "./rooms.mjs";
 import { createTerminalRelay } from "./terminalRelay.mjs";
 import { createPreviewRelay } from "./previewRelay.mjs";
+import { createGithubLookup } from "./github.mjs";
+import { createColleagues } from "./colleagues.mjs";
+import { createWatch } from "./watch.mjs";
 import { randomBytes } from "node:crypto";
 import { HttpError, sameOrigin, sendJson } from "./http.mjs";
 
 const HOUR_MS = 60 * 60 * 1000;
+const STATE_CHECK_MS = 30 * 1000;
 const DOCUMENT = /^room\/([\w-]{8,64})\/(shared|control)$/;
 
 export function createRiff({
@@ -22,6 +26,10 @@ export function createRiff({
   githubClientSecret,
   sessionSecret,
   log = (message) => console.log(`[riff] ${message}`),
+  // seams for the in-process tests: a stand-in GitHub, and a short grace
+  githubLookup = createGithubLookup({ clientId: githubClientId, clientSecret: githubClientSecret }),
+  hostGraceMs,
+  stateCheckMs = STATE_CHECK_MS,
 }) {
   if (!origin) throw new Error("createRiff needs RIFF_ORIGIN: the origin browsers reach this server at");
   const db = openDatabase(dbPath);
@@ -30,15 +38,25 @@ export function createRiff({
   const auth = createAuth({ store, audit, origin, clientId: githubClientId, clientSecret: githubClientSecret, sessionSecret });
 
   let collaboration;
+  let watch;
   const rooms = createRooms({
     store,
     auth,
     audit,
     origin,
+    githubLookup,
+    hostGraceMs,
+    log,
+    onListsChanged: () => watch?.changed(),
+    onEnded: (roomId) => collaboration.setRoomEnded(roomId, true),
+    onRevived: (roomId) => collaboration.setRoomEnded(roomId, false),
     // Production and CI always set SESSION_SECRET. Without it, preview keys
     // last as long as the process, which is as long as any preview does.
     previewSecret: sessionSecret || randomBytes(32).toString("hex"),
-    onRoomChanged: (roomId) => publishRoom(roomId),
+    onRoomChanged: (roomId) => {
+      publishRoom(roomId);
+      watch?.changed();
+    },
     onRemoved: (roomId, memberId) => {
       collaboration.disconnectMember(memberId);
       terminalRelay.disconnectMember(roomId, memberId);
@@ -46,8 +64,12 @@ export function createRiff({
     },
   });
 
+  watch = createWatch({ rooms, auth, log });
+  const colleagues = createColleagues({ store, auth, audit, origin, githubLookup });
+
   // Who a document belongs to and what this credential may do with it.
-  // Anything that isn't `room/<id>/shared|control` doesn't exist.
+  // Anything that isn't `room/<id>/shared|control` doesn't exist. In an
+  // ended room members may still read; the host opening it revives it.
   function authorize({ documentName, token, requestHeaders }) {
     const match = DOCUMENT.exec(documentName);
     const who = match && rooms.resolve(match[1], { token, cookie: requestHeaders.get("cookie") ?? undefined });
@@ -56,7 +78,8 @@ export function createRiff({
       throw Object.assign(new Error("not a member"), { reason: "not-a-member" });
     }
     const part = match[2];
-    return { context: { who }, readOnly: part === "control" && who.role !== "host" };
+    const readOnly = who.role !== "host" && (part === "control" || who.state === "ended");
+    return { context: { who }, readOnly };
   }
 
   collaboration = createCollaboration({
@@ -67,7 +90,10 @@ export function createRiff({
     onRefusedWrite: (who, documentName) =>
       audit.tally(who, "denied", { what: `${documentName.split("/").pop()}.write`, reason: "read_only" }),
     onDocumentLoaded: watchDocument,
-    onPresence: (who, action) => audit.record(who, action),
+    onPresence: (who, action) => {
+      audit.record(who, action);
+      rooms.presence(who, action);
+    },
   });
 
   // Edits are only tallied, but adding and removing a staged prompt or a
@@ -97,13 +123,20 @@ export function createRiff({
 
   // The relays' hello carries the same credential as the documents: a
   // guest's secret as `token`, or the session cookie on the upgrade.
-  const relayAuthorize = (roomId, hello, request) =>
-    rooms.resolve(roomId, {
+  // An ended room has no host, so nothing to relay to its members.
+  const relayAuthorize = (roomId, hello, request) => {
+    const who = rooms.resolve(roomId, {
       token: typeof hello.token === "string" && hello.token ? hello.token : undefined,
       cookie: request.headers.cookie,
     });
-  const relayRefused = (roomId, what, who) =>
-    audit.record(who ?? { roomId }, "denied", { what, reason: who ? "host_only" : "not_a_member" });
+    if (who && who.state === "ended" && who.role !== "host") return { refused: "room-ended" };
+    return who;
+  };
+  const relayRefused = (roomId, what, who, code) => {
+    const member = who?.memberId ? who : null;
+    const reason = code ?? who?.refused ?? (member ? "host_only" : "not_a_member");
+    audit.record(member ?? { roomId }, "denied", { what, reason: reason.replace(/-/g, "_") });
+  };
   const terminalRelay = createTerminalRelay({ authorize: relayAuthorize, onRefused: relayRefused });
   const previewRelay = createPreviewRelay({
     authorize: relayAuthorize,
@@ -154,6 +187,7 @@ export function createRiff({
     const run = async () => {
       if (await auth.handle(request, response, url)) return;
       if (await rooms.handle(request, response, url)) return;
+      if (await colleagues.handle(request, response, url)) return;
       previewRelay.middleware(request, response, next);
     };
     run().catch((error) => fail(response, error));
@@ -176,7 +210,12 @@ export function createRiff({
   function handleUpgrade(request, socket, head) {
     const url = new URL(request.url ?? "/", "http://localhost");
     const path = url.pathname;
-    const ours = path === "/collaboration" || path.startsWith("/collaboration/") || path.startsWith("/terminal/") || path.startsWith("/preview-control/");
+    const ours =
+      path === "/collaboration" ||
+      path.startsWith("/collaboration/") ||
+      path === "/api/rooms/watch" ||
+      path.startsWith("/terminal/") ||
+      path.startsWith("/preview-control/");
     if (!ours) return false;
     // Browsers send cookies on a WebSocket opened by any site; only our own
     // pages may open one.
@@ -187,6 +226,10 @@ export function createRiff({
     }
     if (path === "/collaboration" || path.startsWith("/collaboration/")) {
       collaboration.handleUpgrade(request, socket, head);
+      return true;
+    }
+    if (path === "/api/rooms/watch") {
+      watch.handleUpgrade(request, socket, head);
       return true;
     }
     for (const [prefix, relay] of [["/terminal/", terminalRelay], ["/preview-control/", previewRelay]]) {
@@ -211,6 +254,19 @@ export function createRiff({
   const sweeper = setInterval(sweep, HOUR_MS);
   sweeper.unref();
 
+  // Rooms whose host has been away past the grace period end (ADR 0008).
+  function checkStates() {
+    try {
+      const ended = rooms.endOverdue();
+      if (ended) log(`${ended} rooms ended: their hosts didn't come back`);
+    } catch (error) {
+      console.error("[riff] ending overdue rooms failed", error);
+    }
+  }
+  checkStates();
+  const stateChecker = setInterval(checkStates, stateCheckMs);
+  stateChecker.unref();
+
   function health() {
     let pending = 0;
     for (const room of previewRelay.rooms.values()) pending += room.pending.size;
@@ -226,11 +282,14 @@ export function createRiff({
       preview: { rooms: previewRelay.rooms.size, hosts: previewHosts, pending },
       terminal: { rooms: terminalRelay.rooms.size, hosts: terminalHosts, clients: terminalClients },
       collaboration: collaboration.stats(),
+      watchers: watch.count(),
     };
   }
 
   function close() {
     clearInterval(sweeper);
+    clearInterval(stateChecker);
+    watch.close();
     audit.close();
     previewRelay.close();
     terminalRelay.close();
