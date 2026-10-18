@@ -138,8 +138,8 @@ export function createStore(db) {
     roomById: q("SELECT * FROM rooms WHERE id = ?"),
     roomByCode: q("SELECT * FROM rooms WHERE code = ? AND state <> 'ended'"),
     // A new room is "away" until its host's first socket arrives.
-    insertRoom: q("INSERT INTO rooms (id, code, created_at, host_last_seen, state) VALUES (?, ?, ?, ?, 'away')"),
-    hostArrived: q("UPDATE rooms SET state = 'live', host_last_seen = ?, ended_at = NULL WHERE id = ?"),
+    insertRoom: q("INSERT INTO rooms (id, code, created_at, host_last_seen, state, keep) VALUES (?, ?, ?, ?, 'away', ?)"),
+    hostArrived: q("UPDATE rooms SET state = 'live', host_last_seen = ?, ended_at = NULL WHERE id = ? AND state <> 'ended'"),
     hostLeft: q("UPDATE rooms SET state = 'away', host_last_seen = ? WHERE id = ? AND state = 'live'"),
     endRoom: q("UPDATE rooms SET state = 'ended', ended_at = ? WHERE id = ? AND state <> 'ended'"),
     reviveRoom: q("UPDATE rooms SET state = 'away', host_last_seen = ?, ended_at = NULL WHERE id = ? AND state = 'ended'"),
@@ -177,6 +177,9 @@ export function createStore(db) {
                            GROUP BY u.id ORDER BY last_room_at DESC LIMIT 30`),
     setCode: q("UPDATE rooms SET code = ? WHERE id = ?"),
     setLocked: q("UPDATE rooms SET locked = ? WHERE id = ?"),
+    setKeep: q("UPDATE rooms SET keep = ? WHERE id = ?"),
+    // everyone who ever joined besides the host, removed or not
+    othersEver: q("SELECT COUNT(*) AS n FROM room_members WHERE room_id = ? AND is_host = 0"),
     insertMember: q(`INSERT INTO room_members (room_id, user_id, secret_hash, is_host, name, name_key, joined_at, last_seen)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
     memberById: q("SELECT * FROM room_members WHERE id = ?"),
@@ -229,11 +232,11 @@ export function createStore(db) {
 
     // The room and its host, in one transaction: the schema can't say every
     // room has a host, so creation is the only way a room comes to exist.
-    createRoom({ name, userId, now = Date.now() }) {
+    createRoom({ name, userId, keep = true, now = Date.now() }) {
       return transaction(() => {
         const id = randomToken(16);
         const code = freshCode();
-        s.insertRoom.run(id, code, now, now);
+        s.insertRoom.run(id, code, now, now, keep ? 1 : 0);
         const secret = userId ? null : randomToken();
         const { lastInsertRowid } = s.insertMember.run(
           id, userId ?? null, secret ? hashToken(secret) : null, 1, name.name, name.key, now, now,

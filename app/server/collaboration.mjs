@@ -108,6 +108,7 @@ export function createCollaboration({
     lastSeq: db.prepare("SELECT MAX(seq) AS seq FROM doc_updates WHERE doc = ?"),
     snapshot: db.prepare("INSERT INTO doc_updates (doc, data, at, snapshot) VALUES (?, ?, ?, 1)"),
     dropUpTo: db.prepare("DELETE FROM doc_updates WHERE doc = ? AND seq <= ?"),
+    dropAll: db.prepare("DELETE FROM doc_updates WHERE doc = ?"),
   };
 
   // Per loaded document: bytes of the last snapshot and of rows since it.
@@ -316,20 +317,59 @@ export function createCollaboration({
     return closed;
   }
 
-  // A room ended or came back (docs/adr/0008): what members' open
+  // A room ended or came back (docs/adr/0008, docs/adr/0003): what open
   // connections may do changes in place. Hocuspocus checks a connection's
-  // `readOnly` on every message, so nobody has to reconnect. Participants
-  // never write the control document, ended or not; the host is untouched.
+  // `readOnly` on every message, so nobody has to reconnect. Once a room has
+  // ended nobody writes to it, the host included; reviving it is a new
+  // connection of the host's. Participants never write the control document.
   function setRoomEnded(roomId, ended) {
     for (const part of ["shared", "control"]) {
-      const document = hocuspocus.documents.get(`room/${roomId}/${part}`);
+      const name = `room/${roomId}/${part}`;
+      const document = hocuspocus.documents.get(name);
       if (!document) continue;
       for (const connection of document.getConnections()) {
         const who = connection.context?.who;
-        if (!who || who.role === "host") continue;
-        connection.readOnly = part === "control" ? true : ended;
+        if (!who) continue;
+        if (who.role === "host") connection.readOnly = ended;
+        else connection.readOnly = part === "control" ? true : ended;
+      }
+      // A board the server didn't keep was deleted while the host still had
+      // it open. Revived, the host's copy is the board again (ADR 0003): store
+      // it whole, or later rows would build on content that isn't stored.
+      // (The reviving connection isn't attached yet, so this is an older one.)
+      const hostHasItOpen = document.getConnections().some((connection) => connection.context?.who?.role === "host");
+      if (!ended && hostHasItOpen && statements.lastSeq.get(name).seq === null && Y.encodeStateVector(document).byteLength > 1) {
+        statements.snapshot.run(name, Y.encodeStateAsUpdate(document), Date.now());
+        log(`doc ${name} stored again from the open copy`);
       }
     }
+  }
+
+  // A room whose board the server doesn't keep has ended (ADR 0003): its
+  // members are told and let go, and its stored rows are deleted. The host's
+  // sockets stay (read-only, from setRoomEnded): a host that reconnects
+  // revives the room, and their page is leaving anyway.
+  function forgetRoom(roomId) {
+    setRoomEnded(roomId, true);
+    const names = ["shared", "control"].map((part) => `room/${roomId}/${part}`);
+    let closed = 0;
+    for (const [socketId, documents] of documentsBySocket) {
+      if (whoBySocket.get(socketId)?.role === "host") continue;
+      const mine = names.filter((name) => documents.has(name));
+      const websocket = socketsById.get(socketId);
+      if (mine.length === 0 || !websocket) continue;
+      for (const name of mine) websocket.send(permissionDenied(name, "room-ended"));
+      hangUp(websocket, 4410, "room-ended");
+      closed += 1;
+    }
+    let rows = 0;
+    for (const name of names) {
+      rows += Number(statements.dropAll.run(name).changes);
+      const entry = loaded.get(name);
+      if (entry) entry.pendingBytes = 0;
+    }
+    log(`room ${roomId} ended unkept: ${rows} stored rows deleted, ${closed} sockets let go`);
+    return { rows, closed };
   }
 
   // A change made by the server itself (the member list), stored like any
@@ -352,5 +392,5 @@ export function createCollaboration({
     if (!givenDb) db.close();
   }
 
-  return { handleUpgrade, stats, close, disconnectMember, setRoomEnded, change, hocuspocus, db };
+  return { handleUpgrade, stats, close, disconnectMember, setRoomEnded, forgetRoom, change, hocuspocus, db };
 }

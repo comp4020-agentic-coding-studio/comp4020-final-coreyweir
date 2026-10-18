@@ -142,6 +142,15 @@ export function createTerminalRelay({ authorize, onRefused } = {}) {
         if (client.who?.memberId === memberId) hangUp(client, 4403, "removed");
       }
     },
+    // The room ended: its audience is told and let go. The host's socket
+    // stays; their page is leaving, and a reconnect would revive the room.
+    endRoom(roomName) {
+      for (const client of rooms.get(roomName)?.clients ?? []) {
+        if (client === rooms.get(roomName).host) continue;
+        send(client, { type: "error", code: "room-ended" });
+        hangUp(client, 4410, "room-ended");
+      }
+    },
     handleUpgrade(request, socket, head, roomName) {
       socketServer.handleUpgrade(request, socket, head, (websocket) => {
         socketServer.emit("connection", websocket, request, roomName);

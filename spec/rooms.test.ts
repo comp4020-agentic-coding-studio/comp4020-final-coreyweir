@@ -191,7 +191,10 @@ describe("keeping the board", () => {
       await open.saved();
 
       expect((await api(baseUrl, `/api/rooms/${host.roomId}/end`, { secret: host.secret, body: {} })).status).toBe(200);
-      // the socket the guest had open is told, not just left read-only
+      // The socket the guest had open is told, not just left read-only.
+      // Limit: a reconnect refused with the same reason also passes this, so
+      // it can't show the server said so in-band. That matters behind fly's
+      // proxy, which holds a closed socket open for seconds (CLAUDE.md).
       const reason = await Promise.race([open.shutOut, new Promise((resolve) => setTimeout(resolve, 5_000, "never told"))]);
       expect(reason).toBe("room-ended");
     } finally {

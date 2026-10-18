@@ -90,7 +90,7 @@ export function createRooms({
       reviveRoom(room, member);
       room = s.roomById.get(room.id);
     }
-    return { ...who(room, member), state: room.state };
+    return { ...who(room, member), state: room.state, keep: Boolean(room.keep) };
   }
 
   // ---- the room's state (ADR 0008; the server half of ADR 0003) ----
@@ -107,8 +107,13 @@ export function createRooms({
     if (!s.endRoom.run(now(), roomId).changes) return false;
     const invites = s.deleteRoomInvites.run(roomId).changes;
     const room = s.roomById.get(roomId);
-    audit.record(actor ?? { roomId, code: room.code }, "room.end", { reason, invites_dropped: invites || undefined });
-    onEnded(roomId);
+    const keep = Boolean(room.keep);
+    audit.record(actor ?? { roomId, code: room.code }, "room.end", {
+      reason,
+      board: keep ? "kept" : "deleted",
+      invites_dropped: invites || undefined,
+    });
+    onEnded(roomId, { keep });
     onRoomChanged(roomId);
     return true;
   }
@@ -199,6 +204,8 @@ export function createRooms({
     id: room.id,
     code: room.code,
     locked: Boolean(room.locked),
+    // whether the server keeps the board after the room ends (ADR 0003)
+    keep: Boolean(room.keep),
     state: room.state,
     endsAt: room.state === "away" ? room.host_last_seen + hostGraceMs : null,
   });
@@ -208,8 +215,10 @@ export function createRooms({
     const body = await readJson(request);
     const current = auth.session(request);
     const chosen = name(body, current?.user.login);
-    const { room, member, secret } = store.createRoom({ name: chosen, userId: current?.user.id });
-    audit.record(who(room, member), "room.create");
+    if (body.keep !== undefined && typeof body.keep !== "boolean") throw new HttpError(400, "bad_keep");
+    const keep = body.keep ?? true;
+    const { room, member, secret } = store.createRoom({ name: chosen, userId: current?.user.id, keep });
+    audit.record(who(room, member), "room.create", { board: keep ? "kept" : "not_kept" });
     onRoomChanged(room.id);
     sendJson(response, 201, { room: roomJson(room), member: memberJson(member, secret) });
   }
@@ -293,6 +302,26 @@ export function createRooms({
     onRoomChanged(roomId);
     response.writeHead(204, { "cache-control": "no-store" });
     response.end();
+  }
+
+  // The host can stop keeping the board at any time, but can't start again
+  // once anyone else has joined: they drew on the understanding that the
+  // server wouldn't keep it (ADR 0003).
+  async function setKeep(request, response, roomId) {
+    const actor = hostOf(request, roomId, "room.keep");
+    const body = await readJson(request);
+    if (typeof body.keep !== "boolean") throw new HttpError(400, "bad_keep");
+    const room = s.roomById.get(roomId);
+    if (body.keep !== Boolean(room.keep)) {
+      if (body.keep && s.othersEver.get(roomId).n > 0) {
+        audit.record(actor, "denied", { what: "room.keep", reason: "others_joined" });
+        throw new HttpError(409, "others_joined");
+      }
+      s.setKeep.run(body.keep ? 1 : 0, roomId);
+      audit.record(actor, "room.keep", { board: body.keep ? "kept" : "not_kept" });
+      onRoomChanged(roomId);
+    }
+    sendJson(response, 200, { keep: body.keep });
   }
 
   function end(request, response, roomId) {
@@ -422,6 +451,7 @@ export function createRooms({
         hostLastSeen: room.host_last_seen,
         endsAt: roomJson(room).endsAt,
         locked: Boolean(room.locked),
+        keep: Boolean(room.keep),
         ...(isHost
           ? { invites: s.invitesOfRoom.all(room.id).map((row) => ({ githubId: row.github_id, login: row.login })) }
           : {}),
@@ -463,6 +493,7 @@ export function createRooms({
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/lock$/.exec(path))) await lock(request, response, m[1]);
     else if (request.method === "DELETE" && (m = /^\/api\/rooms\/([\w-]+)\/members\/(\d+)$/.exec(path))) remove(request, response, m[1], Number(m[2]));
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/end$/.exec(path))) end(request, response, m[1]);
+    else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/keep$/.exec(path))) await setKeep(request, response, m[1]);
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/invites$/.exec(path))) await invite(request, response, m[1]);
     else if (request.method === "DELETE" && (m = /^\/api\/rooms\/([\w-]+)\/invites\/(\d+)$/.exec(path))) cancelInvite(request, response, m[1], Number(m[2]));
     else if (request.method === "POST" && (m = /^\/api\/invites\/([\w-]+)\/accept$/.exec(path))) await accept(request, response, m[1]);

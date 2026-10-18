@@ -302,6 +302,50 @@ test("a room whose host stays away ends after the grace period, and its invites 
   }
 });
 
+test("a board the server doesn't keep is deleted from disk when its room ends; a kept one stays", async () => {
+  const app = await start({ hostGraceMs: 300, stateCheckMs: 50 });
+  const rows = (roomId) =>
+    app.db.prepare("SELECT COUNT(*) AS n FROM doc_updates WHERE doc IN (?, ?)").get(`room/${roomId}/shared`, `room/${roomId}/control`).n;
+  try {
+    const rooms = {};
+    for (const which of ["kept", "unkept"]) {
+      const created = await call(app, "/api/rooms", { body: { name: "Ada" } });
+      const room = { id: created.body.room.id, code: created.body.room.code, host: created.body.member.secret };
+      // the unkept one is switched before anyone joins, so the log shows both ways in
+      if (which === "unkept") assert.equal((await call(app, `/api/rooms/${room.id}/keep`, { body: { keep: false }, secret: room.host })).status, 200);
+      room.guest = (await call(app, "/api/rooms/join", { body: { code: room.code, name: "Bo" } })).body.member.secret;
+      const session = await connect(app, room.id, "shared", { secret: room.host });
+      session.doc.getText("board").insert(0, `drawn in the ${which} room`);
+      for (let i = 0; i < 100 && rows(room.id) < 2; i++) await sleep(10);
+      session.leave();
+      rooms[which] = room;
+    }
+    assert.ok(rows(rooms.kept.id) > 0 && rows(rooms.unkept.id) > 0, "both boards were stored");
+
+    // the host stays away past the grace period: both end
+    for (let i = 0; i < 100; i++) {
+      const ended = app.events().filter(by("room.end")).length;
+      if (ended === 2) break;
+      await sleep(20);
+    }
+    assert.equal(rows(rooms.unkept.id), 0, "the unkept board's rows are gone");
+    assert.ok(rows(rooms.kept.id) > 0, "the kept board's rows stay");
+
+    await assert.rejects(connect(app, rooms.unkept.id, "shared", { secret: rooms.unkept.guest }), /refused: room-ended/);
+    const reading = await connect(app, rooms.kept.id, "shared", { secret: rooms.kept.guest });
+    assert.equal(reading.doc.getText("board").toString(), "drawn in the kept room");
+    reading.leave();
+
+    const events = app.events();
+    const ends = Object.fromEntries(events.filter(by("room.end")).map((row) => [row.room_id, row.detail]));
+    assert.deepEqual(ends[rooms.kept.id], { reason: "host_away", board: "kept" });
+    assert.deepEqual(ends[rooms.unkept.id], { reason: "host_away", board: "deleted" });
+    assert.deepEqual(events.filter(by("room.keep")).map((row) => [row.room_id, row.detail.board]), [[rooms.unkept.id, "not_kept"]]);
+  } finally {
+    await app.stop();
+  }
+});
+
 test("after a restart, live rooms count as away with a fresh grace period", async () => {
   let app = await start();
   const dir = app.dir;

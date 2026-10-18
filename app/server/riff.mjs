@@ -48,7 +48,11 @@ export function createRiff({
     hostGraceMs,
     log,
     onListsChanged: () => watch?.changed(),
-    onEnded: (roomId) => collaboration.setRoomEnded(roomId, true),
+    onEnded: (roomId, { keep }) => {
+      if (keep) collaboration.setRoomEnded(roomId, true);
+      else collaboration.forgetRoom(roomId);
+      terminalRelay.endRoom(roomId);
+    },
     onRevived: (roomId) => collaboration.setRoomEnded(roomId, false),
     // Production and CI always set SESSION_SECRET. Without it, preview keys
     // last as long as the process, which is as long as any preview does.
@@ -69,13 +73,18 @@ export function createRiff({
 
   // Who a document belongs to and what this credential may do with it.
   // Anything that isn't `room/<id>/shared|control` doesn't exist. In an
-  // ended room members may still read; the host opening it revives it.
+  // ended room members may still read a board the server kept, and are
+  // turned away from one it didn't (ADR 0003); the host opening it revives it.
   function authorize({ documentName, token, requestHeaders }) {
     const match = DOCUMENT.exec(documentName);
     const who = match && rooms.resolve(match[1], { token, cookie: requestHeaders.get("cookie") ?? undefined });
     if (!who) {
       audit.tally(null, "denied", { what: "document", reason: match ? "not_a_member" : "no_such_document" });
       throw Object.assign(new Error("not a member"), { reason: "not-a-member" });
+    }
+    if (who.state === "ended" && !who.keep && who.role !== "host") {
+      audit.tally(who, "denied", { what: "document", reason: "room_ended" });
+      throw Object.assign(new Error("room ended"), { reason: "room-ended" });
     }
     const part = match[2];
     const readOnly = who.role !== "host" && (part === "control" || who.state === "ended");
@@ -152,8 +161,11 @@ export function createRiff({
   // The room's code, lock, state and member list live in the control document,
   // written only here, so names and the GitHub badge can't be forged from a
   // browser and everyone sees a rotated code or a removal at once.
+  // A board the server no longer keeps isn't written to again, or this
+  // would store it afresh.
   function publishRoom(roomId) {
     const { room, members } = rooms.summary(roomId);
+    if (room.state === "ended" && !room.keep) return;
     collaboration
       .change(`room/${roomId}/control`, (document) => {
         const info = document.getMap("room");
@@ -161,6 +173,7 @@ export function createRiff({
         document.transact(() => {
           if (info.get("code") !== room.code) info.set("code", room.code);
           if (info.get("locked") !== room.locked) info.set("locked", room.locked);
+          if (info.get("keep") !== room.keep) info.set("keep", room.keep);
           if (info.get("state") !== room.state) info.set("state", room.state);
           if (info.get("endsAt") !== room.endsAt) info.set("endsAt", room.endsAt);
           for (const member of members) {
