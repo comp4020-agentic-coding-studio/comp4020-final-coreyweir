@@ -131,3 +131,29 @@ test("acknowledged edits survive SIGKILL, before and after compaction", { timeou
   }
 });
 
+
+// Hocuspocus 4.7.0 unloads a document twice when a server write (a direct
+// connection) ends: once at once, and again from a timer. The timer's unload
+// goes by name, so if a newer copy of the document loaded in between, it
+// takes that copy out of the server's map: whoever is attached to it stops
+// receiving the server's later writes. Seen as the host's member list going
+// stale. The check runs in-process, against the module itself (it prints
+// "Yjs was already imported": the server's yjs is a second copy, harmless
+// here because only the server's documents are touched).
+test("a server write doesn't cut off a copy of the document opened just after it", async () => {
+  const { createCollaboration } = await import(moduleUrl);
+  const collaboration = createCollaboration({ dbPath: join(dir, "unload.sqlite") });
+  const { hocuspocus, change } = collaboration;
+  const name = "room/unload-race/control";
+  try {
+    await change(name, (document) => document.getMap("members").set("1", "Ada"));
+    const reader = await hocuspocus.openDirectConnection(name);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(hocuspocus.documents.get(name), reader.document, "the open copy is still the server's copy");
+    await change(name, (document) => document.getMap("members").set("2", "Bo"));
+    assert.equal(reader.document.getMap("members").get("2"), "Bo", "the next server write reaches it");
+    await reader.disconnect();
+  } finally {
+    collaboration.close();
+  }
+});

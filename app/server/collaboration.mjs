@@ -195,6 +195,16 @@ export function createCollaboration({
       onDocumentLoaded(documentName, document, (origin) => contextFrom(origin)?.who ?? null);
     },
 
+    async beforeUnloadDocument({ documentName, document }) {
+      // Hocuspocus (4.7.0) unloads a document twice after a server write: at
+      // once, and again from a timer, which goes by name. If a newer copy
+      // loaded in between, that second unload would take the newer copy out
+      // of the map, and whoever is attached to it would stop receiving the
+      // server's writes. Throwing makes Hocuspocus keep what it has; it logs the
+      // message, so it reads as what happened.
+      if (hocuspocus.documents.get(documentName) !== document) throw new Error(`${documentName}: skipped unloading a copy that was already unloaded`);
+    },
+
     async afterUnloadDocument({ documentName }) {
       loaded.delete(documentName);
     },
