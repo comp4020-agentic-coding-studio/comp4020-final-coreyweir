@@ -22,6 +22,9 @@ export type Member = {
   name: string;
   host: boolean;
   secret: string;
+  // Goes in the preview's path: `/room-preview/<room id>/<key>/<generation>/`.
+  // An iframe can't send the secret, so the key is what the relay checks.
+  previewKey: string;
 };
 
 export type Part = "shared" | "control";
@@ -69,6 +72,7 @@ async function member(res: Response, what: string): Promise<Member> {
     name: body.member.name,
     host: body.member.host,
     secret: body.member.secret,
+    previewKey: body.member.previewKey,
   };
 }
 
@@ -236,6 +240,43 @@ export function relayHello(
       ws.terminate();
       resolve(heard);
     }, listenMs);
+  });
+}
+
+// Play the host's side of the preview: claim the relay with the host's
+// secret, announce a preview, and answer every request with `page`. The
+// relay rewrites root-relative links in it under the requester's prefix.
+export type PreviewHost = { generation: number; requests: string[]; close(): void };
+
+export function servePreview(baseUrl: string, host: Member, page: string): Promise<PreviewHost> {
+  return new Promise((resolve, reject) => {
+    const url = `${collaborationUrl(baseUrl).replace(/\/collaboration$/, "")}/preview-control/${encodeURIComponent(host.roomId)}`;
+    const ws = new WebSocket(url, { origin: originOf(baseUrl) });
+    const generation = Date.now();
+    const requests: string[] = [];
+    const timer = setTimeout(() => reject(new Error("preview relay never accepted the host")), 10_000);
+    ws.on("open", () => ws.send(JSON.stringify({ type: "hello", token: host.secret })));
+    ws.on("message", (raw: RawData) => {
+      const message = JSON.parse(new TextDecoder().decode(toBytes(raw)));
+      if (message.type === "host-accepted") {
+        ws.send(JSON.stringify({ type: "preview-up", generation }));
+        clearTimeout(timer);
+        resolve({ generation, requests, close: () => ws.close() });
+      } else if (message.type === "request") {
+        requests.push(message.path);
+        ws.send(JSON.stringify({
+          type: "response",
+          requestId: message.requestId,
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+          body: Buffer.from(page).toString("base64"),
+        }));
+      } else if (message.type === "error") {
+        clearTimeout(timer);
+        reject(new Error(`preview relay: ${message.code}`));
+      }
+    });
+    ws.on("error", reject);
   });
 }
 

@@ -8,6 +8,7 @@ import {
   openPart,
   Refused,
   relayHello,
+  servePreview,
   timeUntil,
   uniqueName,
   upgradeStatus,
@@ -205,6 +206,44 @@ describe("the terminal mirror and the preview", () => {
       .toContain("host-accepted");
     expect(await relayHello(baseUrl, "preview-control", host.roomId, { type: "hello", token: guest.secret })
       .then(heard)).toEqual(["error:host-rejected"]);
+  }, 30_000);
+
+  // The preview loads in an iframe, which can't send a secret, so each
+  // member gets a key for the path. Anyone with the code can learn the room
+  // id, and a removed member keeps it: the id alone must not be enough.
+  it("serves the preview only to members, by their own key", async () => {
+    const host = await createRoom(baseUrl);
+    const guest = await joinRoom(baseUrl, host.code);
+    const outsider = await createRoom(baseUrl);
+    const preview = await servePreview(baseUrl, host, '<html><head></head><body><a href="/next">next</a></body></html>');
+    try {
+      const at = (key: string) => new URL(`/room-preview/${host.roomId}/${key}/${preview.generation}/`, baseUrl);
+      const status = async (key: string) => (await fetch(at(key))).status;
+
+      // a member's key gets the page, with its links kept under that key
+      const page = await fetch(at(guest.previewKey));
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain(`href="/room-preview/${host.roomId}/${guest.previewKey}/${preview.generation}/next"`);
+      expect(await status(host.previewKey)).toBe(200);
+
+      // the room id alone, someone else's room, and forged keys
+      expect((await fetch(new URL(`/room-preview/${host.roomId}/${preview.generation}/`, baseUrl))).status).toBe(403);
+      expect(await status(outsider.previewKey)).toBe(403);
+      const [memberId, mac] = guest.previewKey.split(".");
+      const flipped = mac.slice(0, -1) + (mac.endsWith("A") ? "B" : "A");
+      expect(await status(`${memberId}.${flipped}`)).toBe(403);
+      expect(await status(`${host.memberId}.${mac}`)).toBe(403);
+
+      // removal takes the key with it, from the next request
+      expect((await api(baseUrl, `/api/rooms/${host.roomId}/members/${guest.memberId}`, { method: "DELETE", secret: host.secret })).status).toBe(204);
+      expect(await status(guest.previewKey)).toBe(403);
+      expect(await status(host.previewKey)).toBe(200);
+
+      // nothing refused ever reached the host's browser
+      expect(preview.requests).toHaveLength(3);
+    } finally {
+      preview.close();
+    }
   }, 30_000);
 });
 
