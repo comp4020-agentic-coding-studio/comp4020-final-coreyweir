@@ -1,0 +1,156 @@
+# 8. Your rooms, invites by GitHub username, and colleagues
+
+- Status: accepted, not yet implemented
+- Date: 2026-10-18
+
+## Context
+
+Getting into a room means typing a six-character code someone reads out.
+At the crits people struggled with that, and the groups rotate every week,
+on laptops, so a QR code doesn't help. Once you're in a room there is also
+no way back to it except the link you happened to keep.
+
+ADR 0006 rules out a public list of rooms: a room is for the people in it.
+So the way in has to be personal: the rooms you're already in, and rooms
+someone has invited you to. Inviting needs a durable identity, which only
+GitHub sign-in gives (ADR 0005); guests exist only inside a room.
+
+A list of "your rooms" also needs to know which rooms are still going. The
+columns for that exist (`rooms.state`, `host_last_seen`), but nothing sets
+them, so today every room ever made counts as live.
+
+## Options
+
+- Where the list comes from: a public directory; or only rooms you're in or
+  invited to.
+- Who may invite: the host; or any member.
+- What an invite names: the GitHub login as typed; or the account's numeric
+  id, looked up on GitHub.
+- How the list stays current: fetch on load and poll; server-sent events; a
+  websocket; a per-user Yjs document.
+- Colleagues: derived from shared rooms only; or derived suggestions plus a
+  list you keep on purpose.
+
+## Decision
+
+### The list
+
+The landing page gets a "Your rooms" card:
+
+- **Signed in:** pending invites first ("Bo invited you to K7MQ2P", Join or
+  Decline), then the live rooms your GitHub user is a member of. The server
+  knows both, so the list is the same on every device.
+- **Guest:** the rooms this browser holds a member secret for
+  (`riff-member:<id>`). The page sends its secrets, the server answers for
+  each. It lives in one browser because a guest has no account.
+- Each room shows whether the host is there ("host away for 3 min").
+- Never a room you aren't in or invited to.
+
+### Room state, the server half of ADR 0003
+
+To make "live" mean something, this ADR builds the part of ADR 0003's
+lifecycle that the list needs:
+
+- The host's first connection makes the room **live**; their last one
+  leaving makes it **away**, with `host_last_seen` set.
+- A room away for more than **5 minutes** becomes **ended**. A timer checks
+  every 30 seconds. The state and time are in SQLite, so the timer survives
+  a restart; at startup, rooms marked live become away from that moment,
+  since nobody is connected yet.
+- When a room ends, its invites are deleted and members' open connections
+  become read-only. Members can still open it read-only; joining by code is
+  refused.
+- The host opening an ended room revives it.
+
+Left to the lifecycle item: the banners, End room, deleting not-kept boards,
+and pruning.
+
+### Invites
+
+- **Only the host invites**, like rotate, lock and remove. An invite gets
+  past a lock, so a participant who could invite could undo the host's lock.
+  A guest host may invite; only the invited person needs GitHub.
+- The host types a username. The server looks it up with
+  `GET /users/:login`, authenticated with the app's client id and secret
+  (measured: 5000 requests an hour, against 60 without), and stores the
+  invite against the account's **numeric id**. A renamed account keeps its
+  invites, and whoever takes the old name doesn't get them.
+- Whether a GitHub account exists is public, so a typo gets "No GitHub user
+  called adaa". Whether someone uses *Riff* is not, so success always reads
+  "Invited @ada. They'll see it when they sign in", member or not.
+- Accepting joins under your saved name, or your login if there is none,
+  and asks for another if it's taken. It works in a locked room. An invite
+  goes when it's used, declined, cancelled by the host, or the room ends.
+- The host sees pending invites in the People panel and can cancel them.
+
+### Colleagues
+
+Two lists, both only for signed-in users:
+
+- **Recently worked together:** GitHub users who were members of a room
+  with you, derived from `room_members`. It fades as old rooms are pruned
+  (ADR 0003).
+- **Colleagues:** people you add from that list, or by username, and keep
+  until you remove them.
+  - It's yours alone: adding someone doesn't tell them, and they don't see
+    your list. There's nothing to accept, so there's no request to ignore.
+  - Both lists are suggestions in the invite box. They grant nothing: an
+    invite is still needed to get into a room.
+
+### Live updates
+
+The list is real time, over a websocket at `/api/rooms/watch`. The page
+opens it from the landing page (and the People panel, for the host's
+pending invites); a guest sends its secrets as the first message. The server
+sends the whole list on connect and again whenever something in it changes:
+an invite made, cancelled or used, someone joining, the host arriving or
+leaving, a room ending. Lists are a few hundred bytes, so a full list beats
+working out diffs.
+
+### Log
+
+`invite.add`, `invite.cancel`, `invite.accept`, `invite.decline` with the
+invited account's id, `room.away`, `room.end`, `room.revive`. Colleague
+changes are personal, not room events, and aren't logged.
+
+## Consequences
+
+- Getting into a room no longer needs the code for anyone signed in and
+  invited, or anyone who has been in the room before on that browser.
+- A room's state now changes on its own. A host whose tab is suspended for
+  over 5 minutes (a phone in a pocket) ends their room; they revive it by
+  opening it again. Whether 5 minutes suits phones is still open (PLAN).
+- Until the lifecycle item lands, an ended room has no banner. Members just
+  find it read-only.
+- One more long-lived socket per landing page. The server keeps a map from
+  user and member to open watchers; nothing about it is persisted.
+- Colleague lists are personal data kept with no end date. They go in a
+  user's export when that exists (the no-lock-in rule), and are deleted
+  with the account.
+- The signed-in paths can't be checked from `spec/`, which can't sign in
+  with GitHub. An in-process test (`app/scripts`) inserts a user and session
+  directly, as `test:audit-log` does.
+
+## The case for the options we didn't pick
+
+- **A public directory** finds rooms with no code at all, and at a crit it's
+  the room you're standing in. But it shows every room to everyone, and a
+  room's name and host are already more than strangers need (ADR 0006).
+- **Any member invites:** the person who knows the latecomer may not be the
+  host, and the host is busy driving. Against it: it bypasses the lock, and
+  the host is the one answerable for who's in.
+- **The login as typed:** no GitHub call, so no rate limit and no outage to
+  handle. Against it: a rename hands the invite to whoever takes the name
+  next. Short-lived invites make that rare, not impossible.
+- **Polling every 15 seconds** is less code and no extra socket. An invite
+  arriving 15 seconds late is fine; a list that's out of date when you click
+  isn't, and the brief asks for real time.
+- **Server-sent events** are one-way, which fits, but `EventSource` can only
+  `GET`, so guests' secrets would go in the URL and into logs. nginx would
+  also need buffering turned off for it.
+- **A per-user Yjs document** reuses Hocuspocus, but it would copy rows
+  that already live in tables into a second, append-only store, and keep
+  them after they're deleted.
+- **Colleagues only derived** needs no new table and no UI. But the people
+  you work with every week would vanish when old rooms are pruned, and
+  ADR 0003 prunes on purpose.
