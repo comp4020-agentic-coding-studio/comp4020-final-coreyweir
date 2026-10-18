@@ -220,9 +220,11 @@ README, PROCESS.md and the reflections are mine to write.
    - Viewers of a kept, ended board: the host and its members (settles
      ADR 0003's open question).
 5. ~~**Who-did-what log.**~~ Built with 4 (`app/server/audit.mjs`); what it
-   records so far is listed in ADR 0006's "Implementation". Left: leave and
-   end (with ADR 0003), queue release (with ADR 0004), a rehearsal of crit 10's
-   narration from `flyctl logs`.
+   records so far is listed in ADR 0006's "Implementation". Since 18 Oct it
+   also logs connect and disconnect, and staged and queued prompts added
+   and deleted, with who, read on dev and live. Left: end (with ADR 0003),
+   queue release (with ADR 0004; Load never reaches the server today), a
+   rehearsal of crit 10's narration from `flyctl logs`.
 
    Plan as agreed: `events(seq, at, room_id, member_id, action,
    detail_json)`. `detail_json` is a flat object of scalars (ids, counts,

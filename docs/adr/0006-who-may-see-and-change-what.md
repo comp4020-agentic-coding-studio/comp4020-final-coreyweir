@@ -184,15 +184,25 @@ differs from the plan, or stops short:
   20 ms instead of 3 s.
 - **The preview's HTTP side isn't gated.** `/room-preview/<room id>/…` is
   loaded by an iframe, which can't send a guest's secret. The room id is
-  random (128 bits) and only members learn it, but a removed member who kept
-  it could still load the preview while the room is live. Open.
+  random (128 bits), but `GET /api/rooms/by-code/:code` gives it to anyone
+  with the code, joined or not (even in a locked room), and a removed
+  member keeps it. Either can load the preview while the room is live.
+  Open.
 - **What the log records so far:** room create and join, code rotate,
-  lock and unlock, member removal, sign-in and sign-out, edits to each
-  document (one line per person, document and 10 s), and every refusal with
-  its reason (cross-origin socket or API call, not a member, a document that
-  isn't a room's, a read-only write, host-only actions, a participant
-  claiming the terminal or the preview, a bad sign-in state). Leaving and
-  ending (ADR 0003) and queue releases (ADR 0004) come with those features.
+  lock and unlock, member removal, sign-in and sign-out, each member's
+  connect and disconnect (first socket opened, last one closed), staged
+  prompts and queued prompts added and deleted (by id, with who: anyone
+  may delete a staged prompt, so the log has to say who did), edits to each
+  document (one line per person, document and 10 s, `updates=N bytes=B`),
+  and every refusal with its reason (cross-origin socket or API call, not a
+  member, a document that isn't a room's, a read-only write, host-only
+  actions, a participant claiming the terminal or the preview, a bad
+  sign-in state; repeated refusals are combined the same way, `times=N`).
+  Queueing a prompt shows as `queue.add` then `prompt.delete` with the same
+  id. Lines name the room by its current code, even for a socket that
+  connected before a rotation. Ending (ADR 0003) and queue releases
+  (ADR 0004) come with those features; today Load only reaches the host's
+  own terminal, so the server never sees it.
 - **Checked:** `spec/permissions.test.ts`, 14 checks against the live app,
   including the relays. Mutations that turn them red, one at a time:
   control writable by everyone, no Origin check, removed members still

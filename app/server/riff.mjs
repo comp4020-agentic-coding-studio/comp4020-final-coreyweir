@@ -63,7 +63,28 @@ export function createRiff({
     onEdit: (who, documentName, bytes) => audit.tally(who, `${documentName.split("/").pop()}.edit`, {}, bytes),
     onRefusedWrite: (who, documentName) =>
       audit.tally(who, "denied", { what: `${documentName.split("/").pop()}.write`, reason: "read_only" }),
+    onDocumentLoaded: watchDocument,
+    onPresence: (who, action) => audit.record(who, action),
   });
+
+  // Edits are only tallied, but adding and removing a staged prompt or a
+  // queued one is logged one by one, with who did it: anyone may delete a
+  // staged prompt (ADR 0006) because the log shows who did. Ids only, never
+  // the text. The server's own writes (the member list) have no member.
+  function watchDocument(documentName, document, whoOf) {
+    const part = DOCUMENT.exec(documentName)?.[2];
+    const watch = (map, subject) =>
+      map.observe((event) => {
+        const who = whoOf(event.transaction.origin);
+        if (!who) return;
+        for (const [id, change] of event.changes.keys) {
+          if (change.action === "add") audit.record(who, `${subject}.add`, { id });
+          if (change.action === "delete") audit.record(who, `${subject}.delete`, { id });
+        }
+      });
+    if (part === "shared") watch(document.getMap("prompts"), "prompt");
+    if (part === "control") watch(document.getMap("queue"), "queue");
+  }
 
   // The relays' hello carries the same credential as the documents: a
   // guest's secret as `token`, or the session cookie on the upgrade.

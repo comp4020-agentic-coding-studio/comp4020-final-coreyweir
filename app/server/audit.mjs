@@ -43,7 +43,11 @@ export function createAudit({ store, print = (line) => console.log(line), now = 
       action,
       JSON.stringify(flat),
     );
-    const fields = [...describe(who), ["action", action], ...Object.entries(flat)];
+    // A `who` can outlive a code rotation (a socket keeps the one it
+    // connected with), so name the room by its code as it is now.
+    const code = who?.roomId ? store.statements.roomById.get(who.roomId)?.code : undefined;
+    const named = code && code !== who.code ? { ...who, code } : who;
+    const fields = [...describe(named), ["action", action], ...Object.entries(flat)];
     print(`[audit] ${fields.map(([k, v]) => `${k}=${logfmtValue(v)}`).join(" ")}`);
   }
 
@@ -68,7 +72,9 @@ export function createAudit({ store, print = (line) => console.log(line), now = 
     if (!entry) return;
     edits.delete(key);
     clearTimeout(entry.timer);
-    record(entry.who, entry.action, { ...entry.fixed, updates: entry.updates, bytes: entry.bytes || undefined });
+    // An edit tally counts updates; a denial tally counts attempts.
+    const count = entry.action === "denied" ? "times" : "updates";
+    record(entry.who, entry.action, { ...entry.fixed, [count]: entry.updates, bytes: entry.bytes || undefined });
   }
 
   function close() {

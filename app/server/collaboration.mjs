@@ -83,6 +83,13 @@ export function createCollaboration({
   authorize,
   onEdit = () => {},
   onRefusedWrite = () => {},
+  // (documentName, document, whoOf): after stored rows are applied, so
+  // observers see only live changes. whoOf(transaction.origin) gives the
+  // member who sent a change, or null for the server's own writes.
+  onDocumentLoaded = () => {},
+  // (who, "connect" | "disconnect"): a member's first socket opened, or
+  // their last one closed.
+  onPresence = () => {},
   log = (message) => console.log(`[riff] ${message}`),
 } = {}) {
   if (!givenDb && !dbPath) throw new Error("createCollaboration needs a db or a dbPath");
@@ -92,6 +99,7 @@ export function createCollaboration({
   const socketsById = new Map();
   const socketsByMember = new Map();
   const memberBySocket = new Map();
+  const whoBySocket = new Map();
   const documentsBySocket = new Map();
 
   const statements = {
@@ -184,6 +192,7 @@ export function createCollaboration({
         }
         maybeCompact(documentName, document);
       });
+      onDocumentLoaded(documentName, document, (origin) => contextFrom(origin)?.who ?? null);
     },
 
     async afterUnloadDocument({ documentName }) {
@@ -198,8 +207,10 @@ export function createCollaboration({
       if (memberId !== undefined) {
         let ids = socketsByMember.get(memberId);
         if (!ids) socketsByMember.set(memberId, (ids = new Set()));
+        if (ids.size === 0) onPresence(context.who, "connect");
         ids.add(payload.socketId);
         memberBySocket.set(payload.socketId, memberId);
+        whoBySocket.set(payload.socketId, context.who);
         let documents = documentsBySocket.get(payload.socketId);
         if (!documents) documentsBySocket.set(payload.socketId, (documents = new Set()));
         documents.add(payload.documentName);
@@ -235,11 +246,16 @@ export function createCollaboration({
       websocket.on("close", (code, reason) => {
         socketsById.delete(client.socketId);
         const memberId = memberBySocket.get(client.socketId);
+        const who = whoBySocket.get(client.socketId);
         memberBySocket.delete(client.socketId);
+        whoBySocket.delete(client.socketId);
         documentsBySocket.delete(client.socketId);
         const ids = socketsByMember.get(memberId);
         ids?.delete(client.socketId);
-        if (ids?.size === 0) socketsByMember.delete(memberId);
+        if (ids?.size === 0) {
+          socketsByMember.delete(memberId);
+          if (who) onPresence(who, "disconnect");
+        }
         client.handleClose({ code, reason: reason.toString() });
       });
       websocket.on("error", (error) => console.error("[riff] collaboration socket error", error));
@@ -273,9 +289,10 @@ export function createCollaboration({
   function disconnectMember(memberId) {
     const ids = socketsByMember.get(memberId);
     if (!ids) return 0;
-    socketsByMember.delete(memberId);
+    // The bookkeeping is left to each socket's close handler, which also
+    // logs the member's disconnect when the last one goes.
     let closed = 0;
-    for (const id of ids) {
+    for (const id of [...ids]) {
       const websocket = socketsById.get(id);
       if (!websocket) continue;
       for (const documentName of documentsBySocket.get(id) ?? []) {
