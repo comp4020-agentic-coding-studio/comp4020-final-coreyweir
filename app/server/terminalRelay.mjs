@@ -49,7 +49,8 @@ export function createTerminalRelay({ authorize, onRefused } = {}) {
         const who = authorize(roomName, message, request);
         if (!who || who.refused) {
           const code = who?.refused ?? "not-a-member";
-          onRefused?.(roomName, "terminal", null, code);
+          // A refusal can still say whose it was (a member of an ended room).
+          onRefused?.(roomName, "terminal", who?.who ?? null, code);
           send(socket, { type: "error", code });
           hangUp(socket, 4401, code);
           return;

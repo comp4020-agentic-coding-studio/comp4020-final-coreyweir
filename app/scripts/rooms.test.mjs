@@ -313,7 +313,9 @@ test("a board the server doesn't keep is deleted from disk when its room ends; a
       const room = { id: created.body.room.id, code: created.body.room.code, host: created.body.member.secret };
       // the unkept one is switched before anyone joins, so the log shows both ways in
       if (which === "unkept") assert.equal((await call(app, `/api/rooms/${room.id}/keep`, { body: { keep: false }, secret: room.host })).status, 200);
-      room.guest = (await call(app, "/api/rooms/join", { body: { code: room.code, name: "Bo" } })).body.member.secret;
+      const joined = (await call(app, "/api/rooms/join", { body: { code: room.code, name: "Bo" } })).body.member;
+      room.guest = joined.secret;
+      room.guestId = joined.id;
       const session = await connect(app, room.id, "shared", { secret: room.host });
       session.doc.getText("board").insert(0, `drawn in the ${which} room`);
       for (let i = 0; i < 100 && rows(room.id) < 2; i++) await sleep(10);
@@ -336,7 +338,17 @@ test("a board the server doesn't keep is deleted from disk when its room ends; a
     assert.equal(reading.doc.getText("board").toString(), "drawn in the kept room");
     reading.leave();
 
+    // the kept room's guest asks for the terminal: refused, and the log
+    // says whose refusal it was
+    const Socket = socketClass(app.origin);
+    const relay = new Socket(`${app.origin.replace("http", "ws")}/terminal/${rooms.kept.id}`);
+    relay.on("open", () => relay.send(JSON.stringify({ type: "hello", role: "participant", token: rooms.kept.guest })));
+    const heard = await new Promise((resolve) => relay.on("message", (data) => resolve(JSON.parse(String(data)))));
+    assert.deepEqual(heard, { type: "error", code: "room-ended" });
+    relay.close();
+
     const events = app.events();
+    assert.ok(events.some((row) => row.action === "denied" && row.detail.what === "terminal" && row.detail.reason === "room_ended" && row.member_id === rooms.kept.guestId));
     const ends = Object.fromEntries(events.filter(by("room.end")).map((row) => [row.room_id, row.detail]));
     assert.deepEqual(ends[rooms.kept.id], { reason: "host_away", board: "kept" });
     assert.deepEqual(ends[rooms.unkept.id], { reason: "host_away", board: "deleted" });

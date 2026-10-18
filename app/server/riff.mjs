@@ -138,7 +138,7 @@ export function createRiff({
       token: typeof hello.token === "string" && hello.token ? hello.token : undefined,
       cookie: request.headers.cookie,
     });
-    if (who && who.state === "ended" && who.role !== "host") return { refused: "room-ended" };
+    if (who && who.state === "ended" && who.role !== "host") return { refused: "room-ended", who };
     return who;
   };
   const relayRefused = (roomId, what, who, code) => {
