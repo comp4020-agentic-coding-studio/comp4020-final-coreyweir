@@ -113,8 +113,8 @@ the queue with `queue.send` (5)~~, ~~the API proxy (6)~~, ~~then deleting
      Done 18 Oct, with a pasted token sealed the same way (it must be the
      signed-in user's), and the device flow removed. ADR 0005's
      "Implementation" has the details.
-     - Left: a real push from a room on live, through both the OAuth grant
-       and a pasted token (needs your account).
+     - ~~Left: a real push from a room on live.~~ Confirmed by hand on 18
+       Oct (git from a live room, with the model call through the proxy).
    - ~~Left: sign in with a real GitHub account on the live site and check
      the session, `/api/me`, a GitHub member's badge, and sign-out.~~ Done
      by hand on live, 18 Oct.
@@ -320,7 +320,8 @@ the queue with `queue.send` (5)~~, ~~the API proxy (6)~~, ~~then deleting
    - ~~Run the smoke against live.~~ Passed 18 Oct with
      `ECHO_BASE=https://httpbin.org` and the built chunk: httpbin saw the
      real token, the guest's `env` showed only placeholders.
-   - Left: a real model call and a real push from a room on live.
+   - ~~Left: a real model call and a real push from a room on live.~~ Both
+     confirmed by hand on 18 Oct.
 
 ### P2: toward A3
 
