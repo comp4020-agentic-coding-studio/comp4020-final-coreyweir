@@ -10,8 +10,8 @@ so the plan's history stays readable.
 
 1. **Port** (done, `c8792b8..7af9c15`): the existing Riff, deployed on fly
    with server-side persistence.
-2. **Assess and plan** (week 10, now): this file, and ADRs 0001–0006.
-3. **Implement**, in the order below. Each change goes:
+2. **Assess and plan** (week 10, done): this file, and ADRs 0001–0006.
+3. **Implement** (now), in the order below. Each change goes:
    1. a decision (an ADR if it changes how people share a room);
    2. a check in `spec/`;
    3. the change;
@@ -163,10 +163,21 @@ README, PROCESS.md and the reflections are mine to write.
    - Left: gate the preview's HTTP side (`/room-preview/<id>/…`) to members.
    - Left: a "this room predates sign-in" page for old `riff-<code>` links
      (today they reach the join form and "no live room").
-   - Left: the browser smokes that drive a room (`app/scripts/*-browser-smoke.mjs`)
-     haven't been run since; the relay smokes have.
-   - A cold machine answers 502 for the second or two before node listens
-     (nginx starts first). Seen once at the start of a spec run.
+   - ~~The browser smokes that drive a room haven't been run since.~~
+     `terminal-browser-smoke.mjs` now hosts through the landing page and
+     joins from the share link alone; it passes on dev and live (18 Oct).
+     Its old check counted live data events only, which a late joiner
+     needn't get while Claude sits idle: it now waits for the snapshot,
+     then types on the host and waits for live data.
+     - Left: `preview-browser-smoke.mjs` and
+       `preview-participant-browser-smoke.mjs` still claim a room name and
+       host capability client-side; port them with the preview HTTP gate.
+   - ~~A cold machine answers 502 for the second or two before node
+     listens.~~ Fixed in `deploy/start.sh`: nginx starts only once node
+     accepts connections, so fly's proxy holds the request. Measured with
+     `flyctl machine stop` then requests: before, every request for the
+     first seconds was 502; after, three rounds, the first request took
+     ~4 s and got its real answer.
 
    Plan as agreed:
    - `rooms(id, code, keep, locked, state, host_last_seen, created_at,

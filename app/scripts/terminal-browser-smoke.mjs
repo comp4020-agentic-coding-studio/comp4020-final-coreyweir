@@ -13,18 +13,20 @@ try {
   const host = await browser.newPage();
   const pageErrors = [];
   host.on("pageerror", (error) => pageErrors.push(String(error)));
-  await host.goto(`${baseUrl}/?setup=host`, { waitUntil: "networkidle0" });
-  const hostInputs = await host.$$(".entry-card input");
+  // Host through the landing page: the server creates the room, and the
+  // page moves to ?id=<room id>. The join code is shown in the top bar.
+  await host.goto(baseUrl, { waitUntil: "networkidle0" });
+  await host.click(".entry-card > nav button:nth-child(2)");
+  const hostInputs = await host.$$(".entry-card form input");
   await hostInputs[0].type("Browser Host");
   await hostInputs[1].click({ clickCount: 3 });
   await hostInputs[1].type(`${baseUrl}/fake-anthropic`);
   await hostInputs[2].type("invalid-browser-smoke-token");
-  await Promise.all([
-    host.waitForNavigation({ waitUntil: "networkidle0" }),
-    host.click(".entry-card .primary"),
-  ]);
-  room = await host.evaluate(() => new URL(location.href).searchParams.get("room") ?? "");
-  assert(room);
+  await host.click(".entry-card form .primary");
+  await host.waitForFunction(() => location.search.startsWith("?id="), { timeout: 10_000 });
+  await host.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 10_000 });
+  room = await host.$eval(".room-name span", (element) => element.textContent.replace("Room ", ""));
+  assert.match(room, /^[A-Z2-9]{6}$/);
 
   const headers = await host.evaluate(() => ({ isolated: crossOriginIsolated, worker: typeof SharedArrayBuffer !== "undefined" }));
   assert.deepEqual(headers, { isolated: true, worker: true });
@@ -58,20 +60,32 @@ try {
   const participant = await participantContext.newPage();
   participant.on("pageerror", (error) => pageErrors.push(String(error)));
   await participant.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
-  await participant.goto(baseUrl, { waitUntil: "networkidle0" });
-  const participantInputs = await participant.$$(".entry-card input");
+  // Join from the share link alone, as a pod member would: the code is
+  // prefilled, so a name is all it takes.
+  await participant.goto(`${baseUrl}/?room=${room.toLowerCase()}`, { waitUntil: "networkidle0" });
+  await participant.waitForSelector(".entry-card form");
+  const participantInputs = await participant.$$(".entry-card form input");
   await participantInputs[0].type("Browser Participant");
-  await participantInputs[1].type(room);
-  await Promise.all([
-    participant.waitForNavigation({ waitUntil: "networkidle0" }),
-    participant.click(".entry-card .primary"),
-  ]);
-  assert.equal(await participant.evaluate(() => new URL(location.href).searchParams.get("room")), room);
+  await participant.click(".entry-card form .primary");
+  await participant.waitForFunction(() => location.search.startsWith("?id="), { timeout: 10_000 });
+  assert.equal(
+    await participant.evaluate(() => new URL(location.href).searchParams.get("id")),
+    await host.evaluate(() => new URL(location.href).searchParams.get("id")),
+  );
   assert.equal(await participant.evaluate(() => new URL(location.href).searchParams.has("preview")), false);
   await participant.evaluate(() => {
     const button = [...document.querySelectorAll(".topbar nav button")].find((element) => element.textContent === "Room");
     button?.click();
   });
+  // A late joiner first gets the host's latest snapshot. Claude may be idle
+  // by then (the fake endpoint fails at once), so live data only follows
+  // once the host's screen changes: type into the host's terminal.
+  await participant.waitForFunction(
+    () => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-checkpoint-renders")) > 0,
+    { timeout: 30_000 },
+  );
+  await host.click(".terminal-target .xterm");
+  await host.keyboard.type("riff smoke");
   await participant.waitForFunction(
     () => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-data-events")) > 0,
     { timeout: 30_000 },

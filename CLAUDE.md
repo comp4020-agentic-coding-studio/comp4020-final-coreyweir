@@ -16,7 +16,8 @@ Reused code does not answer the brief. What I change, decide and justify does.
 
 ## Where we are
 
-Week 10. Crit 9 ("All at once") was today; its decision is `docs/adr/0001`.
+Week 10. Crit 9 ("All at once") was on 12 October; its decision is
+`docs/adr/0001`.
 Next is crit 10 on 19 October: the server tells people apart, checks what
 each may see and change, and logs who did what in a way that outlives the
 crit. That is built (`docs/adr/0005`, `docs/adr/0006`, checked in
@@ -35,10 +36,11 @@ an item, and update it when the item lands.
 
 1. **Port** (done, `c8792b8..7af9c15`): the existing Riff deployed on fly,
    with server-side persistence.
-2. **Assess and plan** (now): measure Riff against the brief and the README,
-   and settle priorities and architecture. Decisions are recorded as ADRs in
-   `docs/adr/`, with the options, the choice and its cost.
-3. **Implement**, in priority order. Each change goes: decision (an ADR if it
+2. **Assess and plan** (done, ADRs 0001–0006 and `PLAN.md`): measure Riff
+   against the brief and the README, and settle priorities and
+   architecture. Decisions are recorded as ADRs in `docs/adr/`, with the
+   options, the choice and its cost.
+3. **Implement** (now), in priority order. Each change goes: decision (an ADR if it
    changes how people share a room), then a check in `spec/` where it can be
    tested, then the change, then verification on the live app, then a commit.
 
