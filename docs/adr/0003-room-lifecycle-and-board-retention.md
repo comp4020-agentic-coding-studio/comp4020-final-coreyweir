@@ -1,6 +1,7 @@
 # 3. Room lifecycle and board retention
 
-- Status: accepted, not yet implemented (week 10, planning phase)
+- Status: accepted; lifecycle, keeping and End room implemented 2026-10-18;
+  pruning, the size cap, local copies and export not yet
 - Date: 2026-10-12
 
 ## Context
@@ -178,4 +179,72 @@ opinionated" says to make that a setting.
 ## Not decided here
 
 - Who can view a kept, ended board: anyone with the room code, or only the
-  people who were in it. That's crit 10's permissions question.
+  people who were in it. That's crit 10's permissions question. (Settled in
+  ADR 0006: the host and the room's members, read-only. The code stops
+  resolving once a room ends.)
+
+## Implementation (2026-10-18)
+
+Built with ADR 0008's room states (`a0bee0f`, `ef1401f`): the state and the
+host's last-seen time in SQLite, the grace timer, and after a restart live
+rooms counting as away from then. This part adds keeping and ending.
+
+- **Server** (`7928bac`, `d9a7766`). `rooms.keep` is set at creation
+  (`POST /api/rooms {keep}`, default true) and changed with
+  `POST /api/rooms/:id/keep`: host only, and `409 others_joined` when
+  switching back to keeping after anyone else has ever been a member,
+  removed members included. Ending (`POST /api/rooms/:id/end`, or the grace
+  running out) deletes invites, then:
+  - kept: every connection to the room's documents turns read-only,
+    the host's too, so the host's still-open page can't write either;
+  - not kept: the server tells each non-host socket in-band
+    (`PermissionDenied`, reason `room-ended`) and hangs up, deletes the
+    room's rows from `doc_updates`, and refuses the documents from then on.
+  The terminal relay tells participants `room-ended` and hangs up. The log
+  records `room.create board=kept|not_kept`, `room.keep`, `room.end
+  reason=host|host_away board=kept|deleted invites_dropped=N`, and denials
+  with the member's name.
+- **Reviving.** The host opening an ended room (its documents or
+  `GET /api/rooms/:id/me`) revives it, as decided. For a not-kept room the
+  server starts empty; the host's own browser copy (IndexedDB) then syncs
+  back into it, the exception "Local copies" allows. That last step is by
+  design but **not measured in a browser** yet.
+- **Client** (`8066106`). The host form has "Keep the board after the room
+  ends", ticked by default. A share link's join form says what happens to
+  the board before anyone joins, and inside the room the top bar (desktop)
+  and the People panel say it. The People panel gives the host the switch
+  and "End room", which asks first and says what happens to the board. The
+  host's page then leaves for the start page at once (`?ended=CODE`),
+  because its reconnecting would revive the room.
+- **Wording that changed from the Decision.** The away banner says *"The
+  host isn't connected, so there's no Claude or preview for now. The
+  whiteboard still works. If they don't come back, the room ends in 4:32."*:
+  "isn't connected", because the server only knows the connection went. The
+  ended banners don't mention export until export exists. A not-kept ended
+  room is a closed page, not a banner, because the server refuses it.
+- **Read-only, in the page.** In a kept ended room the whiteboard is
+  quickdraw's `readonly` (no toolbar), staging has no form and its cards
+  are read-only. The server refuses writes anyway; this is so the page
+  doesn't offer what would be refused. A participant's terminal stops
+  reconnecting on `room-ended` and starts again if the host revives the
+  room.
+
+Checked:
+
+- `spec/rooms.test.ts` (live): keeping and its 409, a not-kept board deleted
+  and its guest let go, the host's open socket refused after ending, the
+  room's state and `endsAt` inside the room, the terminal relay's
+  `room-ended`. It can't tell an in-band notice from a refused reconnect
+  (a mutation that skipped telling members stayed green).
+- `npm run test:rooms`: the grace period ending a kept and a not-kept room,
+  rows deleted only for the latter, the log, and the relay's denial naming
+  the member.
+- `npm run test:lifecycle-browser`, dev and live, 1920×1080 and 390×844:
+  the form's default, the join form's notice, the away banner's countdown
+  and its clearing when the host returns, End room's confirmation, the kept
+  board read-only after a reload, the keep switch refused after a join, and
+  the not-kept room closed after a reload. The five-minute grace is too long
+  to wait for in a browser; `test:rooms` shortens it.
+
+Not built: pruning and the size cap (their numbers aren't decided), local
+copy lists, export and import.

@@ -23,7 +23,9 @@ each may see and change, and logs who did what in a way that outlives the
 crit. That is built (`docs/adr/0005`, `docs/adr/0006`, checked in
 `spec/permissions.test.ts`); what's left of it is in `PLAN.md`. A3 is due at
 noon on 9 November. Toward A3, "Your rooms", invites and colleagues are
-built (`docs/adr/0008`); next in `PLAN.md`'s P2 is the room lifecycle.
+built (`docs/adr/0008`), and so is the room lifecycle apart from pruning
+and the size cap (`docs/adr/0003`); next in `PLAN.md`'s P2 is local copies
+and export.
 
 Update this section at each crit. A harness describing last week's project
 steers the agent into last week's work.

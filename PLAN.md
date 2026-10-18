@@ -34,7 +34,7 @@ README, PROCESS.md and the reflections are mine to write.
 |---|---|---|
 | [0001](docs/adr/0001-the-terminal-mirror-is-not-persisted.md) | The terminal mirror stays in server memory and is never persisted | Yes (today's behaviour) |
 | [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
-| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import | No |
+| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`, 18 Oct); not pruning, size cap, local copies, export |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
 | [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes (`389ffff`, `4acb32b`; push token in the client 18 Oct) |
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
@@ -342,12 +342,19 @@ auto-release at the latest.
 - **Room lifecycle** (ADR 0003):
   - ~~room records: state, the host's last-seen time, and a permanent id
     beside the join code~~ (the columns exist since P1.4);
-  - a grace timer that survives restarts (moved to ADR 0008's item);
-  - the "host away" and "ended" banners;
-  - read-only connections for kept ended rooms (moved to ADR 0008's item),
-    refused ones for not-kept, and End room;
+  - ~~a grace timer that survives restarts~~ (built with ADR 0008);
+  - ~~the "host away" and "ended" banners~~;
+  - ~~read-only connections for kept ended rooms, refused ones for
+    not-kept, and End room~~. Built 18 Oct (`f98a002` spec, `7928bac`
+    server, `8066106` client, `d9a7766` log); see the ADR's Implementation
+    section. Checked by `spec/rooms.test.ts` (live), `npm run test:rooms`,
+    `npm run test:lifecycle-browser` (dev and live, both sizes).
+    - Left: a host reviving a not-kept room in a browser (their IndexedDB
+      copy should sync back; not measured); the 5-minute grace on a phone
+      host (Still open).
   - pruning (oldest opened first, past a volume threshold) and a per-room
-    size cap.
+    size cap. **Needs a decision first:** the threshold, the cap, and what
+    the cap does when reached.
 - **Local copies:**
   - file y-indexeddb copies under the permanent id;
   - "Rooms you hosted" and "Boards you've been in" lists, with delete;

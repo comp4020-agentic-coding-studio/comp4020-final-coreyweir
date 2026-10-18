@@ -96,6 +96,7 @@ npm run test:collaboration
 npm run test:audit-log             # the who-did-what log, read back from SQLite
 npm run test:rooms                 # your rooms, invites, colleagues, the grace timer (signed in, in-process)
 npm run test:rooms-browser         # needs the dev server; writes a signed-in user into the dev database
+npm run test:lifecycle-browser     # needs the dev server, or RIFF_URL=<live>; W/H for the viewport
 npm run test:terminal-relay
 npm run test:github-push-browser   # needs the dev server
 npm run test:credentials-browser   # needs the dev server; ECHO_BASE=https://httpbin.org against live
