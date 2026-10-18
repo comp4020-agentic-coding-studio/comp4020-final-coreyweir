@@ -69,6 +69,7 @@ async function start({ dir = mkdtempSync(join(tmpdir(), "riff-rooms-")), ...opti
         .run(hashToken(token), user.id, now, now, now + 86_400_000);
       return `__Host-riff-session=${token}`;
     },
+    prune: () => riff.prune(),
     events: () =>
       db.prepare("SELECT room_id, member_id, user_id, action, detail_json FROM events ORDER BY seq").all()
         .map((row) => ({ ...row, detail: JSON.parse(row.detail_json ?? "{}") })),
@@ -353,6 +354,128 @@ test("a board the server doesn't keep is deleted from disk when its room ends; a
     assert.deepEqual(ends[rooms.kept.id], { reason: "host_away", board: "kept" });
     assert.deepEqual(ends[rooms.unkept.id], { reason: "host_away", board: "deleted" });
     assert.deepEqual(events.filter(by("room.keep")).map((row) => [row.room_id, row.detail.board]), [[rooms.unkept.id, "not_kept"]]);
+  } finally {
+    await app.stop();
+  }
+});
+
+// ADR 0003's amendment. spec/limits.test.ts checks the cap on a deployed
+// app; this checks what it can't: that a full room stays full across a
+// restart, and pruning, which needs a nearly full volume (stood in for).
+test("the limit counts what the room holds, not edits since undone", async () => {
+  const app = await start({ roomLimitBytes: 4000 });
+  try {
+    const created = await call(app, "/api/rooms", { body: { name: "Ada" } });
+    const room = { id: created.body.room.id, host: created.body.member.secret };
+    const board = await connect(app, room.id, "shared", { secret: room.host });
+    const text = board.doc.getText("board");
+    const me = async () => (await get(app, `/api/rooms/${room.id}/me`, { secret: room.host })).body.room;
+    const stored = () => app.db.prepare("SELECT COUNT(*) AS n FROM doc_updates WHERE doc = ?").get(`room/${room.id}/shared`).n;
+    // 2.5 kB written and deleted, then 2.5 kB more: 5 kB of rows, 2.5 kB of board
+    text.insert(0, "a".repeat(2500));
+    for (let i = 0; i < 100 && stored() < 1; i++) await sleep(10);
+    text.delete(0, 2500);
+    for (let i = 0; i < 100 && stored() < 2; i++) await sleep(10);
+    text.insert(0, "b".repeat(2500));
+    for (let i = 0; i < 100 && stored() < 2; i++) await sleep(10);
+    await sleep(100);
+    assert.equal((await me()).full, false);
+    board.leave();
+    const reread = await connect(app, room.id, "shared", { secret: room.host });
+    assert.equal(reread.doc.getText("board").toString(), "b".repeat(2500));
+    reread.leave();
+  } finally {
+    await app.stop();
+  }
+});
+
+test("a full room stays full after a restart", async () => {
+  let app = await start({ roomLimitBytes: 4000 });
+  const dir = app.dir;
+  const rows = (roomId) => app.db.prepare("SELECT COUNT(*) AS n FROM doc_updates WHERE doc = ?").get(`room/${roomId}/shared`).n;
+  let room;
+  try {
+    const created = await call(app, "/api/rooms", { body: { name: "Ada" } });
+    room = { id: created.body.room.id, host: created.body.member.secret };
+    assert.equal(created.body.room.limitBytes, 4000);
+    const board = await connect(app, room.id, "shared", { secret: room.host });
+    board.doc.getText("board").insert(0, "a".repeat(2500));
+    for (let i = 0; i < 100 && rows(room.id) < 1; i++) await sleep(10);
+    board.doc.getText("board").insert(0, "b".repeat(2500));
+    for (let i = 0; i < 100 && !(await get(app, `/api/rooms/${room.id}/me`, { secret: room.host })).body.room.full; i++) await sleep(10);
+    assert.equal(rows(room.id), 1, "the write that didn't fit wasn't stored");
+    board.leave();
+  } finally {
+    await app.stop({ keep: true });
+  }
+  app = await start({ dir, roomLimitBytes: 4000 });
+  try {
+    assert.equal((await get(app, `/api/rooms/${room.id}/me`, { secret: room.host })).body.room.full, true);
+    const board = await connect(app, room.id, "shared", { secret: room.host });
+    assert.equal(board.doc.getText("board").toString(), "a".repeat(2500));
+    board.doc.getText("board").insert(0, "c");
+    await sleep(300);
+    assert.equal(rows(room.id), 1, "a full room takes nothing more, even a byte");
+    board.leave();
+    const full = app.events().filter(by("room.full"));
+    assert.equal(full.length, 1);
+    assert.ok(full[0].detail.stored_bytes > 2500 && full[0].detail.refused_bytes > 2500);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("pruning deletes the ended boards opened longest ago until the volume is below 60%, never a live one", async () => {
+  // A 10 kB volume, 75% used, and boards of about 1 kB: two have to go.
+  let used = 7_500;
+  const app = await start({ diskUsage: () => ({ total: 10_000, used }) });
+  const rows = (roomId) =>
+    app.db.prepare("SELECT COUNT(*) AS n FROM doc_updates WHERE doc IN (?, ?)").get(`room/${roomId}/shared`, `room/${roomId}/control`).n;
+  try {
+    const rooms = {};
+    for (const name of ["a", "b", "c", "live"]) {
+      const created = await call(app, "/api/rooms", { body: { name: "Ada" } });
+      const room = { id: created.body.room.id, code: created.body.room.code, host: created.body.member.secret };
+      room.guest = (await call(app, "/api/rooms/join", { body: { code: room.code, name: "Bo" } })).body.member.secret;
+      const board = await connect(app, room.id, "shared", { secret: room.host });
+      board.doc.getText("board").insert(0, name.repeat(1000 / name.length));
+      for (let i = 0; i < 100 && rows(room.id) < 1; i++) await sleep(10);
+      board.leave();
+      if (name !== "live") assert.equal((await call(app, `/api/rooms/${room.id}/end`, { body: {}, secret: room.host })).status, 200);
+      rooms[name] = room;
+      await sleep(5);
+    }
+    // a was opened again after it ended, so b and c are the oldest
+    (await connect(app, rooms.a.id, "shared", { secret: rooms.a.guest })).leave();
+
+    assert.equal(app.prune(), 2);
+    assert.ok(rows(rooms.a.id) > 0, "the board opened most recently stays");
+    assert.equal(rows(rooms.b.id), 0);
+    assert.equal(rows(rooms.c.id), 0);
+    assert.ok(rows(rooms.live.id) > 0, "a room that hasn't ended is never pruned");
+
+    // to its members, a pruned board is like one the server didn't keep
+    await assert.rejects(connect(app, rooms.b.id, "shared", { secret: rooms.b.guest }), /refused: board-pruned/);
+    assert.equal((await get(app, `/api/rooms/${rooms.b.id}/me`, { secret: rooms.b.guest })).body.room.pruned, true);
+    const pruned = app.events().filter(by("room.prune"));
+    assert.deepEqual(pruned.map((row) => row.room_id).sort(), [rooms.b.id, rooms.c.id].sort());
+    assert.ok(pruned.every((row) => row.detail.freed_bytes > 1000));
+
+    // its host opening it brings it back, from their own copy
+    const revived = await connect(app, rooms.b.id, "shared", { secret: rooms.b.host });
+    assert.equal(revived.doc.getText("board").toString(), "", "the server has nothing left of it");
+    revived.doc.getText("board").insert(0, "from the host's copy");
+    for (let i = 0; i < 100 && rows(rooms.b.id) < 1; i++) await sleep(10);
+    revived.leave();
+    const me = (await get(app, `/api/rooms/${rooms.b.id}/me`, { secret: rooms.b.guest })).body.room;
+    assert.equal(me.pruned, false);
+    assert.notEqual(me.state, "ended");
+    assert.ok(rows(rooms.b.id) > 0);
+
+    // below 70% nothing is pruned
+    used = 6_500;
+    assert.equal(app.prune(), 0);
+    assert.ok(rows(rooms.a.id) > 0);
   } finally {
     await app.stop();
   }

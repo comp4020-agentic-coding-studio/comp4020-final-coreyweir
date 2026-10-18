@@ -35,7 +35,12 @@ export function migrate(db) {
       state           TEXT    NOT NULL DEFAULT 'live' CHECK (state IN ('live', 'away', 'ended')),
       host_last_seen  INTEGER,
       created_at      INTEGER NOT NULL,
-      ended_at        INTEGER
+      ended_at        INTEGER,
+      -- ADR 0003's amendment: a full room stays read-only; pruning picks
+      -- the ended boards opened longest ago, and a pruned board is gone.
+      full_at         INTEGER,
+      last_opened     INTEGER,
+      pruned_at       INTEGER
     ) STRICT;
 
     -- A member is a GitHub user or a guest with a room-scoped secret, never
@@ -96,6 +101,12 @@ export function migrate(db) {
       PRIMARY KEY (user_id, github_id)
     ) STRICT;
   `);
+  // Columns added after the table first shipped. CREATE TABLE IF NOT EXISTS
+  // leaves an existing table as it was, so the live database gets them here.
+  const columns = new Set(db.prepare("PRAGMA table_info(rooms)").all().map((column) => column.name));
+  for (const column of ["full_at", "last_opened", "pruned_at"]) {
+    if (!columns.has(column)) db.exec(`ALTER TABLE rooms ADD COLUMN ${column} INTEGER`);
+  }
 }
 
 export const randomToken = (bytes = 32) => randomBytes(bytes).toString("base64url");
@@ -142,7 +153,15 @@ export function createStore(db) {
     hostArrived: q("UPDATE rooms SET state = 'live', host_last_seen = ?, ended_at = NULL WHERE id = ? AND state <> 'ended'"),
     hostLeft: q("UPDATE rooms SET state = 'away', host_last_seen = ? WHERE id = ? AND state = 'live'"),
     endRoom: q("UPDATE rooms SET state = 'ended', ended_at = ? WHERE id = ? AND state <> 'ended'"),
-    reviveRoom: q("UPDATE rooms SET state = 'away', host_last_seen = ?, ended_at = NULL WHERE id = ? AND state = 'ended'"),
+    // A pruned board comes back from the host's own copy.
+    reviveRoom: q("UPDATE rooms SET state = 'away', host_last_seen = ?, ended_at = NULL, pruned_at = NULL WHERE id = ? AND state = 'ended'"),
+    markFull: q("UPDATE rooms SET full_at = ? WHERE id = ? AND full_at IS NULL"),
+    touchOpened: q("UPDATE rooms SET last_opened = ? WHERE id = ?"),
+    // Ended boards the server still keeps, opened longest ago first.
+    prunable: q(`SELECT id, code FROM rooms WHERE state = 'ended' AND keep = 1 AND pruned_at IS NULL
+                 ORDER BY COALESCE(last_opened, ended_at, created_at), created_at`),
+    // The board is gone, so it isn't full any more either.
+    markPruned: q("UPDATE rooms SET pruned_at = ?, full_at = NULL WHERE id = ? AND pruned_at IS NULL"),
     overdueRooms: q("SELECT id FROM rooms WHERE state = 'away' AND host_last_seen < ?"),
     // After a restart nobody is connected, so a live room's host is away
     // from that moment and gets the whole grace period to come back.

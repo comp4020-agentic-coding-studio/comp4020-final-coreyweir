@@ -23,6 +23,8 @@ export function createRooms({
   githubLookup,
   // ADR 0003: how long a room waits for its host before it ends
   hostGraceMs = 5 * MINUTE,
+  // ADR 0003's amendment: what a room's two documents may store together
+  limitBytes = 4 * 1024 * 1024,
   now = () => Date.now(),
   onRoomChanged = () => {},
   onRemoved = () => {},
@@ -31,6 +33,8 @@ export function createRooms({
   // the room ended or came back: open connections change what they may do
   onEnded = () => {},
   onRevived = () => {},
+  // the room filled up: open connections turn read-only
+  onFull = () => {},
   log = () => {},
 }) {
   if (!previewSecret) throw new Error("createRooms needs a previewSecret");
@@ -90,7 +94,13 @@ export function createRooms({
       reviveRoom(room, member);
       room = s.roomById.get(room.id);
     }
-    return { ...who(room, member), state: room.state, keep: Boolean(room.keep) };
+    return {
+      ...who(room, member),
+      state: room.state,
+      keep: Boolean(room.keep),
+      full: room.full_at !== null,
+      pruned: room.pruned_at !== null,
+    };
   }
 
   // ---- the room's state (ADR 0008; the server half of ADR 0003) ----
@@ -123,6 +133,28 @@ export function createRooms({
     audit.record(who(room, hostMember), "room.revive");
     onRevived(room.id);
     onRoomChanged(room.id);
+  }
+
+  // The write that would have taken the room past its limit was refused;
+  // from now on nobody writes to it (ADR 0003's amendment). It stays full:
+  // the way on is exporting it and starting a new room.
+  function markFull(roomId, actor, detail) {
+    if (!s.markFull.run(now(), roomId).changes) return false;
+    audit.record(actor ?? { roomId }, "room.full", detail);
+    onFull(roomId);
+    onRoomChanged(roomId);
+    return true;
+  }
+
+  // An ended, kept board deleted to make space. The room, its members and
+  // its log stay; to its members it is now like a board the server didn't
+  // keep, and its host opening it brings it back from their own copy.
+  function markPruned(roomId, detail) {
+    if (!s.markPruned.run(now(), roomId).changes) return false;
+    s.deleteRoomInvites.run(roomId);
+    const room = s.roomById.get(roomId);
+    audit.record({ roomId, code: room.code }, "room.prune", detail);
+    return true;
   }
 
   // Ends every room whose host has been away longer than the grace period.
@@ -208,6 +240,11 @@ export function createRooms({
     keep: Boolean(room.keep),
     state: room.state,
     endsAt: room.state === "away" ? room.host_last_seen + hostGraceMs : null,
+    // ADR 0003's amendment: how much it may store, whether that's reached,
+    // and whether an ended board was deleted to make space
+    limitBytes,
+    full: room.full_at !== null,
+    pruned: room.pruned_at !== null,
   });
 
   async function create(request, response) {
@@ -516,5 +553,16 @@ export function createRooms({
     return { room: roomJson(room), members };
   }
 
-  return { handle, resolve, resolvePreview, summary, presence, endOverdue, membersForSecrets, listFor };
+  return {
+    handle,
+    resolve,
+    resolvePreview,
+    summary,
+    presence,
+    endOverdue,
+    markFull,
+    markPruned,
+    membersForSecrets,
+    listFor,
+  };
 }

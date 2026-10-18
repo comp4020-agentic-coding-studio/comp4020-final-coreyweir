@@ -13,11 +13,29 @@ import { createGithubLookup } from "./github.mjs";
 import { createColleagues } from "./colleagues.mjs";
 import { createWatch } from "./watch.mjs";
 import { randomBytes } from "node:crypto";
+import { statfsSync } from "node:fs";
+import { dirname, resolve as resolvePath } from "node:path";
 import { HttpError, sameOrigin, sendJson } from "./http.mjs";
 
 const HOUR_MS = 60 * 60 * 1000;
 const STATE_CHECK_MS = 30 * 1000;
 const DOCUMENT = /^room\/([\w-]{8,64})\/(shared|control)$/;
+// docs/adr/0003, amendment of 18 October: a 16 MB board ran the 256 MB
+// machine out of memory, 4 MB per room didn't. Pruning starts above 70% of
+// the volume and stops below 60%.
+const ROOM_LIMIT_BYTES = 4 * 1024 * 1024;
+const PRUNE_ABOVE = 0.7;
+const PRUNE_UNTIL = 0.6;
+
+// The volume the database is on, counting the database's free pages as
+// free: SQLite reuses them, but never gives them back to the filesystem.
+function volumeUsage(db, dbPath) {
+  const volume = statfsSync(dirname(resolvePath(dbPath)));
+  const { freelist_count: freePages } = db.prepare("PRAGMA freelist_count").get();
+  const { page_size: pageSize } = db.prepare("PRAGMA page_size").get();
+  const total = volume.blocks * volume.bsize;
+  return { total, used: (volume.blocks - volume.bfree) * volume.bsize - freePages * pageSize };
+}
 
 export function createRiff({
   dbPath,
@@ -30,12 +48,25 @@ export function createRiff({
   githubLookup = createGithubLookup({ clientId: githubClientId, clientSecret: githubClientSecret }),
   hostGraceMs,
   stateCheckMs = STATE_CHECK_MS,
+  roomLimitBytes = ROOM_LIMIT_BYTES,
+  diskUsage,
 }) {
   if (!origin) throw new Error("createRiff needs RIFF_ORIGIN: the origin browsers reach this server at");
   const db = openDatabase(dbPath);
   const store = createStore(db);
   const audit = createAudit({ store });
   const auth = createAuth({ store, audit, origin, clientId: githubClientId, clientSecret: githubClientSecret, sessionSecret });
+  const usage = diskUsage ?? (() => volumeUsage(db, dbPath));
+
+  // What a member may write in each document of a room. The host writes
+  // both documents, participants only the shared one; once a room has
+  // ended or filled up, nobody writes (ADR 0006, ADR 0003).
+  const readOnly = (room, who, part) => room.full || room.state === "ended" || (who.role !== "host" && part === "control");
+  const accessOf = (roomId) => {
+    const row = store.statements.roomById.get(roomId);
+    const room = { full: row.full_at !== null, state: row.state };
+    return (who, part) => readOnly(room, who, part);
+  };
 
   let collaboration;
   let watch;
@@ -46,14 +77,19 @@ export function createRiff({
     origin,
     githubLookup,
     hostGraceMs,
+    limitBytes: roomLimitBytes,
     log,
     onListsChanged: () => watch?.changed(),
     onEnded: (roomId, { keep }) => {
-      if (keep) collaboration.setRoomEnded(roomId, true);
+      if (keep) collaboration.setAccess(roomId, accessOf(roomId));
       else collaboration.forgetRoom(roomId);
       terminalRelay.endRoom(roomId);
     },
-    onRevived: (roomId) => collaboration.setRoomEnded(roomId, false),
+    onRevived: (roomId) => {
+      collaboration.setAccess(roomId, accessOf(roomId));
+      collaboration.storeOpenCopy(roomId);
+    },
+    onFull: (roomId) => collaboration.setAccess(roomId, accessOf(roomId)),
     // Production and CI always set SESSION_SECRET. Without it, preview keys
     // last as long as the process, which is as long as any preview does.
     previewSecret: sessionSecret || randomBytes(32).toString("hex"),
@@ -74,7 +110,9 @@ export function createRiff({
   // Who a document belongs to and what this credential may do with it.
   // Anything that isn't `room/<id>/shared|control` doesn't exist. In an
   // ended room members may still read a board the server kept, and are
-  // turned away from one it didn't (ADR 0003); the host opening it revives it.
+  // turned away from one it didn't keep or pruned (ADR 0003); the host
+  // opening it revives it. Opening a room counts for pruning, which goes by
+  // the boards opened longest ago.
   function authorize({ documentName, token, requestHeaders }) {
     const match = DOCUMENT.exec(documentName);
     const who = match && rooms.resolve(match[1], { token, cookie: requestHeaders.get("cookie") ?? undefined });
@@ -82,13 +120,13 @@ export function createRiff({
       audit.tally(null, "denied", { what: "document", reason: match ? "not_a_member" : "no_such_document" });
       throw Object.assign(new Error("not a member"), { reason: "not-a-member" });
     }
-    if (who.state === "ended" && !who.keep && who.role !== "host") {
-      audit.tally(who, "denied", { what: "document", reason: "room_ended" });
-      throw Object.assign(new Error("room ended"), { reason: "room-ended" });
+    if (who.state === "ended" && (!who.keep || who.pruned) && who.role !== "host") {
+      const reason = who.keep ? "board-pruned" : "room-ended";
+      audit.tally(who, "denied", { what: "document", reason: reason.replace(/-/g, "_") });
+      throw Object.assign(new Error(reason), { reason });
     }
-    const part = match[2];
-    const readOnly = who.role !== "host" && (part === "control" || who.state === "ended");
-    return { context: { who }, readOnly };
+    store.statements.touchOpened.run(Date.now(), who.roomId);
+    return { context: { who }, readOnly: readOnly(who, who, match[2]) };
   }
 
   collaboration = createCollaboration({
@@ -99,6 +137,10 @@ export function createRiff({
     onRefusedWrite: (who, documentName) =>
       audit.tally(who, "denied", { what: `${documentName.split("/").pop()}.write`, reason: "read_only" }),
     onDocumentLoaded: watchDocument,
+    limitBytes: roomLimitBytes,
+    onOversized: (who) => audit.record(who, "denied", { what: "message", reason: "too_big" }),
+    onFull: (roomId, who, { storedBytes, refusedBytes }) =>
+      rooms.markFull(roomId, who, { stored_bytes: storedBytes, refused_bytes: refusedBytes }),
     onPresence: (who, action) => {
       audit.record(who, action);
       rooms.presence(who, action);
@@ -161,11 +203,11 @@ export function createRiff({
   // The room's code, lock, state and member list live in the control document,
   // written only here, so names and the GitHub badge can't be forged from a
   // browser and everyone sees a rotated code or a removal at once.
-  // A board the server no longer keeps isn't written to again, or this
-  // would store it afresh.
+  // A board the server no longer keeps (or pruned) isn't written to again,
+  // or this would store it afresh.
   function publishRoom(roomId) {
     const { room, members } = rooms.summary(roomId);
-    if (room.state === "ended" && !room.keep) return;
+    if (room.state === "ended" && (!room.keep || room.pruned)) return;
     collaboration
       .change(`room/${roomId}/control`, (document) => {
         const info = document.getMap("room");
@@ -176,6 +218,8 @@ export function createRiff({
           if (info.get("keep") !== room.keep) info.set("keep", room.keep);
           if (info.get("state") !== room.state) info.set("state", room.state);
           if (info.get("endsAt") !== room.endsAt) info.set("endsAt", room.endsAt);
+          if (info.get("full") !== room.full) info.set("full", room.full);
+          if (info.get("limitBytes") !== room.limitBytes) info.set("limitBytes", room.limitBytes);
           for (const member of members) {
             const current = list.get(String(member.id));
             if (JSON.stringify(current) !== JSON.stringify(member)) list.set(String(member.id), member);
@@ -257,10 +301,35 @@ export function createRiff({
     return false;
   }
 
+  // Above 70% of the volume, delete ended boards the server kept, opened
+  // longest ago first, until below 60% (ADR 0003's amendment). Live and
+  // away rooms are never pruned. Freed pages stay in the file as free
+  // pages, which volumeUsage counts as free.
+  function prune() {
+    const { total, used } = usage();
+    if (used <= PRUNE_ABOVE * total) return 0;
+    let remaining = used;
+    let pruned = 0;
+    let freed = 0;
+    for (const { id } of store.statements.prunable.all()) {
+      if (remaining < PRUNE_UNTIL * total) break;
+      const bytes = collaboration.roomBytes(id);
+      if (!rooms.markPruned(id, { freed_bytes: bytes })) continue;
+      collaboration.forgetRoom(id, "board-pruned");
+      remaining -= bytes;
+      freed += bytes;
+      pruned += 1;
+    }
+    const percent = (value) => Math.round((value / total) * 100);
+    log(`volume ${percent(used)}% used: pruned ${pruned} ended boards, ${freed} bytes, now about ${percent(remaining)}%`);
+    return pruned;
+  }
+
   function sweep() {
     try {
       const swept = store.sweep();
       if (swept.sessions || swept.events) log(`swept ${swept.sessions} expired sessions, ${swept.events} old events`);
+      prune();
     } catch (error) {
       console.error("[riff] sweep failed", error);
     }
@@ -312,5 +381,5 @@ export function createRiff({
     db.close();
   }
 
-  return { middleware, handleUpgrade, health, close };
+  return { middleware, handleUpgrade, health, close, prune };
 }
