@@ -1,7 +1,8 @@
 # 3. Room lifecycle and board retention
 
 - Status: accepted; lifecycle, keeping and End room implemented 2026-10-18;
-  pruning, the size cap, local copies and export not yet
+  pruning and the size cap decided 2026-10-18 (amendment below), not yet
+  built; local copies and export not yet
 - Date: 2026-10-12
 
 ## Context
@@ -248,3 +249,71 @@ Checked:
 
 Not built: pruning and the size cap (their numbers aren't decided), local
 copy lists, export and import.
+
+## Amendment (2026-10-18): pruning and the size cap
+
+The Decision above left the numbers open. We proposed a 16 MB cap per room
+as a hypothesis, to be measured before settling. It failed: on the live
+machine (256 MB, of which the kernel leaves 212 MB; node idles at 70 MB),
+writing a 16 MB board got node killed for running out of memory after about
+10 MB. The client reconnected and the server, loading the same board back
+from SQLite, was killed again, and again, until the grace period ended the
+room. (It was a not-kept test room, so ending it deleted the board.) Peak
+memory of node, after a fresh restart, for one board written in 1 MB images
+and loaded back:
+
+| Board | Peak |
+| --- | --- |
+| 2 MB | 110 MB |
+| 4 MB | 127 MB |
+| 8 MB | 132 MB |
+| 16 MB | killed |
+
+Growth isn't linear (garbage collection decides), and several big rooms
+open at once weren't measured. The finding is that board size is a way
+for any member to take the server down, today, not only a storage question.
+
+### Decided
+
+- **A room holds at most 4 MB** (its two documents' stored bytes, after
+  compaction). That's several screenshots, not dozens.
+- **The cap is hard, and a full room is read-only for everyone**, the host
+  included. The update that would take a room past 4 MB is refused, and the
+  room is marked full (`rooms.full_at`, so it stays full after a restart).
+  Refusing just that one update isn't an option: the sender's copy would
+  then hold something the server doesn't, and their later changes would
+  build on it. Members see "This board is full. Export it and start a new
+  room." Staged prompts live in the same document, so they stop too; the
+  host's terminal doesn't.
+- **One websocket message is at most 8 MB** (it was `ws`'s default,
+  100 MB). Bigger closes the socket.
+- **The client refuses an image that wouldn't fit** before it reaches the
+  board, and says why. The server's refusal is the backstop, not the
+  experience: a client whose change was refused keeps resending it on
+  every reconnect.
+- **Pruning** runs at startup and hourly. The disk counts as used by what
+  the filesystem reports used, less the free pages inside SQLite's file
+  (deleting rows frees pages for reuse; the file doesn't shrink). Above 70%
+  of the volume, ended kept rooms are pruned, least recently opened first,
+  until below 60%. Live and away rooms are never pruned. Opening a room
+  (any member's socket) sets `rooms.last_opened`.
+- **A pruned room** loses its stored board and pending invites; its row,
+  members and log stay, marked `pruned_at`. From then on it behaves like an
+  ended room whose board wasn't kept: members are told "The server deleted
+  this board to make space", and a host who comes back revives it from
+  their own copy.
+
+### Next: images out of the board document
+
+Option C, chosen to follow, and to be built with export, which has to
+package images anyway: the browser uploads each image once, the server
+stores it on the volume, and the board holds a reference. Server memory per
+room is then strokes and text, and the cap becomes a disk limit. Until then,
+4 MB is the price of keeping images inline (ADR 0002).
+
+### The case for the options we didn't pick
+
+**A bigger machine** (512 MB, an 8 MB cap): costs more each month and only
+moves the limit; the next person who pastes enough images finds it again.
+**Images out of the document straight away**: the right end state, but a
+bigger change than closing the crash, which can't wait.
