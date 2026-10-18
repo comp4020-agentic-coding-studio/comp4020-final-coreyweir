@@ -149,7 +149,7 @@ export function createRiff({
     },
   });
 
-  // The room's code, lock and member list live in the control document,
+  // The room's code, lock, state and member list live in the control document,
   // written only here, so names and the GitHub badge can't be forged from a
   // browser and everyone sees a rotated code or a removal at once.
   function publishRoom(roomId) {
@@ -161,6 +161,8 @@ export function createRiff({
         document.transact(() => {
           if (info.get("code") !== room.code) info.set("code", room.code);
           if (info.get("locked") !== room.locked) info.set("locked", room.locked);
+          if (info.get("state") !== room.state) info.set("state", room.state);
+          if (info.get("endsAt") !== room.endsAt) info.set("endsAt", room.endsAt);
           for (const member of members) {
             const current = list.get(String(member.id));
             if (JSON.stringify(current) !== JSON.stringify(member)) list.set(String(member.id), member);

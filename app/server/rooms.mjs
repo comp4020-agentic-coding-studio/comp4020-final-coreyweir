@@ -100,7 +100,7 @@ export function createRooms({
     if (actor?.role !== "host") return;
     if (action === "connect") s.hostArrived.run(now(), actor.roomId);
     else if (s.hostLeft.run(now(), actor.roomId).changes) audit.record(actor, "room.away");
-    onListsChanged(actor.roomId);
+    onRoomChanged(actor.roomId);
   }
 
   function endRoom(roomId, reason, actor) {
@@ -109,7 +109,7 @@ export function createRooms({
     const room = s.roomById.get(roomId);
     audit.record(actor ?? { roomId, code: room.code }, "room.end", { reason, invites_dropped: invites || undefined });
     onEnded(roomId);
-    onListsChanged(roomId);
+    onRoomChanged(roomId);
     return true;
   }
 
@@ -117,7 +117,7 @@ export function createRooms({
     if (!s.reviveRoom.run(now(), room.id).changes) return;
     audit.record(who(room, hostMember), "room.revive");
     onRevived(room.id);
-    onListsChanged(room.id);
+    onRoomChanged(room.id);
   }
 
   // Ends every room whose host has been away longer than the grace period.
@@ -194,7 +194,14 @@ export function createRooms({
     previewKey: previewKey(member),
     ...(secret ? { secret } : {}),
   });
-  const roomJson = (room) => ({ id: room.id, code: room.code, locked: Boolean(room.locked), state: room.state });
+  // endsAt: when an away room ends unless its host comes back.
+  const roomJson = (room) => ({
+    id: room.id,
+    code: room.code,
+    locked: Boolean(room.locked),
+    state: room.state,
+    endsAt: room.state === "away" ? room.host_last_seen + hostGraceMs : null,
+  });
 
   async function create(request, response) {
     limit("create", request);
@@ -413,6 +420,7 @@ export function createRooms({
         state: room.state,
         hostName: host?.name ?? null,
         hostLastSeen: room.host_last_seen,
+        endsAt: roomJson(room).endsAt,
         locked: Boolean(room.locked),
         ...(isHost
           ? { invites: s.invitesOfRoom.all(room.id).map((row) => ({ githubId: row.github_id, login: row.login })) }
