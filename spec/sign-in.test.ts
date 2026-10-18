@@ -114,3 +114,36 @@ describe("who am I", () => {
     }
   });
 });
+
+// The push token never rests anywhere readable: the browser holds it sealed
+// with a key derived from its session, and only that session can open it.
+// Sealing a pasted token needs the same session. A real seal and unwrap
+// needs a real GitHub account, so it's checked by hand; these check the
+// doors are shut to everyone else.
+describe("the push token", () => {
+  const paths = ["/api/github/token/seal", "/api/github/token/unwrap"];
+  const body = { token: "ghp_notreal", ciphertext: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" };
+
+  it("is sealed and opened only for a signed-in session", async () => {
+    for (const path of paths) {
+      for (const cookie of [undefined, "__Host-riff-session=made-up"]) {
+        const res = await api(baseUrl, path, { method: "POST", body, cookie });
+        expect(res.status, `${path} with ${cookie ?? "no cookie"}`).toBe(401);
+      }
+    }
+  });
+
+  it("refuses another origin before anything else", async () => {
+    for (const path of paths) {
+      const res = await api(baseUrl, path, { method: "POST", body, origin: "https://evil.example" });
+      expect(res.status, path).toBe(403);
+    }
+  });
+
+  it("no longer hands out device-flow codes: the web flow replaced it", async () => {
+    for (const path of ["/api/github/device/code", "/api/github/device/token"]) {
+      const res = await api(baseUrl, path, { method: "POST", body: {} });
+      expect(res.status, path).toBe(404);
+    }
+  });
+});
