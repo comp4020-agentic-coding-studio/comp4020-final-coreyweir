@@ -14,7 +14,7 @@ try {
   page.on("pageerror", (error) => {
     if (!String(error).includes("ProcessExitSentinel: Process exited with code 0")) errors.push(String(error));
   });
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
   page.on("console", (msg) => {
     const text = msg.text();
     if (text.includes("BRIDGE") || text.includes("panicked") || text.includes("RuntimeError") || text.includes("Error")) console.log("[console]", msg.type(), text);

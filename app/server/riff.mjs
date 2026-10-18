@@ -9,7 +9,6 @@ import { createAuth } from "./auth.mjs";
 import { createRooms } from "./rooms.mjs";
 import { createTerminalRelay } from "./terminalRelay.mjs";
 import { createPreviewRelay } from "./previewRelay.mjs";
-import { createGitHubDeviceProxy } from "./githubDeviceProxy.mjs";
 import { randomBytes } from "node:crypto";
 import { HttpError, sameOrigin, sendJson } from "./http.mjs";
 
@@ -132,7 +131,6 @@ export function createRiff({
       .catch((error) => console.error("[riff] publishing room state failed", error));
   }
 
-  const deviceProxy = createGitHubDeviceProxy({ clientId: githubClientId });
 
   function fail(response, error) {
     if (error instanceof HttpError) {
@@ -150,7 +148,7 @@ export function createRiff({
     const run = async () => {
       if (await auth.handle(request, response, url)) return;
       if (await rooms.handle(request, response, url)) return;
-      previewRelay.middleware(request, response, () => deviceProxy(request, response, next));
+      previewRelay.middleware(request, response, next);
     };
     run().catch((error) => fail(response, error));
   }

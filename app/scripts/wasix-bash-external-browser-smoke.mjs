@@ -48,7 +48,7 @@ try {
   const page = await browser.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
   const result = await page.evaluate(async ({ bash, coreutils }) => {
     const [{ ClaudePodController }, { WasixSession }] = await Promise.all([
       import("/src/claudePod.ts"),

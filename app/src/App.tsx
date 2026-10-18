@@ -3,13 +3,11 @@ import { Quickdraw, useQuickdrawStore, type ShapeRecord } from "@quickdrawjs/rea
 import { addPrompt, replaceYText, saveName, savedName, type PromptSnapshot, type QueuedPrompt, type RoomMember, useRoom } from "./room";
 import {
   type Access, ApiError, createRoom, currentUser, enterRoom, joinRoom, removeMember, roomByCode, rotateCode, setLocked,
-  signInUrl, signOut, type User,
+  forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
 } from "./api";
 import { useBoardSync } from "./boardSync";
 import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
 import type { HostConfig } from "./claudePod";
-import { GitHubAuthPoc } from "./GitHubAuthPoc";
-import { useGitHubSession } from "./GitHubSession";
 import { previewRelayUrl } from "./previewChannel";
 
 type View = "board" | "room" | "preview";
@@ -79,6 +77,61 @@ function Account({ user }: { user: User | null | undefined }) {
   );
 }
 
+// "GitHub for pushing" in host setup. Connecting is a GitHub sign-in with
+// the repo scope; the token comes back sealed for this session (api.ts).
+// A pasted token (for an org that hasn't approved Riff's OAuth app) must
+// be the signed-in user's own, so the paste needs a sign-in first.
+function GitHubPush({ user, beforeLeaving, back }: { user: User | null | undefined; beforeLeaving?: () => void; back: string }) {
+  const [connected, setConnected] = useState(hasPushToken);
+  const [pasting, setPasting] = useState(false);
+  const [pasted, setPasted] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (user === undefined) return null;
+  const linked = connected && user !== null;
+
+  async function paste() {
+    setBusy(true);
+    setError(null);
+    try {
+      await sealPastedToken(pasted.trim());
+      setPasted("");
+      setPasting(false);
+      setConnected(true);
+    } catch (failure) {
+      const code = failure instanceof ApiError ? failure.code : "";
+      setError(code === "not_yours" ? `That token isn't @${user?.login}'s. Paste one of your own.`
+        : code === "bad_token" ? "GitHub didn't accept that token."
+        : problem(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="github-push">
+      <span className="github-push-label">GitHub for pushing <small>Optional</small></span>
+      {linked ? (
+        <p>Connected as <strong>@{user.login}</strong>. Claude can push with your access. <button type="button" className="link" onClick={() => { forgetPushToken(); setConnected(false); }}>Disconnect</button></p>
+      ) : (
+        <>
+          <p>
+            <a className="github-sign-in" href={signInUrl("push", back)} onClick={() => beforeLeaving?.()}>Connect GitHub</a>
+            {!pasting && <button type="button" className="link" onClick={() => setPasting(true)}>or paste a token</button>}
+          </p>
+          {pasting && (user ? (
+            <span className="github-push-paste">
+              <input type="password" aria-label="GitHub token" value={pasted} onChange={(event) => setPasted(event.target.value)} placeholder="github_pat_..." autoComplete="off" />
+              <button type="button" disabled={busy || !pasted.trim()} onClick={() => void paste()}>{busy ? "Checking..." : "Use token"}</button>
+            </span>
+          ) : <small>Sign in with GitHub first: a pasted token has to be your own.</small>)}
+          {error && <small className="form-error" role="alert">{error}</small>}
+        </>
+      )}
+    </div>
+  );
+}
+
 function Landing({ code: sharedCode = "" }: { code?: string }) {
   const user = useUser();
   const [mode, setMode] = useState<"join" | "host">(() => new URLSearchParams(location.search).get("setup") === "host" ? "host" : "join");
@@ -140,6 +193,7 @@ function Landing({ code: sharedCode = "" }: { code?: string }) {
             <label>Claude base URL<input type="url" required value={config.baseUrl} onChange={(event) => updateConfig("baseUrl", event.target.value)} /></label>
             <label>API token<input type="password" required value={config.token} onChange={(event) => updateConfig("token", event.target.value)} placeholder="Stored on this device" /></label>
             <label>Git repository <small>Optional</small><input value={config.repo} onChange={(event) => updateConfig("repo", event.target.value)} placeholder="https://github.com/group/project.git" /></label>
+            <GitHubPush user={user} back="/?setup=host" beforeLeaving={() => { saveName(name); localStorage.setItem("riff-host-config", JSON.stringify(config)); }} />
             <p className="local-note">These settings stay in this browser and are never included in the room link.</p>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="primary" disabled={busy}>{busy ? "Creating..." : "Create room"}</button>
@@ -406,8 +460,9 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 // connects: a shared link (?room=CODE) for someone already in the room goes
 // straight in; for anyone else it's the join form with the code filled in.
 function RoomGate({ roomId, code }: { roomId: string | null; code: string | null }) {
-  const { session } = useGitHubSession();
-  const [state, setState] = useState<{ access: Access } | { join: string } | { error: string } | null>(null);
+  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean } | { join: string } | { error: string } | null>(null);
+  const [withoutGitHub, setWithoutGitHub] = useState(false);
+  const user = useUser();
 
   useEffect(() => {
     let active = true;
@@ -417,7 +472,11 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
       if (!active) return;
       if (access) {
         if (!roomId) history.replaceState(null, "", `${location.pathname}?${new URLSearchParams({ id: access.room.id })}`);
-        setState({ access });
+        // The host's pod gets the push token at boot, so open it first.
+        const hadPush = hasPushToken();
+        const githubToken = access.member.host ? await unwrapPushToken() : null;
+        if (!active) return;
+        setState({ access, githubToken, pushLost: access.member.host && hadPush && !githubToken });
       } else {
         setState(code ? { join: code } : { error: "This browser isn't in that room. Ask the host for the code." });
       }
@@ -441,14 +500,30 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
   }
   const facilitator = state.access.member.host;
   const storedConfig = facilitator ? savedHostConfig() : null;
-  if (storedConfig?.repo && !session) return <GitHubAuthPoc roomGate />;
-  const hostConfig = storedConfig && session ? { ...storedConfig, githubToken: session.token } : storedConfig;
+  const { githubToken, pushLost } = state;
+  // A host who meant to push (a repository, or a token that has since
+  // expired with its session) is told before Claude starts without it.
+  if (storedConfig && !githubToken && (pushLost || storedConfig.repo) && !withoutGitHub) {
+    return (
+      <main className="landing">
+        <section className="entry-card">
+          <h2>{pushLost ? "GitHub for pushing has expired" : "Connect GitHub for pushing?"}</h2>
+          <p>{pushLost ? "It ended with the GitHub session it was connected in (signing out, or 30 days unused). Connect again so Claude can push." : `This room works on ${storedConfig.repo}. Without GitHub, Claude can read public repositories but can't push.`}</p>
+          <GitHubPush user={user} back={`${location.pathname}${location.search}`} />
+          <button className="link" onClick={() => setWithoutGitHub(true)}>Continue without GitHub</button>
+        </section>
+      </main>
+    );
+  }
+  const hostConfig = storedConfig && githubToken ? { ...storedConfig, githubToken } : storedConfig;
   return <RoomApp access={state.access} hostConfig={hostConfig} />;
 }
 
 export default function App() {
   const params = new URLSearchParams(location.search);
-  if (params.get("poc") === "github-auth") return <GitHubAuthPoc />;
+  // A page that opens nothing, for browser smokes that drive modules
+  // directly (`?poc=blank`).
+  if (params.has("poc")) return <main className="poc-blank" />;
   const roomId = params.get("id")?.replace(/[^\w-]/g, "").slice(0, 64) || null;
   const code = params.get("room")?.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 16).toUpperCase() || null;
   if (!roomId && !code) return <Landing />;

@@ -30,7 +30,7 @@ try {
   page.on("pageerror", (error) => {
     if (!String(error).includes("ProcessExitSentinel: Process exited with code 0")) errors.push(String(error));
   });
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
 
   const result = await page.evaluate(async (BASH) => {
     if (!crossOriginIsolated) throw new Error("Riff is not cross-origin isolated");

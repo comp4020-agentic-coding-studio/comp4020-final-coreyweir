@@ -19,7 +19,7 @@ try {
   page.on("pageerror", (error) => {
     if (!String(error).includes("ProcessExitSentinel: Process exited with code 0")) throw new Error(String(error));
   });
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
 
   const result = await page.evaluate(async () => {
     const [{ ClaudePodController }] = await Promise.all([import("/src/claudePod.ts")]);

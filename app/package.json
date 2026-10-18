@@ -49,8 +49,7 @@
     "test:claude-bundle": "node scripts/claude-bundle-smoke.mjs",
     "test:claude-bundle-browser": "node scripts/claude-bundle-browser-smoke.mjs",
     "test:claude-stream": "node scripts/claude-stream-smoke.mjs",
-    "test:github-auth": "node scripts/github-auth-smoke.mjs",
-    "test:github-pat-browser": "node scripts/github-pat-browser-smoke.mjs",
+    "test:github-push-browser": "node scripts/github-push-browser-smoke.mjs",
     "test:git-sync-browser": "node scripts/git-sync-browser-smoke.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test:wasix-concurrent-bash-browser": "node scripts/wasix-concurrent-bash-browser-smoke.mjs"

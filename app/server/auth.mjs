@@ -12,6 +12,7 @@ const OAUTH_MAX_AGE_S = 600;
 // Sliding expiry, written at most this often per session.
 const TOUCH_EVERY_MS = 60 * 60 * 1000;
 const SCOPES = { identity: "", push: "repo" };
+const POST_ROUTES = new Set(["/api/signout", "/api/github/token/seal", "/api/github/token/unwrap"]);
 
 const sha256url = (text) => createHash("sha256").update(text).digest("base64url");
 
@@ -209,7 +210,7 @@ export function createAuth({ store, audit, origin, clientId, clientSecret, sessi
       sendJson(response, 200, { user }, headers);
       return true;
     }
-    if (request.method !== "POST" || (path !== "/api/signout" && path !== "/api/github/token/unwrap")) return false;
+    if (request.method !== "POST" || !POST_ROUTES.has(path)) return false;
     if (!sameOrigin(request, origin)) throw new HttpError(403, "cross_origin");
     const current = session(request);
     if (path === "/api/signout") {
@@ -221,9 +222,33 @@ export function createAuth({ store, audit, origin, clientId, clientSecret, sessi
       return true;
     }
     if (!current) throw new HttpError(401, "signed_out");
-    const { ciphertext } = await readJson(request);
-    const token = typeof ciphertext === "string" ? unseal(ciphertext, current.tokenHash) : null;
+    const who = { userId: current.user.id, login: current.user.login };
+    const json = await readJson(request);
+
+    if (path === "/api/github/token/seal") {
+      // A pasted token (a PAT, say, for an org that hasn't approved the OAuth
+      // app) is sealed like an OAuth one. It has to belong to the signed-in
+      // user, so the log's "who" is also whose token pushed.
+      const token = typeof json.token === "string" ? json.token.trim() : "";
+      if (!token || token.length > 512) throw new HttpError(400, "bad_token");
+      const me = await fetchImpl("https://api.github.com/user", {
+        headers: { accept: "application/vnd.github+json", authorization: `Bearer ${token}`, "user-agent": "riff" },
+      });
+      if (me.status === 401) throw new HttpError(400, "bad_token");
+      if (!me.ok) throw new HttpError(502, "github_unreachable");
+      const profile = await me.json();
+      if (profile.id !== current.user.github_id) {
+        audit.record(who, "denied", { what: "github.token.seal", reason: "not_yours" });
+        throw new HttpError(403, "not_yours");
+      }
+      audit.record(who, "github.token.seal", { kind: "pasted" });
+      sendJson(response, 200, { ciphertext: seal(token, current.tokenHash) });
+      return true;
+    }
+
+    const token = typeof json.ciphertext === "string" ? unseal(json.ciphertext, current.tokenHash) : null;
     if (!token) throw new HttpError(400, "stale_token");
+    audit.record(who, "github.token.unwrap");
     sendJson(response, 200, { token });
     return true;
   }

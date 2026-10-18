@@ -23,7 +23,7 @@ try {
     worker.on("console", (message) => console.log(`[worker] ${message.text()}`));
     worker.on("error", (error) => console.log(`[worker error] ${String(error)}`));
   });
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
   const result = await page.evaluate(async () => {
     if (!crossOriginIsolated) throw new Error("Riff is not cross-origin isolated");
     const { probePipeWriteInWorker } = await import("/src/wasixPipeWriteProbe.ts");

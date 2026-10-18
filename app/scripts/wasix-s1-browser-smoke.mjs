@@ -21,7 +21,7 @@ try {
       pageErrors.push(String(error));
     }
   });
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
 
   const report = await page.evaluate(async (iterationCount) => {
     if (!crossOriginIsolated) throw new Error("Riff is not cross-origin isolated");

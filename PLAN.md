@@ -36,7 +36,7 @@ README, PROCESS.md and the reflections are mine to write.
 | [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
 | [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import | No |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
-| [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes, except the client's use of the push token (`389ffff`, `4acb32b`) |
+| [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes (`389ffff`, `4acb32b`; push token in the client 18 Oct) |
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
 
 ## Work, in order
@@ -47,7 +47,7 @@ README, PROCESS.md and the reflections are mine to write.
 
 ### P1: before crit 10 (19 Oct)
 
-Left, in order (18 Oct): the push token on the client (3), Load leaving
+Left, in order (18 Oct): ~~the push token on the client (3)~~, Load leaving
 the queue with `queue.send` (5), the API proxy (6), then deleting
 `/data/yjs` and the old `riff-*` rows.
 
@@ -107,8 +107,13 @@ the queue with `queue.send` (5), the API proxy (6), then deleting
      nobody needs an old room.
 3. ~~**Identity** (ADR 0005).~~ Built 12 Oct (`389ffff` server, `4acb32b`
    client); the ADR's "Implementation" section has the differences.
-   - Left: the host page reading the sealed push token (`#push=…`) and
-     "Connect GitHub for pushing" in host setup; then the device flow goes.
+   - ~~Left: the host page reading the sealed push token (`#push=…`) and
+     "Connect GitHub for pushing" in host setup; then the device flow goes.~~
+     Done 18 Oct, with a pasted token sealed the same way (it must be the
+     signed-in user's), and the device flow removed. ADR 0005's
+     "Implementation" has the details.
+     - Left: a real push from a room on live, through both the OAuth grant
+       and a pasted token (needs your account).
    - ~~Left: sign in with a real GitHub account on the live site and check
      the session, `/api/me`, a GitHub member's badge, and sign-out.~~ Done
      by hand on live, 18 Oct.
@@ -380,8 +385,8 @@ The rest after.
   and how soon may vary by device and settings. Worth measuring on the
   Pixel before settling on 5 minutes; not urgent.
 - **The course org's OAuth app restriction.** Still unapproved (18 Oct),
-  and not blocking: course-org repos can be pulled, and any other repo
-  pushed. Good enough.
+  and not blocking: course-org repos can be pulled, any other repo pushed,
+  and a pasted token covers the rest.
 - ~~**Who may view a kept, ended board.**~~ The host and its members (P1.4).
 - ~~**How Claude Code reaches the build** (P1.1).~~ It doesn't: the browser derives it.
 - ~~**Build the client in the Docker image**, or keep committing `app/dist/`.~~ Built in the image.

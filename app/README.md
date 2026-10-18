@@ -11,17 +11,27 @@ npm run dev
 
 Open the printed local URL, then host a new room or join with an existing room ID. Host configuration is remembered in that browser. Use **Share room** to copy a participant link, then open it in another browser or private window to test collaboration.
 
-### GitHub authentication PoC
+### GitHub sign-in
 
-Open `/?poc=github-auth` to test GitHub's OAuth device flow separately from room creation and Nodepod. The flow uses Riff's own OAuth app (device flow enabled) and retains the resulting token only in page memory. Reloading or leaving the page forgets it.
-
-The server provides the fixed-purpose same-origin proxy required because GitHub's OAuth token endpoints do not support browser CORS. The device flow needs no client secret. The client id comes from `GITHUB_CLIENT_ID` (a Fly secret in production, `mise.local.toml` locally); without it the proxy answers 503. Start the dev server through mise so it sees the variable:
+Sign-in is GitHub's OAuth web flow with state and PKCE, answered by the node
+server (`server/auth.mjs`, `docs/adr/0005` at the repo root). It needs
+`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET` and
+`RIFF_ORIGIN` (Fly secrets and `fly.toml` in production, `mise.local.toml`
+locally); without the secret, sign-in answers 503. Start the dev server
+through mise so it sees them:
 
 ```sh
 mise exec -- npx vite --host 127.0.0.1 --port 8093 --strictPort
 ```
 
-When a facilitator creates or refreshes a room with a Git repository configured, Riff requires this authentication before opening the workspace. The token is added to the in-memory Nodepod environment as `GITHUB_TOKEN` and `GH_TOKEN`, making it available to Claude and Nodepod's Git wrapper. It is never added to the persisted host configuration or collaborative room state.
+"GitHub for pushing", in host setup, is the same flow with the `repo` scope,
+or a pasted token (which must belong to the signed-in user). The server
+seals the token with a key from the session and the browser keeps only the
+ciphertext (`riff-github-push` in localStorage); the host's page opens it
+at room start (`POST /api/github/token/unwrap`) and passes it to the pod as
+`GITHUB_TOKEN` and `GH_TOKEN`. Signing out or the session ending makes the
+stored copy useless, and the room tells the host before Claude starts
+without it. `npm run test:github-push-browser` checks the page's side.
 
 ## Implemented
 
@@ -36,13 +46,11 @@ When a facilitator creates or refreshes a room with a Git repository configured,
 - Room-scoped participant Preview relayed from the facilitator's browser-local Nodepod server
 - Facilitator-owned interactive Claude Code terminal running in browser Nodepod
 - Live read-only xterm output for participants with periodic recovery checkpoints
-- Session-only GitHub authentication through device OAuth or a provided PAT
+- GitHub sign-in (web flow); a push token, OAuth or pasted, sealed by the server for the host's browser
 
 ## Intentional boundaries
 
-- Terminal publication uses a host capability kept out of participant links, but room creation is not yet authenticated against a durable server identity.
 - Relay traffic is not yet encrypted.
-- Anyone with a room code can access that room's relayed Preview while its facilitator is connected.
 - Quickdraw records currently use whole-record Yjs conflict resolution.
 
 ## Claude integration spike
@@ -72,8 +80,7 @@ The collaboration test starts its own temporary relay, so the development server
 ```sh
 npm run test:collaboration
 npm run test:terminal-relay
-npm run test:github-auth
-npm run test:git-sync
+npm run test:github-push-browser   # needs the dev server
 npm run test:claude-bundle
 ```
 

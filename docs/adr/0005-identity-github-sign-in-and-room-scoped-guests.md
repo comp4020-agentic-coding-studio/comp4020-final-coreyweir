@@ -1,6 +1,7 @@
 # 5. Identity: GitHub sign-in, and guests who exist only in their room
 
-- Status: accepted, implemented 2026-10-12 except the push token in the client (see "Implementation" below)
+- Status: accepted, implemented 2026-10-12; the push token in the client and the
+  device flow's removal on 2026-10-18 (see "Implementation" below)
 - Date: 2026-10-12
 
 ## Context
@@ -150,13 +151,31 @@ assembled by `riff.mjs`), client in `4acb32b` (`app/src/api.ts`, the
 landing page in `App.tsx`). Where it differs from the plan above, or stops
 short of it:
 
-- **The push token is sealed but not yet used.** `/auth/github/start?purpose=push`
+- **The push token.** `/auth/github/start?purpose=push`
   asks for `repo`, and the callback returns the token AES-GCM-sealed (key by
   HKDF from `SESSION_SECRET` and the session's hash) in the URL fragment,
   `#push=…`, which never reaches a server or a log. `POST
-  /api/github/token/unwrap` opens it for that session only. The host page
-  doesn't read the fragment yet: pushing still goes through the device flow
-  (`githubDeviceProxy.mjs`, on our own client id), which stays until it does.
+  /api/github/token/unwrap` opens it for that session only. Until 18 Oct
+  the host page didn't read the fragment and pushing went through the
+  device flow.
+- **The client's half, and the device flow gone (18 Oct).** "GitHub for
+  pushing" sits in host setup. The page takes `#push=…` before anything
+  else reads the URL, keeps it in localStorage (`riff-github-push`) and
+  wipes it from the address bar. The host's room unwraps it before the pod
+  boots. If a stored token no longer opens (its session ended), or the host
+  set a repository but never connected, the room says so before Claude
+  starts and offers to connect or continue without. Sign-out forgets it.
+  - **A pasted token is sealed the same way** (`POST
+    /api/github/token/seal`), for repositories in an org that hasn't
+    approved Riff's OAuth app (the course org, so far). It has to belong
+    to the signed-in user (checked with GitHub's `GET /user`), so the log's
+    "who" is also whose token pushes, and so pasting needs a sign-in. A
+    PAT used to be kept only in page memory and asked for on every load.
+  - **Logged:** `github.token.seal kind=pasted`, `github.token.unwrap`, and
+    a refused paste (`denied what=github.token.seal reason=not_yours`).
+  - **The device flow is gone:** `githubDeviceProxy.mjs`, its page
+    (`?poc=github-auth`), and its smoke. Browser smokes that only need a
+    page to load modules into use `?poc=blank`.
 - **`events` has a `user_id` column** beside `member_id`, because sign-in
   and sign-out happen outside any room.
 - **Names stay taken after removal.** `UNIQUE (room_id, name_key)` covers
@@ -166,6 +185,13 @@ short of it:
 - **Checked:** `spec/sign-in.test.ts` (the redirect's parameters, the
   signed state cookie, open-redirect `return` values, a bad, missing or
   tampered state rejected before GitHub is contacted) against the live app;
-  turning the state check off turns three of them red. **Not checked from
-  outside:** the path of a real GitHub user, which needs a real sign-in.
+  turning the state check off turns three of them red. Since 18 Oct also:
+  sealing and unwrapping refuse no session, a made-up session and another
+  origin, and the device-flow routes answer 404.
+  `app/scripts/github-push-browser-smoke.mjs` checks the page against the
+  token routes' contract (stood in for): where Connect leads, only
+  ciphertext stored, the fragment taken and wiped, the stale-token notice,
+  one unwrap before a room starts. **Not checked from outside:** the path
+  of a real GitHub user, which needs a real sign-in (done by hand on live
+  for identity, 18 Oct).
 

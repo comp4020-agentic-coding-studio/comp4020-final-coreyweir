@@ -57,6 +57,7 @@ export function signInUrl(purpose: "identity" | "push" = "identity", back = loca
 }
 
 export async function signOut() {
+  forgetPushToken();
   await call("/api/signout", { method: "POST", body: {} });
 }
 
@@ -106,4 +107,47 @@ export function setLocked(access: Access, locked: boolean) {
 
 export function removeMember(access: Access, memberId: number) {
   return call<void>(`/api/rooms/${access.room.id}/members/${memberId}`, { method: "DELETE", token: access.token });
+}
+
+// GitHub for pushing (docs/adr/0005). The browser keeps only what the
+// server sealed with a key from this session: after a push sign-in it
+// arrives in the URL fragment, and a pasted token is sealed on request.
+// Only the same session can open it again, so signing out kills it.
+const PUSH_KEY = "riff-github-push";
+
+export function takePushFromLocation() {
+  const match = /^#push=([\w-]+)$/.exec(location.hash);
+  if (!match) return;
+  localStorage.setItem(PUSH_KEY, match[1]);
+  history.replaceState(history.state, "", location.pathname + location.search);
+}
+
+export function hasPushToken() {
+  return localStorage.getItem(PUSH_KEY) !== null;
+}
+
+export function forgetPushToken() {
+  localStorage.removeItem(PUSH_KEY);
+}
+
+export async function sealPastedToken(token: string) {
+  const { ciphertext } = await call<{ ciphertext: string }>("/api/github/token/seal", { method: "POST", body: { token } });
+  localStorage.setItem(PUSH_KEY, ciphertext);
+}
+
+// The token itself, for the host's pod; null if none is stored or the
+// session that sealed it has ended (and then the stale copy is dropped).
+export async function unwrapPushToken() {
+  const ciphertext = localStorage.getItem(PUSH_KEY);
+  if (!ciphertext) return null;
+  try {
+    const { token } = await call<{ token: string }>("/api/github/token/unwrap", { method: "POST", body: { ciphertext } });
+    return token;
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 400 || error.status === 401)) {
+      forgetPushToken();
+      return null;
+    }
+    throw error;
+  }
 }

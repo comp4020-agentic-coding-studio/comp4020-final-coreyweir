@@ -70,7 +70,7 @@ try {
       await sleep(50);
     }
   })();
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
   const result = await page.evaluate(async (repeats) => {
     const [{ ClaudePodController, INTERACTIVE_BASH }, { WasixSession }, { createRiffWasmerProvider }] = await Promise.all([
       import("/src/claudePod.ts"),

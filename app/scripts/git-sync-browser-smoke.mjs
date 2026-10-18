@@ -24,7 +24,7 @@ try {
     delete headers.authorization;
     request.continue({ headers });
   });
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
   await page.evaluate(async () => {
     const target = document.createElement("div");
     target.className = "terminal-target";

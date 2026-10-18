@@ -29,7 +29,7 @@ try {
   const host = await browser.newPage();
   const errors = [];
   host.on("pageerror", (error) => errors.push(String(error)));
-  await host.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await host.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
   await host.evaluate(async ({ roomName, hostSecret }) => {
     const fromBase64 = (value) => {
       const binary = atob(value);
@@ -118,7 +118,7 @@ try {
   const participantContext = await browser.createBrowserContext();
   const participant = await participantContext.newPage();
   participant.on("pageerror", (error) => errors.push(String(error)));
-  await participant.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await participant.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
   const relayUrl = `${baseUrl}/room-preview/${room}/${joined.member.previewKey}/1/`;
   // the room id alone, without a member's key, is refused
   assert.equal(await participant.evaluate((url) => fetch(url).then((response) => response.status), `${baseUrl}/room-preview/${room}/1/`), 403);

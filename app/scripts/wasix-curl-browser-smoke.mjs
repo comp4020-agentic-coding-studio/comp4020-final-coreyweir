@@ -13,7 +13,7 @@ try {
   page.on("console", (message) => {
     if (message.text().startsWith("curl acceptance")) console.log(message.text());
   });
-  await page.goto(`${process.env.RIFF_URL ?? "http://127.0.0.1:8093"}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${process.env.RIFF_URL ?? "http://127.0.0.1:8093"}/?poc=blank`, { waitUntil: "networkidle0" });
   const result = await page.evaluate(async () => {
     if (!crossOriginIsolated) throw new Error("Riff is not cross-origin isolated");
     const { ClaudePodController } = await import("/src/claudePod.ts");

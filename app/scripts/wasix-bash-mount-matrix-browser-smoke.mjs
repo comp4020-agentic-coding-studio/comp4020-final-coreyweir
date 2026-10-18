@@ -113,7 +113,7 @@ try {
     const text = message.text();
     if (text.startsWith("[P7]")) console.log(text);
   });
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
 
   const result = await page.evaluate(async ({ bash, coreutils, cases, afterCases, forkCases }) => {
     const [{ ClaudePodController }, { WasixSession }] = await Promise.all([

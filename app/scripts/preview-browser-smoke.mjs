@@ -13,7 +13,7 @@ try {
   const page = await browser.newPage();
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(String(error)));
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
   await page.evaluate(async () => {
     window.__previewEvents = [];
     const { ClaudePodController } = await import("/src/claudePod.ts");

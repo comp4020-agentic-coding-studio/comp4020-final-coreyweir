@@ -4,6 +4,9 @@ import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 import "./preview.css";
 import App from "./App";
-import { GitHubSessionProvider } from "./GitHubSession";
+import { takePushFromLocation } from "./api";
 
-createRoot(document.querySelector("#root")!).render(<GitHubSessionProvider><App /></GitHubSessionProvider>);
+// Back from a push sign-in, before anything reads the URL.
+takePushFromLocation();
+
+createRoot(document.querySelector("#root")!).render(<App />);

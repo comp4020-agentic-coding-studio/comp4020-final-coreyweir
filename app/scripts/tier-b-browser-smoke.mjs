@@ -10,7 +10,7 @@ const browser = await puppeteer.launch({
 
 try {
   const page = await browser.newPage();
-  await page.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
+  await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
   const result = await page.evaluate(async () => {
     const [{ ClaudePodController }, { createRiffWasmerProvider }] = await Promise.all([
       import("/src/claudePod.ts"),
