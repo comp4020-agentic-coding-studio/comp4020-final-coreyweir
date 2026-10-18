@@ -11,8 +11,8 @@ type PreviewRequest = {
   body: string;
 };
 
-export function previewRelayUrl(roomId: string, generation: number) {
-  return `/room-preview/${encodeURIComponent(roomId)}/${generation}/`;
+export function previewRelayUrl(roomId: string, previewKey: string, generation: number) {
+  return `/room-preview/${encodeURIComponent(roomId)}/${encodeURIComponent(previewKey)}/${generation}/`;
 }
 
 function controlUrl(roomId: string) {

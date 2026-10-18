@@ -112,8 +112,12 @@ function fail(response, status, message) {
 
 // `authorize(roomName, hello, request)` returns who the socket belongs to,
 // with a server-resolved role, or null. Only the host serves a preview.
-export function createPreviewRelay({ authorize, onRefused } = {}) {
+// `authorizeView(roomName, key)` does the same for the key in a preview
+// request's path (`/room-preview/<room>/<key>/<generation>/…`): an iframe
+// can't send a secret, so the key is the member's credential here.
+export function createPreviewRelay({ authorize, authorizeView, onRefused } = {}) {
   if (typeof authorize !== "function") throw new Error("createPreviewRelay needs authorize");
+  if (typeof authorizeView !== "function") throw new Error("createPreviewRelay needs authorizeView");
   const socketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_SOCKET_BYTES });
   const rooms = new Map();
 
@@ -234,15 +238,18 @@ export function createPreviewRelay({ authorize, onRefused } = {}) {
     const url = new URL(request.url ?? "/", "http://localhost");
     if (!url.pathname.startsWith("/room-preview/")) return next();
     const parts = url.pathname.slice("/room-preview/".length).split("/");
-    if (parts.length < 2) return fail(response, 404, "Preview not found");
+    if (parts.length < 3) return fail(response, 404, "Preview not found");
 
-    const [encodedRoom, generationText, ...pathParts] = parts;
+    const [encodedRoom, key, generationText, ...pathParts] = parts;
     let roomName;
     try {
       roomName = decodeURIComponent(encodedRoom);
     } catch {
       return fail(response, 404, "Preview not found");
     }
+    // The key first, so a stranger learns nothing, not even whether a
+    // preview is live.
+    if (!authorizeView(roomName, key)) return fail(response, 403, "Not a member of this room");
     const room = rooms.get(roomName);
     const generation = Number(generationText);
     if (!room || !room.host || generation !== room.generation) {
@@ -282,7 +289,7 @@ export function createPreviewRelay({ authorize, onRefused } = {}) {
         timer,
         generation,
         method: request.method,
-        relayPrefix: `/room-preview/${encodedRoom}/${generation}`,
+        relayPrefix: `/room-preview/${encodedRoom}/${key}/${generation}`,
       });
       response.on("close", () => {
         const pending = room.pending.get(requestId);

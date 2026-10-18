@@ -7,7 +7,9 @@ import { createPreviewRelay } from "../server/previewRelay.mjs";
 // resolve; no token, no room.
 const authorize = (_room, hello) =>
   hello.token === "host-token" ? { memberId: 1, role: "host" } : hello.token ? { memberId: 2, role: "participant" } : null;
-const relay = createPreviewRelay({ authorize });
+// Stand-in for rooms.resolvePreview: "view-key" is a member's key for any room.
+const authorizeView = (_room, key) => (key === "view-key" ? { memberId: 2, role: "participant" } : null);
+const relay = createPreviewRelay({ authorize, authorizeView });
 const server = createServer((request, response) => {
   relay.middleware(request, response, () => {
     response.writeHead(404);
@@ -87,7 +89,7 @@ try {
   await waitFor(() => messages.some((message) => message.type === "host-accepted"), "Preview host was not accepted");
   host.send(JSON.stringify({ type: "preview-up", generation: 7 }));
 
-  const base = `http://127.0.0.1:${port}/room-preview/${room}/7`;
+  const base = `http://127.0.0.1:${port}/room-preview/${room}/view-key/7`;
   const textResponse = await fetch(`${base}/hello?name=riff`);
   assert.equal(textResponse.status, 200);
   assert.equal(await textResponse.text(), "GET /hello?name=riff ");
@@ -103,7 +105,7 @@ try {
   assert.equal(binaryResponse.status, 201);
   assert.deepEqual(new Uint8Array(await binaryResponse.arrayBuffer()), new Uint8Array([0, 1, 2, 255]));
 
-  const prefix = `/room-preview/${room}/7`;
+  const prefix = `/room-preview/${room}/view-key/7`;
   const html = await (await fetch(`${base}/index.html`)).text();
   assert.match(html, new RegExp(`href="${prefix}/next\\.html"`));
   assert.match(html, new RegExp(`<base href="${prefix}/">`));
@@ -130,9 +132,12 @@ try {
   const stylesheet = await (await fetch(`${base}/styles.css`)).text();
   assert.equal(stylesheet, `@import "${prefix}/reset.css";body{background:url(${prefix}/img/bg.png)}`);
 
-  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/${room}/6/`)).status, 404);
-  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/other-room/7/`)).status, 404);
-  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/%FF/7/`)).status, 404);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/${room}/view-key/6/`)).status, 404);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/other-room/view-key/7/`)).status, 404);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/%FF/view-key/7/`)).status, 404);
+  // no key, or a wrong one: refused before the relay looks for a preview
+  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/${room}/7/`)).status, 403);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/${room}/other-key/7/`)).status, 403);
 
   host.send(JSON.stringify({ type: "preview-down", generation: 6 }));
   host.send(JSON.stringify({ type: "hello", token: "host-token" }));

@@ -3,8 +3,22 @@ import puppeteer from "puppeteer-core";
 
 const baseUrl = process.env.RIFF_URL ?? "http://127.0.0.1:8093";
 const previewPort = 4318;
-const room = `riff-preview-${Date.now().toString(36)}`;
-const hostCapability = "browser-host-capability-that-is-at-least-forty-eight-characters";
+
+// A real room, made through the API: the host's secret claims the relay,
+// and the participant's preview key is what lets its iframe in.
+async function api(path, body) {
+  const response = await fetch(new URL(path, baseUrl), {
+    method: "POST",
+    headers: { origin: new URL(baseUrl).origin, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  assert(response.ok, `${path}: ${response.status}`);
+  return response.json();
+}
+const suffix = Date.now().toString(36);
+const hosted = await api("/api/rooms", { name: `preview-host-${suffix}` });
+const joined = await api("/api/rooms/join", { code: hosted.room.code, name: `preview-guest-${suffix}` });
+const room = hosted.room.id;
 const browser = await puppeteer.launch({
   executablePath: process.env.CHROMIUM_PATH ?? "/usr/local/bin/chromium",
   headless: true,
@@ -16,7 +30,7 @@ try {
   const errors = [];
   host.on("pageerror", (error) => errors.push(String(error)));
   await host.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
-  await host.evaluate(async ({ roomName, hostKey }) => {
+  await host.evaluate(async ({ roomName, hostSecret }) => {
     const fromBase64 = (value) => {
       const binary = atob(value);
       return Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -47,7 +61,7 @@ try {
     });
     socket.addEventListener("open", () => socket.send(JSON.stringify({
       type: "hello",
-      capability: hostKey,
+      token: hostSecret,
     })));
     socket.addEventListener("message", async (event) => {
       const message = JSON.parse(String(event.data));
@@ -56,12 +70,20 @@ try {
         return;
       }
       if (message.type !== "request") return;
-      const response = await controller.requestPreview({
-        method: message.method,
-        path: message.path,
-        headers: message.headers,
-        body: message.body ? fromBase64(message.body) : null,
-      });
+      // As previewChannel.ts does: a request that arrives as the preview goes
+      // down (a real race over a real network) gets a 502, not a page error.
+      let response;
+      try {
+        response = await controller.requestPreview({
+          method: message.method,
+          path: message.path,
+          headers: message.headers,
+          body: message.body ? fromBase64(message.body) : null,
+        });
+      } catch {
+        socket.send(JSON.stringify({ type: "response", requestId: message.requestId, status: 502, headers: {}, body: "" }));
+        return;
+      }
       socket.send(JSON.stringify({
         type: "response",
         requestId: message.requestId,
@@ -75,7 +97,7 @@ try {
     window.__previewSocket = socket;
     window.__previewGeneration = () => generation;
     window.__previewLive = () => live;
-  }, { roomName: room, hostKey: hostCapability });
+  }, { roomName: room, hostSecret: hosted.member.secret });
 
   await host.evaluate(async (port) => {
     const script = "document.body.dataset.script='executed';try{parent.localStorage.getItem('riff-host-config');document.body.dataset.isolation='failed'}catch{document.body.dataset.isolation='safe'}";
@@ -97,7 +119,9 @@ try {
   const participant = await participantContext.newPage();
   participant.on("pageerror", (error) => errors.push(String(error)));
   await participant.goto(`${baseUrl}/?poc=github-auth`, { waitUntil: "networkidle0" });
-  const relayUrl = `${baseUrl}/room-preview/${room}/1/`;
+  const relayUrl = `${baseUrl}/room-preview/${room}/${joined.member.previewKey}/1/`;
+  // the room id alone, without a member's key, is refused
+  assert.equal(await participant.evaluate((url) => fetch(url).then((response) => response.status), `${baseUrl}/room-preview/${room}/1/`), 403);
   await participant.evaluate((url) => {
     const iframe = document.createElement("iframe");
     iframe.className = "participant-preview";
@@ -109,16 +133,22 @@ try {
   const frame = await iframe.contentFrame();
   assert(frame);
   await frame.waitForSelector("h1", { timeout: 30_000 });
-  await frame.waitForFunction(() => document.body.dataset.script === "executed", { timeout: 30_000 });
-  await frame.waitForFunction(() => document.body.dataset.dependency === "loaded", { timeout: 30_000 });
+  // Poll on a timer: the default polls on animation frames, which Chrome can
+  // starve in a sandboxed iframe it runs in its own process (as it does on
+  // https), so the wait timed out on live while the frame had long finished.
+  const poll = { timeout: 30_000, polling: 100 };
+  const styled = () => getComputedStyle(document.body).getPropertyValue("--preview-styled") === "yes";
+  await frame.waitForFunction(() => document.body.dataset.script === "executed", poll);
+  await frame.waitForFunction(() => document.body.dataset.dependency === "loaded", poll);
   assert.equal(await frame.evaluate(() => document.body.dataset.entry), "loaded");
   assert.equal(await frame.$eval("h1", (element) => element.textContent), "Participant preview");
   assert.equal(await frame.evaluate(() => document.body.dataset.isolation), "safe");
-  assert.equal(await frame.evaluate(() => getComputedStyle(document.body).getPropertyValue("--preview-styled")), "yes");
+  await frame.waitForFunction(styled, poll);
   await frame.click("#next");
   await frame.waitForSelector("#home");
   assert.equal(await frame.$eval("h1", (element) => element.textContent), "Participant next page");
-  assert.equal(await frame.evaluate(() => getComputedStyle(document.body).getPropertyValue("--preview-styled")), "yes");
+  // The heading exists before its stylesheet arrives, so wait for the style.
+  await frame.waitForFunction(styled, poll);
   await frame.click("#home");
   await frame.waitForSelector("#next");
   assert.equal(await frame.$eval("h1", (element) => element.textContent), "Participant preview");

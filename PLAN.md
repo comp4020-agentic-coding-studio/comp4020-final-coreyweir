@@ -160,7 +160,10 @@ README, PROCESS.md and the reflections are mine to write.
    refused duplicate name, staging, queueing, the People panel, a new code,
    a reload, and removal (shut out in about 20 ms).
    - Left: participants proposing to the queue (stateless message).
-   - Left: gate the preview's HTTP side (`/room-preview/<id>/…`) to members.
+   - ~~Left: gate the preview's HTTP side (`/room-preview/<id>/…`) to
+     members.~~ Done 18 Oct: a per-member key in the path (HMAC, nothing
+     stored), as a stop-gap until the separate-origin question is settled.
+     Options and cost in ADR 0006's "Implementation".
    - Left: a "this room predates sign-in" page for old `riff-<code>` links
      (today they reach the join form and "no live room").
    - ~~The browser smokes that drive a room haven't been run since.~~
@@ -169,9 +172,13 @@ README, PROCESS.md and the reflections are mine to write.
      Its old check counted live data events only, which a late joiner
      needn't get while Claude sits idle: it now waits for the snapshot,
      then types on the host and waits for live data.
-     - Left: `preview-browser-smoke.mjs` and
-       `preview-participant-browser-smoke.mjs` still claim a room name and
-       host capability client-side; port them with the preview HTTP gate.
+     - ~~Left: port the preview smokes.~~ `preview-participant-browser-smoke.mjs`
+       now uses a real room (host secret, participant's preview key) and
+       passes on dev and live. On live it had two waits that only worked by
+       luck: animation-frame polling starved in the out-of-process sandboxed
+       iframe, and a style check that raced its stylesheet.
+       `preview-browser-smoke.mjs` is the host's own preview and never
+       touched the relay; it passes as it was.
    - ~~A cold machine answers 502 for the second or two before node
      listens.~~ Fixed in `deploy/start.sh`: nginx starts only once node
      accepts connections, so fly's proxy holds the request. Measured with

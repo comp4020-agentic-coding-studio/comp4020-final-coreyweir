@@ -182,12 +182,37 @@ differs from the plan, or stops short:
   Hocuspocus PermissionDenied before hanging up, and drops the connection
   500 ms after the close frame. Live, a removed browser is shut out in about
   20 ms instead of 3 s.
-- **The preview's HTTP side isn't gated.** `/room-preview/<room id>/…` is
-  loaded by an iframe, which can't send a guest's secret. The room id is
-  random (128 bits), but `GET /api/rooms/by-code/:code` gives it to anyone
-  with the code, joined or not (even in a locked room), and a removed
-  member keeps it. Either can load the preview while the room is live.
-  Open.
+- **The preview's HTTP side is gated by a per-member key** (decided and
+  built 18 Oct). `/room-preview/<room id>/…` is loaded by an iframe, which
+  can't send a guest's secret. The room id alone wasn't enough protection:
+  `GET /api/rooms/by-code/:code` gives it to anyone with the code, joined
+  or not (even in a locked room), and a removed member keeps it. Options:
+  - **A key in the path (chosen):** `/room-preview/<room id>/<key>/<generation>/…`,
+    where the key is `<member id>.<MAC>`, an HMAC over the room and member
+    from `SESSION_SECRET`. The create, join and `me` responses carry it.
+    Every request checks the MAC, then the member like any other
+    credential, so removal or the room ending turns it away from the next
+    request. Nothing is stored. The relay already rewrites root-relative URLs
+    under the prefix, so the page's own requests carry the key. A bad key
+    is refused (403) before the relay even looks for a preview.
+  - **A cookie scoped to the preview path:** tidier URLs, but the
+    participant's iframe is sandboxed into an opaque origin, where cookies
+    can't be relied on. Worth measuring if A ever chafes.
+  - **Stop giving the room id to people who haven't joined:** simple, but a
+    removed member still has it.
+
+  Cost: the key sits in the URL. Relayed responses already send
+  `Referrer-Policy: no-referrer`, but a Claude-written page can set its
+  own policy. Since a key names its member and dies with their removal, a
+  leaked one is traceable and revocable. This is a stop-gap: serving the
+  preview from a separate origin (still open, with the host's unsandboxed
+  preview) would change how the preview is reached anyway.
+  Checked by `spec/permissions.test.ts` ("serves the preview only to
+  members, by their own key"). Mutations that turn it red: removed members'
+  keys still resolving, and skipping the MAC check. Also checked by
+  `preview-participant-browser-smoke.mjs` on dev and live: a pod's dev
+  server reaches a sandboxed participant iframe through the key, page,
+  stylesheet, script and a module's import included.
 - **What the log records so far:** room create and join, code rotate,
   lock and unlock, member removal, sign-in and sign-out, each member's
   connect and disconnect (first socket opened, last one closed), staged

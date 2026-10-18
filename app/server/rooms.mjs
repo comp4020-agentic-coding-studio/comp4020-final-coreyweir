@@ -1,12 +1,16 @@
 // Rooms and who is in them (docs/adr/0006): the API that creates and joins
 // rooms, the host's controls, and `resolve`, which every socket and request
 // uses to turn a credential into a role. The browser never claims a role.
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { hashToken, normaliseCode, normaliseName } from "./store.mjs";
 import { clientAddress, createRateLimit, HttpError, parseCookies, readJson, sameOrigin, sendJson } from "./http.mjs";
 
 const MINUTE = 60 * 1000;
 
-export function createRooms({ store, auth, audit, origin, onRoomChanged = () => {}, onRemoved = () => {} }) {
+const PREVIEW_KEY = /^(\d{1,15})\.([\w-]{22})$/;
+
+export function createRooms({ store, auth, audit, origin, previewSecret, onRoomChanged = () => {}, onRemoved = () => {} }) {
+  if (!previewSecret) throw new Error("createRooms needs a previewSecret");
   const s = store.statements;
   // Rooms are the one thing anyone can create, so creating, joining and
   // looking up codes are limited per address. A full spec run makes about
@@ -53,6 +57,32 @@ export function createRooms({ store, auth, audit, origin, onRoomChanged = () => 
     return who(room, member);
   }
 
+  // The preview loads in an iframe, which can't send a secret or (sandboxed
+  // into an opaque origin) be relied on for cookies, so each member gets a
+  // key for the preview's path: their member id and a MAC over the room and
+  // that id. Nothing to store; removal or the room ending turns it away,
+  // because resolvePreview checks the member like any other credential.
+  function previewMac(roomId, memberId) {
+    return createHmac("sha256", previewSecret)
+      .update(`riff preview v1\0${roomId}\0${memberId}`)
+      .digest("base64url")
+      .slice(0, 22);
+  }
+
+  const previewKey = (member) => `${member.id}.${previewMac(member.room_id, member.id)}`;
+
+  function resolvePreview(roomId, key) {
+    const match = PREVIEW_KEY.exec(typeof key === "string" ? key : "");
+    const room = typeof roomId === "string" ? s.roomById.get(roomId) : undefined;
+    if (!match || !room || room.state === "ended") return null;
+    const expected = Buffer.from(previewMac(room.id, Number(match[1])));
+    const given = Buffer.from(match[2]);
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+    const member = s.memberById.get(Number(match[1]));
+    if (!member || member.room_id !== room.id || member.removed_at !== null) return null;
+    return who(room, member);
+  }
+
   function bearer(request) {
     const match = /^Bearer\s+(\S+)$/i.exec(request.headers.authorization ?? "");
     return match ? match[1] : undefined;
@@ -90,6 +120,7 @@ export function createRooms({ store, auth, audit, origin, onRoomChanged = () => 
     id: member.id,
     name: member.name,
     host: Boolean(member.is_host),
+    previewKey: previewKey(member),
     ...(secret ? { secret } : {}),
   });
   const roomJson = (room) => ({ id: room.id, code: room.code, locked: Boolean(room.locked) });
@@ -220,5 +251,5 @@ export function createRooms({ store, auth, audit, origin, onRoomChanged = () => 
     return { room: roomJson(room), members };
   }
 
-  return { handle, resolve, summary };
+  return { handle, resolve, resolvePreview, summary };
 }

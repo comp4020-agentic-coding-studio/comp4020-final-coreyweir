@@ -3,7 +3,9 @@
 // credentials: a guest's room secret, or the session cookie it sends itself.
 
 export type RoomInfo = { id: string; code: string; locked: boolean };
-export type MemberInfo = { id: number; name: string; host: boolean; secret?: string };
+// previewKey goes in the preview relay's path: the participant's iframe
+// can't send the secret, so the relay checks this instead.
+export type MemberInfo = { id: number; name: string; host: boolean; previewKey: string; secret?: string };
 export type User = { id: number; login: string; avatarUrl: string | null };
 // Everything a page needs to be in a room: which room, who you are in it,
 // and the guest secret (null for a signed-in member).

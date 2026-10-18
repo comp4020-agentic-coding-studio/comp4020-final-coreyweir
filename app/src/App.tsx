@@ -250,8 +250,9 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, onDelete
   );
 }
 
-function PreviewView({ roomId, live, generation, facilitator, preview }: {
+function PreviewView({ roomId, previewKey, live, generation, facilitator, preview }: {
   roomId: string;
+  previewKey: string;
   live: boolean;
   generation: number;
   facilitator: boolean;
@@ -260,7 +261,7 @@ function PreviewView({ roomId, live, generation, facilitator, preview }: {
   const localLive = facilitator && preview !== null;
   const [reload, setReload] = useState(0);
   const source = localLive ? preview.url : live && generation > 0
-    ? previewRelayUrl(roomId, generation)
+    ? previewRelayUrl(roomId, previewKey, generation)
     : null;
   return (
     <section className="preview-pane">
@@ -393,7 +394,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       <main className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
         {view === "board" && <BoardView store={store} selected={selected} onSelection={setSelected} onStageSelection={stageSelected} />}
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
-        {view === "preview" && <PreviewView roomId={roomId} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
+        {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} onAdd={(text) => addPrompt(room.doc, room.prompts, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {people && <PeoplePanel access={access} room={room} onClose={() => setPeople(false)} />}
       </main>

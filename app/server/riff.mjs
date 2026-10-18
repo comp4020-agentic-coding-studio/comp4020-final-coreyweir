@@ -10,6 +10,7 @@ import { createRooms } from "./rooms.mjs";
 import { createTerminalRelay } from "./terminalRelay.mjs";
 import { createPreviewRelay } from "./previewRelay.mjs";
 import { createGitHubDeviceProxy } from "./githubDeviceProxy.mjs";
+import { randomBytes } from "node:crypto";
 import { HttpError, sameOrigin, sendJson } from "./http.mjs";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -35,6 +36,9 @@ export function createRiff({
     auth,
     audit,
     origin,
+    // Production and CI always set SESSION_SECRET. Without it, preview keys
+    // last as long as the process, which is as long as any preview does.
+    previewSecret: sessionSecret || randomBytes(32).toString("hex"),
     onRoomChanged: (roomId) => publishRoom(roomId),
     onRemoved: (roomId, memberId) => {
       collaboration.disconnectMember(memberId);
@@ -96,7 +100,16 @@ export function createRiff({
   const relayRefused = (roomId, what, who) =>
     audit.record(who ?? { roomId }, "denied", { what, reason: who ? "host_only" : "not_a_member" });
   const terminalRelay = createTerminalRelay({ authorize: relayAuthorize, onRefused: relayRefused });
-  const previewRelay = createPreviewRelay({ authorize: relayAuthorize, onRefused: relayRefused });
+  const previewRelay = createPreviewRelay({
+    authorize: relayAuthorize,
+    onRefused: relayRefused,
+    // A page load is dozens of requests, so refusals are tallied.
+    authorizeView: (roomId, key) => {
+      const who = rooms.resolvePreview(roomId, key);
+      if (!who) audit.tally({ roomId }, "denied", { what: "preview.view", reason: "bad_preview_key" });
+      return who;
+    },
+  });
 
   // The room's code, lock and member list live in the control document,
   // written only here, so names and the GitHub badge can't be forged from a

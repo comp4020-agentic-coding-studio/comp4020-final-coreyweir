@@ -146,6 +146,14 @@ same commit. Each README quality turns into what it means for a change:
   the client in-band first (Hocuspocus `PermissionDenied`, a relay `error`
   message), then closes with `hangUp` (`app/server/sockets.mjs`). Checked
   live, not just on dev, where nginx closes at once.
+- Vite restarts the dev server when a server file changes, and a restart
+  that reads a half-edited set of files fails and **leaves the old server
+  running**. After editing several server files, check its output for
+  "server restart failed" and `touch app/server/riff.mjs` if needed.
+- In a browser smoke, wait inside the participant's preview iframe with
+  `{ polling: 100 }`. The default polls on animation frames, which Chrome
+  starves in a sandboxed iframe it runs out of process (as on https), so a
+  wait times out on live while passing on dev.
 - Type-check the client with `npm run typecheck` (`tsc -b`). `tsc -p .`
   checks nothing, because the root tsconfig only holds references.
 - Preview relaying routes on path prefixes (`/room-preview/`,
