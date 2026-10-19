@@ -8,6 +8,7 @@ import { clientAddress, createRateLimit, HttpError, parseCookies, readJson, same
 const MINUTE = 60 * 1000;
 
 const PREVIEW_KEY = /^(\d{1,15})\.([\w-]{22})$/;
+const MODEL_KEY = /^([\w-]{8,64})\.(\d{1,15})\.([\w-]{22})$/;
 
 // What GitHub accepts as a username: letters, digits and single hyphens
 // between them, at most 39 characters. Anything else never reaches GitHub.
@@ -19,6 +20,9 @@ export function createRooms({
   audit,
   origin,
   previewSecret,
+  // whether the server has Riff's own model key, so hosts get a key for it
+  // (docs/adr/0009)
+  models = false,
   // (login) => {id, login, avatarUrl} | null; throws if GitHub can't be asked
   githubLookup,
   // ADR 0003: how long a room waits for its host before it ends
@@ -191,6 +195,32 @@ export function createRooms({
     return who(room, member);
   }
 
+  // Riff's own models (docs/adr/0009) are the host's alone. Claude sends the
+  // key as its token from inside the pod (behind a placeholder, ADR 0007),
+  // so like the preview key it names the room and the member, with a MAC.
+  function mac(label, roomId, memberId) {
+    return createHmac("sha256", previewSecret)
+      .update(`${label}\0${roomId}\0${memberId}`)
+      .digest("base64url")
+      .slice(0, 22);
+  }
+
+  const modelKey = (member) => `${member.room_id}.${member.id}.${mac("riff model v1", member.room_id, member.id)}`;
+
+  // The member a model key belongs to, whatever their role now, with the
+  // room's state; null for anything that isn't a key we made.
+  function resolveModel(key) {
+    const match = MODEL_KEY.exec(typeof key === "string" ? key : "");
+    if (!match) return null;
+    const expected = Buffer.from(mac("riff model v1", match[1], Number(match[2])));
+    const given = Buffer.from(match[3]);
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+    const room = s.roomById.get(match[1]);
+    const member = s.memberById.get(Number(match[2]));
+    if (!room || !member || member.room_id !== room.id || member.removed_at !== null) return null;
+    return { ...who(room, member), state: room.state };
+  }
+
   function bearer(request) {
     const match = /^Bearer\s+(\S+)$/i.exec(request.headers.authorization ?? "");
     return match ? match[1] : undefined;
@@ -229,6 +259,7 @@ export function createRooms({
     name: member.name,
     host: Boolean(member.is_host),
     previewKey: previewKey(member),
+    ...(models && member.is_host ? { modelKey: modelKey(member) } : {}),
     ...(secret ? { secret } : {}),
   });
   // endsAt: when an away room ends unless its host comes back.
@@ -557,6 +588,7 @@ export function createRooms({
     handle,
     resolve,
     resolvePreview,
+    resolveModel,
     summary,
     presence,
     endOverdue,

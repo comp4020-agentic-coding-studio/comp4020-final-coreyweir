@@ -23,6 +23,8 @@ const riff = createRiff({
   githubClientId: process.env.GITHUB_CLIENT_ID,
   githubClientSecret: process.env.GITHUB_CLIENT_SECRET,
   sessionSecret: process.env.SESSION_SECRET,
+  // Riff's own free models for hosts (docs/adr/0009); unset, hosts bring their own
+  openrouterKey: process.env.OPENROUTER_API_KEY,
 });
 
 // Host metrics cannot answer "is anyone actually able to use this", so report

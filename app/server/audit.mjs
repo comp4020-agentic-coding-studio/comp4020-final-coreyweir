@@ -23,6 +23,8 @@ function describe(who) {
   return parts;
 }
 
+const COUNTED_AS = { denied: "times", "model.request": "requests" };
+
 export function createAudit({ store, print = (line) => console.log(line), now = () => Date.now() }) {
   const edits = new Map();
 
@@ -72,8 +74,9 @@ export function createAudit({ store, print = (line) => console.log(line), now = 
     if (!entry) return;
     edits.delete(key);
     clearTimeout(entry.timer);
-    // An edit tally counts updates; a denial tally counts attempts.
-    const count = entry.action === "denied" ? "times" : "updates";
+    // An edit tally counts updates, a denial tally attempts, a model tally
+    // requests.
+    const count = COUNTED_AS[entry.action] ?? "updates";
     record(entry.who, entry.action, { ...entry.fixed, [count]: entry.updates, bytes: entry.bytes || undefined });
   }
 

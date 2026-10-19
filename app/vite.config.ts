@@ -23,6 +23,8 @@ function riffServer(): Plugin {
         githubClientId: process.env.GITHUB_CLIENT_ID,
         githubClientSecret: process.env.GITHUB_CLIENT_SECRET,
         sessionSecret: process.env.SESSION_SECRET,
+        // Riff's own free models for hosts (docs/adr/0009); unset, hosts bring their own
+        openrouterKey: process.env.OPENROUTER_API_KEY,
       });
       server.middlewares.use(riff.middleware);
       server.httpServer?.on("upgrade", (request, socket, head) => {

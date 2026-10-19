@@ -12,6 +12,7 @@ import { createPreviewRelay } from "./previewRelay.mjs";
 import { createGithubLookup } from "./github.mjs";
 import { createColleagues } from "./colleagues.mjs";
 import { createWatch } from "./watch.mjs";
+import { createModels } from "./models.mjs";
 import { randomBytes } from "node:crypto";
 import { statfsSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
@@ -43,6 +44,11 @@ export function createRiff({
   githubClientId,
   githubClientSecret,
   sessionSecret,
+  // Riff's OpenRouter key (docs/adr/0009); the upstream and fetch are seams
+  // for the in-process test's stand-in OpenRouter
+  openrouterKey,
+  modelUpstream,
+  modelFetch,
   log = (message) => console.log(`[riff] ${message}`),
   // seams for the in-process tests: a stand-in GitHub, and a short grace
   githubLookup = createGithubLookup({ clientId: githubClientId, clientSecret: githubClientSecret }),
@@ -93,6 +99,7 @@ export function createRiff({
     // Production and CI always set SESSION_SECRET. Without it, preview keys
     // last as long as the process, which is as long as any preview does.
     previewSecret: sessionSecret || randomBytes(32).toString("hex"),
+    models: Boolean(openrouterKey),
     onRoomChanged: (roomId) => {
       publishRoom(roomId);
       watch?.changed();
@@ -106,6 +113,7 @@ export function createRiff({
 
   watch = createWatch({ rooms, auth, log });
   const colleagues = createColleagues({ store, auth, audit, origin, githubLookup });
+  const models = createModels({ apiKey: openrouterKey, upstream: modelUpstream, rooms, audit, origin, fetch: modelFetch });
 
   // Who a document belongs to and what this credential may do with it.
   // Anything that isn't `room/<id>/shared|control` doesn't exist. In an
@@ -247,6 +255,7 @@ export function createRiff({
       if (await auth.handle(request, response, url)) return;
       if (await rooms.handle(request, response, url)) return;
       if (await colleagues.handle(request, response, url)) return;
+      if (await models.handle(request, response, url)) return;
       previewRelay.middleware(request, response, next);
     };
     run().catch((error) => fail(response, error));
@@ -367,6 +376,7 @@ export function createRiff({
       terminal: { rooms: terminalRelay.rooms.size, hosts: terminalHosts, clients: terminalClients },
       collaboration: collaboration.stats(),
       watchers: watch.count(),
+      models: models.available,
     };
   }
 

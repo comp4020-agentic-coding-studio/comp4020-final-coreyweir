@@ -35,13 +35,18 @@ jobs:
         # volume; the spec runs against it. The app is told its own origin
         # and the OAuth app's public client id (spec/sign-in.test.ts), and a
         # throwaway session secret. No client secret: CI never finishes a
-        # GitHub sign-in.
+        # GitHub sign-in. Riff's OpenRouter key comes from the repo's secrets
+        # (spec/models.test.ts only lists models, which spends nothing), and
+        # reaches the container from the environment, not the command line.
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           docker build -t app .
           docker run -d --init --name app -p 8080:8080 -e PORT=8080 --tmpfs /data \
             -e RIFF_ORIGIN=http://localhost:8080 \
             -e GITHUB_CLIENT_ID=Ov23liF1O4v3obY6vdCc \
             -e SESSION_SECRET="$(openssl rand -hex 32)" \
+            -e OPENROUTER_API_KEY \
             app
       - name: Run the spec
         run: pnpm check

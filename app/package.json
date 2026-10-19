@@ -56,6 +56,7 @@
     "test:wasix-concurrent-bash-browser": "node scripts/wasix-concurrent-bash-browser-smoke.mjs",
     "test:audit-log": "node --test --test-force-exit scripts/audit-log.test.mjs",
     "test:board-file": "node --test scripts/board-file.test.mjs",
+    "test:models": "node --test --test-force-exit scripts/models.test.mjs",
     "test:rooms": "node --test --test-force-exit scripts/rooms.test.mjs",
     "test:rooms-browser": "node scripts/rooms-browser-smoke.mjs",
     "test:lifecycle-browser": "node scripts/lifecycle-browser-smoke.mjs",
