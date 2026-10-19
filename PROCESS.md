@@ -6,13 +6,18 @@ while working on a web application. This is based on a project I have been worki
 to be used in the COMP4020 crit riffs.
 
 ## How I got here
-My project already had realtime websockets, so for this week what I really wanted to do was think about how I needed to adapt the
-communications and persistence to better fit my aims for this assignment.
+For this week, what I really needed to do was get the new data model, authentication system, and invite flow in, to enable the logging.
 
-For this week, what I needed to answer was whether this project was actually a reasonable fit for the brief, whether reusing something
-I'd been working on was allowed, whether the dependency licenses were such that distributing them with modifications in git was allowed,
-whether getting this running on fly.io would be feasible, and whether I could get it done quickly enough.
+Ahead of crit 9, I determined a plan of attack for the stages this assignment would be approached in, which landed in [5c256b0](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/5c256b0be4163c59f82e0e8d7e5533d673013d91).
 
-Last week, Claude proposed helped me create a Dockerfile for and modify my project to run on fly.io. 
+During the 'assess and plan' phase, I focussed on working with claude to produce a set of architecture decisions that would guide the later
+implementation phase. The decisions up to the end of the phase are [here](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/tree/2c8adc542ea24369ecff5b86eec7211f815c1739/docs/adr).
 
-This week, I spent the time going back and forth with Claude to figure out the plan. How would we do persistence. How would we do authentication. What did we want in local state, what did we want stored in the sqlite db. How would we adapt the whiteboard to be a better fit (hocuspocus and sqlite storage). Eventually, we formulated a plan of attack, which landed in [5c256b0](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/5c256b0).
+This week, the focus became implementing the key features required for the site to start taking shape.
+
+The major change for the week was in [389ffff](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/389ffff).
+This commit included the data model, the new GitHub OAuth flow, the Hocuspocus SQLite whiteboard, and the initial audit logging.
+
+Following that commit was [4acb32b](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/4acb32b), which
+included the client-side changes to use the new GitHub auth flow, create and join rooms through the updated API, keep track of the new
+boards, and add a 'people panel'.
