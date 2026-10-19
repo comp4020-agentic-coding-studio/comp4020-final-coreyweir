@@ -406,6 +406,13 @@ auto-release at the latest.
   too.
 - **Terminal redeploy gap** (ADR 0001): forget the host's last snapshot when
   the relay accepts the host again.
+- **Redesign the landing page.** Sign-in, "Your rooms", "Boards on this
+  browser", colleagues and both forms all sit in one card, which grew taller
+  than the window and hid Create room (found by hand on live, 19 Oct). The
+  stop-gap: the card stops at the window's height, everything below the
+  Join | Host tabs scrolls, and the whole card scrolls if what's above the
+  tabs is too tall on its own. Now that there are accounts, colleagues and
+  past rooms, not everything needs to be on the landing page.
 
 ### P3: if there's time
 - **A mode with no API key.** OpenCode Zen is likely ruled out: its terms

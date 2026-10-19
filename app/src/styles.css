@@ -89,3 +89,10 @@
 .people-panel .export-board{margin:10px 16px 0;display:grid;gap:4px;justify-items:start}
 .people-panel .export-board button{padding:5px 8px;border:1px solid #d5d5cf;border-radius:3px;background:white;font-size:9px}
 .people-panel .export-board small{font-size:9px;color:#777;line-height:1.4}
+/* The landing card never grows past the window: everything below the Join | Host tabs scrolls, and if what's above the tabs is too tall on its own, the whole card scrolls. A stop-gap until the landing page is redesigned. */
+.landing{grid-template-rows:64px minmax(0,1fr)}
+.entry-card{display:flex;flex-direction:column;max-height:calc(100% - 48px);overflow:auto}
+.entry-card>*{flex:0 0 auto}
+.entry-card>button,.entry-card>a{align-self:flex-start}
+.entry-card>form,.entry-card>.colleagues{flex:0 1 auto;min-height:260px;overflow:auto}
+@media(max-width:780px){.landing{grid-template-rows:60px auto auto}.entry-card{max-height:none;overflow:visible}.entry-card>form,.entry-card>.colleagues{min-height:0;overflow:visible}}
