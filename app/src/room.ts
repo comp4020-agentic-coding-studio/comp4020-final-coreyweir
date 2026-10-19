@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
-import { IndexeddbPersistence } from "y-indexeddb";
+import { openCopy } from "./copies";
+import { stagePrompt } from "./boardFile";
 import { Awareness } from "y-protocols/awareness";
 import type { Access, RoomState } from "./api";
 
@@ -106,7 +107,7 @@ export function useRoom(access: Access) {
     controlled.attach();
     return controlled;
   });
-  const [persistence] = useState(() => new IndexeddbPersistence(`room/${roomId}/shared`, doc));
+  const [persistence] = useState(() => openCopy(`room/${roomId}/shared`, doc));
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [shutOut, setShutOut] = useState<string | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -154,21 +155,7 @@ export function useRoom(access: Access) {
     };
   }, [access.member.id, access.member.name, awareness, colour, control, controlProvider, doc, facilitator, persistence, prompts, provider, socket]);
 
-  const promptSnapshots: PromptSnapshot[] = [];
-  prompts.forEach((map, id) => {
-    const text = map.get("text");
-    if (!(text instanceof Y.Text)) return;
-    promptSnapshots.push({
-      id,
-      author: String(map.get("author") ?? "Guest"),
-      sourceId: typeof map.get("sourceId") === "string" ? String(map.get("sourceId")) : null,
-      status: "staged",
-      rank: Number(map.get("rank") ?? 0),
-      text,
-      map,
-    });
-  });
-  promptSnapshots.sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id));
+  const promptSnapshots = snapshotPrompts(prompts);
 
   const queued = [...queue.entries()]
     .map(([id, item]) => ({ ...item, id }))
@@ -225,21 +212,29 @@ export function useRoom(access: Access) {
   };
 }
 
-export function addPrompt(
-  doc: Y.Doc,
-  prompts: Y.Map<Y.Map<unknown>>,
-  author: string,
-  text: string,
-  sourceId: string | null = null,
-) {
-  const id = crypto.randomUUID();
-  const prompt = new Y.Map<unknown>();
-  prompt.set("author", author);
-  prompt.set("sourceId", sourceId);
-  prompt.set("status", "staged");
-  prompt.set("rank", Date.now());
-  prompt.set("text", new Y.Text(text));
-  doc.transact(() => prompts.set(id, prompt));
+// The staged prompts as the page shows them, oldest first.
+export function snapshotPrompts(prompts: Y.Map<Y.Map<unknown>>): PromptSnapshot[] {
+  const promptSnapshots: PromptSnapshot[] = [];
+  prompts.forEach((map, id) => {
+    const text = map.get("text");
+    if (!(text instanceof Y.Text)) return;
+    promptSnapshots.push({
+      id,
+      author: String(map.get("author") ?? "Guest"),
+      sourceId: typeof map.get("sourceId") === "string" ? String(map.get("sourceId")) : null,
+      status: "staged",
+      rank: Number(map.get("rank") ?? 0),
+      text,
+      map,
+    });
+  });
+  promptSnapshots.sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id));
+  return promptSnapshots;
+}
+
+// boardFile.ts owns the shape of a prompt, because import writes them too.
+export function addPrompt(doc: Y.Doc, author: string, text: string, sourceId: string | null = null) {
+  stagePrompt(doc, author, text, sourceId);
 }
 
 export function replaceYText(text: Y.Text, next: string) {
