@@ -2,7 +2,7 @@
 
 - Status: accepted; lifecycle, keeping and End room implemented 2026-10-18;
   pruning and the size cap decided and implemented 2026-10-18; local copies,
-  export and import decided 2026-10-19, not yet built (amendments below)
+  export and import decided and implemented 2026-10-19 (amendments below)
 - Date: 2026-10-12
 
 ## Context
@@ -432,3 +432,46 @@ into a live room** is handy for a host who forgot to import at the start,
 but it would put a file's contents in front of people mid-session without
 them choosing it. **Leaving the queue out** would lose the prompts the host
 had already approved.
+
+## Implementation of the second amendment (2026-10-19)
+
+Built in `4e17a8f` (the board file) and `65ba779` (the client). No server
+change: everything here happens in the browser, and the server's 4 MB cap
+stays the backstop.
+
+- **The file** (`app/src/boardFile.ts`): format `riff-board`, version 1.
+  Reading one back copies only quickdraw's shape types and their known
+  props, and image assets that are PNG, JPEG, WebP or GIF data URLs whose
+  first bytes match the type, at most 2048px a side. The browser then
+  decodes each image and drops any that won't open. Anything left out is
+  counted and named before the room is created ("Left out: 1 image that
+  isn't PNG, JPEG, WebP or GIF"), so the "if time allows" image checks
+  were built too. A file over 8 MB, or a board over 4 MB less 64 KB, is
+  refused at the form.
+- **Starting a room from a file** creates the room, writes the board and
+  prompts into this browser's copy of it, reads the copy back to check it,
+  then opens the room, which syncs the copy to the server. The server
+  doesn't read the file: it trusts the content as much as it trusts
+  anyone drawing, and counts it against the cap like any other write.
+- **The list** (`app/src/copies.ts`): this browser notes each room it opens
+  in localStorage (`riff-boards`); the list is every note whose IndexedDB
+  copy still exists, plus copies with no note, found by name. "Delete all"
+  shows for anyone with two or more copies, not only guests: a signed-in
+  person on a shared machine needs it as much.
+- **A copy deleted while its room is open in another tab** closes that
+  tab's IndexedDB connection (`versionchange`). Without it the tab's next
+  edit threw `InvalidStateError`; the room carries on through the server.
+- **Wording:** sign-out asks "This browser has a copy of 1 board you've
+  been in. Delete it too?"; the ended and full banners and the People
+  panel offer "Export".
+
+**Checked:** `npm run test:board-file` (round trip, hostile fields,
+image rules; two mutations turn it red); `npm run test:boards-browser` on
+dev and live at both sizes (export, Open into the room, the read-only copy
+after the room ends, Delete leaving nothing, a too-big file refused, an
+SVG left out, a guest in the new room exporting the same images byte for
+byte and the same shape ids); `npm run test:rooms-browser` (sign-out
+deleting copies, and the other tab carrying on).
+
+**Not built:** the workspace export (it waits for the OPFS workspace) and
+transcripts. **Not checked:** a browser other than Chrome.

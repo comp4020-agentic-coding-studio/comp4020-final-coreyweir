@@ -53,7 +53,8 @@ credential's own origins (the model endpoint; `api.github.com`,
 - Collaborative staged prompt bodies backed by `Y.Text`
 - Facilitator queue action and shared queue state
 - Yjs awareness-based participant presence
-- Local IndexedDB persistence per room
+- Local IndexedDB copy per room, listed under "Boards on this browser" (Open read-only, Export, Delete)
+- Board export to a JSON file (board, images, staged prompts, queue) and starting a new room from one
 - Yjs WebSocket relay attached to the Vite development server
 - Host/join landing flow with explicit display names and locally remembered host configuration
 - Room-scoped participant Preview relayed from the facilitator's browser-local Nodepod server
@@ -98,6 +99,8 @@ npm run test:rooms                 # your rooms, invites, colleagues, the grace 
 npm run test:rooms-browser         # needs the dev server; writes a signed-in user into the dev database
 npm run test:lifecycle-browser     # needs the dev server, or RIFF_URL=<live>; W/H for the viewport
 npm run test:limits-browser        # needs the dev server, or RIFF_URL=<live>; W/H for the viewport
+npm run test:board-file            # reading and writing board files, in node
+npm run test:boards-browser        # boards on this browser, export, import; dev or RIFF_URL=<live>; W/H
 npm run test:terminal-relay
 npm run test:github-push-browser   # needs the dev server
 npm run test:credentials-browser   # needs the dev server; ECHO_BASE=https://httpbin.org against live

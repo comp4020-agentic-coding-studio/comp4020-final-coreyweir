@@ -34,7 +34,7 @@ README, PROCESS.md and the reflections are mine to write.
 |---|---|---|
 | [0001](docs/adr/0001-the-terminal-mirror-is-not-persisted.md) | The terminal mirror stays in server memory and is never persisted | Yes (today's behaviour) |
 | [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
-| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import. 4 MB per room, pruning from 70% of the volume | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`), size cap and pruning (`f512b5a`, `7d27daa`), 18 Oct; local copies, export and import decided 19 Oct, not built |
+| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import. 4 MB per room, pruning from 70% of the volume | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`), size cap and pruning (`f512b5a`, `7d27daa`), 18 Oct; local copies, export and import (`4e17a8f`, `65ba779`), 19 Oct |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
 | [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes (`389ffff`, `4acb32b`; push token in the client 18 Oct) |
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
@@ -361,35 +361,26 @@ auto-release at the latest.
     (`3e54ceb`/`b3df0f2` spec, `f512b5a` server, `7d27daa` client); checked
     by `spec/limits.test.ts` (live), `npm run test:rooms`,
     `npm run test:limits-browser` (dev and live, both sizes).
-    - Left: the banner says "Export it" once export exists; a full room's
+    - Left: ~~the banner says "Export it" once export exists~~ (`65ba779`); a full room's
       preview live flag stops reaching participants (accepted, see the
       ADR); pruning has only run against a stand-in disk.
 - **Images out of the board document** (ADR 0003's amendment, option C),
   with export: the browser uploads each image once, the server stores it
   on the volume, the board holds a reference. Lifts the 4 MB cap to a disk
   limit.
-- **Local copies** (decided 19 Oct, ADR 0003's second amendment):
-  - ~~file y-indexeddb copies under the permanent id~~ (already so,
-    `room/<id>/shared`);
-  - one "Boards on this browser" list (hosted/joined, Open, Export,
-    Delete), including copies found by IndexedDB name; Open shows a
-    read-only copy without the server when the room isn't in "Your rooms";
-  - Delete removes the copy and this browser's room secret; sign-out offers
-    to delete them all; "Delete all" for guests;
-  - copies never pushed back to an ended room, except the host reviving it.
-- **Export:**
-  - Room file `riff-<code>-<date>.json`: format and version, date, code,
-    quickdraw records with images as they are, staged prompts, the queue
-    (from the room; a copy has none). PNG is already in quickdraw's menu.
-  - Workspace: zip of OPFS (fflate), including Claude transcripts from
-    `~/.claude/projects/-work-repo/`, never credentials.
-- **Import:**
-  - Room file into a new room only (host form), checked against 4 MB before
-    the room is created. Known fields only, images byte-for-byte; the queue
-    comes in as staged prompts.
-  - If time allows: check each image decodes, matches its type
-    (PNG, JPEG, WebP or GIF, no SVG) and fits within 2048px.
-  - Transcripts: allowed, with warnings on both export and import.
+- ~~**Local copies**, **room export** and **room import**~~ (decided 19 Oct,
+  ADR 0003's second amendment; built 19 Oct, `4e17a8f` file, `65ba779`
+  client): one "Boards on this browser" list (hosted/joined, Open, Export,
+  Delete, "Delete all"), a read-only copy with no server, Delete taking the
+  room secret too, sign-out offering to delete; `riff-<code>-<date>.json`
+  with board, staged prompts and queue; import into a new room only, known
+  fields only, images byte for byte and checked (type, magic bytes,
+  2048px, decodes). Checked by `npm run test:board-file` and
+  `npm run test:boards-browser` (dev and live, both sizes).
+  - Left: workspace export, a zip of OPFS (fflate) including Claude
+    transcripts from `~/.claude/projects/-work-repo/`, never credentials,
+    with the OPFS workspace below; transcripts allowed in, with warnings on
+    both export and import.
 - **OPFS workspace.**
   - The host's filesystem survives a reload or crash, one workspace per repo.
   - Check: reload mid-task, and unpushed edits are still there.

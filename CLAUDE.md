@@ -24,8 +24,8 @@ crit. That is built (`docs/adr/0005`, `docs/adr/0006`, checked in
 `spec/permissions.test.ts`); what's left of it is in `PLAN.md`. A3 is due at
 noon on 9 November. Toward A3, "Your rooms", invites and colleagues are
 built (`docs/adr/0008`), and so is the room lifecycle with its 4 MB size
-cap and pruning (`docs/adr/0003`); next in `PLAN.md`'s P2 is local copies
-and export.
+cap and pruning, and local copies, export and import (`docs/adr/0003`);
+next in `PLAN.md`'s P2 is the OPFS workspace.
 
 Update this section at each crit. A harness describing last week's project
 steers the agent into last week's work.
@@ -144,8 +144,14 @@ same commit. Each README quality turns into what it means for a change:
   end them, so the board is deleted. Room creation is rate-limited per IP
   (60 per 10 minutes): many smoke runs against dev end in 429
   `slow_down`; restart the dev server.
-- The client still keeps its own IndexedDB copy of each room. "It persisted"
-  has to say which store it came from.
+- The client still keeps its own IndexedDB copy of each room, listed under
+  "Boards on this browser" (`app/src/copies.ts`). "It persisted" has to say
+  which store it came from. Open a copy through `openCopy()`, never a bare
+  `IndexeddbPersistence`, so deleting it from another tab doesn't break the
+  tab that has it open.
+- A board file is read with `parseBoardFile()` (`app/src/boardFile.ts`),
+  which copies known fields only. A new quickdraw shape type or prop needs
+  adding there, or import silently leaves it out (it says so in "Left out").
 - `/readme/` is generated from `README.md` at image build time. Editing the
   README changes nothing live until a redeploy.
 - No local Docker. Build and deploy with `flyctl deploy --remote-only
