@@ -160,7 +160,7 @@ export type Colleagues = { colleagues: Colleague[]; recent: (Colleague & { lastR
 
 // Every room this browser holds a guest secret for. The server ignores
 // secrets it doesn't accept, so a stale one costs nothing.
-function storedSecrets() {
+export function storedSecrets() {
   const secrets: { roomId: string; secret: string }[] = [];
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index) ?? "";

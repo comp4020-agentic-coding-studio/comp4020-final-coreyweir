@@ -163,8 +163,39 @@ try {
 
   await shot(boLanding, "rooms-list");
 
+  // Signing out offers to delete the boards this browser kept, and does it
+  // with the room still open in another tab (which has to let go).
+  await octocatLanding.reload({ waitUntil: "networkidle0" });
+  await waitText(octocatLanding, ".local-boards li", new RegExp(`Room ${code}`));
+  await clickText(octocatLanding, ".account button", "Sign out");
+  await waitText(octocatLanding, ".signing-out", /This browser has a copy of 1 board you've been in\. Delete it too\?/);
+  await shot(octocatLanding, "sign-out-copies");
+  const reloaded = octocatLanding.waitForNavigation({ waitUntil: "networkidle0", timeout: 10_000 });
+  await clickText(octocatLanding, ".signing-out button", "Sign out and delete");
+  await reloaded;
+  await octocatLanding.waitForSelector(".account .github-sign-in");
+  const kept = await octocatLanding.evaluate(async () => ({
+    boards: Boolean(document.querySelector(".local-boards")),
+    databases: (await indexedDB.databases()).filter((database) => database.name.startsWith("room/")).length,
+    secrets: Object.keys(localStorage).filter((key) => key.startsWith("riff-member:")).length,
+  }));
+  assert.deepEqual(kept, { boards: false, databases: 0, secrets: 0 });
+  // The open room tab let go of its copy cleanly: an edit there now
+  // doesn't throw from a closed database (copies.ts openCopy).
+  // A background tab takes no typing in headless Chrome ("Target closed").
+  await octocat.bringToFront();
+  await octocat.type(".new-prompt textarea", "after the copy went");
+  await octocat.click(".new-prompt button");
+  await octocat.waitForFunction(() => [...document.querySelectorAll(".prompt-card textarea")].some((element) => element.value === "after the copy went"), { timeout: 5_000, polling: 100 });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.deepEqual(errors, []);
+  console.log("signed out and deleted this browser's copies, with the room open in another tab, which carries on");
+
   assert.deepEqual(errors, []);
   console.log(`rooms browser smoke passed at ${width}x${height}`);
+} catch (error) {
+  console.error(error);
+  process.exitCode = 1;
 } finally {
   await browser.close();
 }

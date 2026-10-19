@@ -67,3 +67,25 @@
 /* A room's size limit (docs/adr/0003, amendment) */
 .room-banner.full{border-color:#e3c2bd;background:#fbecea;color:#6b2a20}.board-notice{position:absolute;top:47px;left:13px;right:13px;z-index:30;margin:0;padding:8px 11px;border:1px solid #e3c2bd;border-radius:4px;background:#fbecea;color:#6b2a20;font-size:10px;line-height:1.45;box-shadow:0 4px 14px rgba(0,0,0,.06)}
 .people-panel .board-size{margin:6px 16px 0;color:#888;font-size:9px}
+/* Boards on this browser, export and import (docs/adr/0003, second amendment) */
+.local-boards{padding:14px 26px;border-bottom:1px solid #ededE8;font-size:10px}
+.local-boards h2{margin:0;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#666}
+.local-boards ul{margin:8px 0 0;padding:0;list-style:none;display:grid;gap:2px;max-height:168px;overflow:auto}
+.local-boards li{min-height:34px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;border-bottom:1px solid #f0f0ec}
+.local-boards li:last-child{border-bottom:0}
+.local-boards code,.import-summary code,.entry-card p code{font-family:"SFMono-Regular",Consolas,monospace;letter-spacing:.08em}
+.local-boards li small{color:#777;font-size:9px}
+.local-boards .actions{margin-left:auto;display:flex;align-items:center;gap:10px}
+.local-boards .actions.asking{flex-basis:100%;justify-content:flex-end;padding-bottom:6px;color:#444}
+.local-boards .link,.signing-out .link,.room-banner .link,.entry-card p .link{padding:0;border:0;background:none;color:#315efb;font:inherit;text-decoration:underline}
+.local-boards button.danger,.signing-out button:not(.link){padding:5px 9px;border:1px solid #d5d5cf;border-radius:3px;background:white;font-size:9px}
+.local-boards button.danger{border-color:#b75243;background:#b75243;color:white}
+.local-boards .delete-all{margin:6px 0 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;color:#444}
+.account .signing-out{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding-top:6px;font-size:10px;color:#444}
+.account .signing-out .link{margin-left:0}
+.import-board{display:grid;gap:6px}
+.import-board input[type=file]{height:auto;padding:6px 0;border:0;font-size:10px}
+.import-summary{margin:0}
+.people-panel .export-board{margin:10px 16px 0;display:grid;gap:4px;justify-items:start}
+.people-panel .export-board button{padding:5px 8px;border:1px solid #d5d5cf;border-radius:3px;background:white;font-size:9px}
+.people-panel .export-board small{font-size:9px;color:#777;line-height:1.4}
