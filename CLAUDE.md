@@ -154,6 +154,10 @@ same commit. Each README quality turns into what it means for a change:
   adding there, or import silently leaves it out (it says so in "Left out").
 - `/readme/` is generated from `README.md` at image build time. Editing the
   README changes nothing live until a redeploy.
+- Push to `origin` (HTTPS, a token approved for the course organisation,
+  deliberately without the `workflow` scope). When a push is refused
+  because it changes `.github/workflows/`, push the same commits through
+  the `ssh` remote. Don't suggest changing the token's scopes.
 - No local Docker. Build and deploy with `flyctl deploy --remote-only
   --ha=false -a comp4020-final-coreyweir`, run through `mise exec` from the
   repo root (the fly token lives in `mise.local.toml`).
