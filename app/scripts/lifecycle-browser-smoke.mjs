@@ -43,13 +43,16 @@ async function host(context, name, keep) {
   const tab = await page(context);
   await tab.goto(baseUrl, { waitUntil: "networkidle0" });
   await tab.click(".entry-card > nav button:nth-child(2)");
-  const inputs = await tab.$$(".entry-card form input");
+  // Riff's own models are the default when the server has a key; this
+  // smoke runs Claude against a fake endpoint of its own.
+  await tab.$(".model-choice label:nth-of-type(2) input").then((own) => own?.click());
+  const inputs = await tab.$$(".entry-card form input:not([type=radio])");
   await inputs[0].click({ clickCount: 3 });
   await inputs[0].type(name);
   await inputs[1].click({ clickCount: 3 });
   await inputs[1].type(`${baseUrl}/fake-anthropic`);
   await inputs[2].type("invalid-lifecycle-smoke-token");
-  const checkbox = await tab.$(".entry-card form label.check input");
+  const checkbox = await tab.$(".entry-card form label.check input[type=checkbox]");
   assert.equal(await checkbox.evaluate((element) => element.checked), true, "keeping the board is the default");
   if (!keep) await checkbox.click();
   await shot(tab, `host-form-${keep ? "kept" : "not-kept"}`);

@@ -79,7 +79,10 @@ const WASINIX_BINARIES = [
  */
 const WASINIX_COREUTILS_NAMES = ["env", "stat", "du", "id", "timeout", "chmod"] as const;
 
-export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string };
+// env: extra variables for Claude Code (model choice for Riff's own
+// models, docs/adr/0009). Never a credential: those go through
+// credentialFor() so only a placeholder reaches the guest.
+export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string; env?: Record<string, string> };
 export type PreviewRequest = { method?: string; path?: string; headers?: Record<string, string>; body?: Uint8Array | null };
 export type PreviewResponse = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
 const NODEPOD_WORKER_URL = import.meta.env.DEV
@@ -358,6 +361,7 @@ export class ClaudePodController {
     ]);
 
     const env: Record<string, string> = {
+      ...this.config.env,
       DISABLE_AUTOUPDATER: "1",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       SHELL: "bash",

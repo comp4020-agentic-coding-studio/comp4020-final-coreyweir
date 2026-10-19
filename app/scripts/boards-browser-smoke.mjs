@@ -69,7 +69,10 @@ async function lastDownload(tab, count) {
 async function hostForm(tab, name) {
   await tab.goto(baseUrl, { waitUntil: "networkidle0" });
   await tab.click(".entry-card > nav button:nth-child(2)");
-  const inputs = await tab.$$(".entry-card form input");
+  // Riff's own models are the default when the server has a key; this
+  // smoke runs Claude against a fake endpoint of its own.
+  await tab.$(".model-choice label:nth-of-type(2) input").then((own) => own?.click());
+  const inputs = await tab.$$(".entry-card form input:not([type=radio])");
   await inputs[0].click({ clickCount: 3 });
   await inputs[0].type(name);
   await inputs[1].click({ clickCount: 3 });

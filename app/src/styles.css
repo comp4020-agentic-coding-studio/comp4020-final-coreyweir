@@ -96,3 +96,5 @@
 .entry-card>button,.entry-card>a{align-self:flex-start}
 .entry-card>form,.entry-card>.colleagues{flex:0 1 auto;min-height:260px;overflow:auto}
 @media(max-width:780px){.landing{grid-template-rows:60px auto auto}.entry-card{max-height:none;overflow:visible}.entry-card>form,.entry-card>.colleagues{min-height:0;overflow:visible}}
+/* Riff's free models or your own endpoint (docs/adr/0009) */
+.entry-card fieldset.model-choice{border:0;padding:0;margin:0;min-width:0;display:grid;gap:10px}.entry-card fieldset.model-choice legend{padding:0;margin-bottom:8px;font-size:9px;font-weight:600}

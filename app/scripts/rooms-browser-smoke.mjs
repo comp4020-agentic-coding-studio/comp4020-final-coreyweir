@@ -73,7 +73,10 @@ try {
   const host = await newPage();
   await host.goto(baseUrl, { waitUntil: "networkidle0" });
   await host.click(".entry-card > nav button:nth-child(2)");
-  const inputs = await host.$$(".entry-card form input");
+  // Riff's own models are the default when the server has a key; this
+  // smoke runs Claude against a fake endpoint of its own.
+  await host.$(".model-choice label:nth-of-type(2) input").then((own) => own?.click());
+  const inputs = await host.$$(".entry-card form input:not([type=radio])");
   await inputs[0].type("Hana");
   await inputs[1].click({ clickCount: 3 });
   await inputs[1].type(`${baseUrl}/fake-anthropic`);

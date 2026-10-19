@@ -6,6 +6,7 @@ import {
   acceptInvite, addColleague, cancelInvite, declineInvite, inviteToRoom, listColleagues, removeColleague, watchRooms,
   type Colleagues, type ListedRoom, type RoomInfo, type RoomList,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
+  RIFF_MODEL_ENV, riffModelsAvailable, riffModelsUrl,
 } from "./api";
 import * as Y from "yjs";
 import { type BoardLimit, useBoardSync } from "./boardSync";
@@ -19,24 +20,43 @@ import {
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
 
 type View = "board" | "room" | "preview";
-type SavedHostConfig = Pick<HostConfig, "baseUrl" | "token" | "repo">;
+// models: "riff" is Riff's own free models through the server
+// (docs/adr/0009); "own" is the host's endpoint and token.
+type ModelChoice = "riff" | "own";
+type SavedHostConfig = Pick<HostConfig, "baseUrl" | "token" | "repo"> & { models: ModelChoice };
 const DEFAULT_HOST_CONFIG: SavedHostConfig = {
   baseUrl: "https://api.anthropic.com",
   token: "",
   repo: "",
+  models: "riff",
 };
 
-function savedHostConfig() {
+function savedHostConfig(): SavedHostConfig {
   try {
     const saved = JSON.parse(localStorage.getItem("riff-host-config") ?? "{}") as Partial<SavedHostConfig>;
+    const token = typeof saved.token === "string" ? saved.token : DEFAULT_HOST_CONFIG.token;
     return {
       baseUrl: typeof saved.baseUrl === "string" ? saved.baseUrl : DEFAULT_HOST_CONFIG.baseUrl,
-      token: typeof saved.token === "string" ? saved.token : DEFAULT_HOST_CONFIG.token,
+      token,
       repo: typeof saved.repo === "string" ? saved.repo : DEFAULT_HOST_CONFIG.repo,
+      // A host who saved a token before there was a choice keeps using it.
+      models: saved.models === "riff" || saved.models === "own" ? saved.models : token ? "own" : "riff",
     };
   } catch {
     return DEFAULT_HOST_CONFIG;
   }
+}
+
+function useRiffModels() {
+  const [available, setAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    let active = true;
+    void riffModelsAvailable().then((value) => active && setAvailable(value));
+    return () => {
+      active = false;
+    };
+  }, []);
+  return available;
 }
 
 // Inside a room the URL names it by its permanent id; a shared link names
@@ -484,10 +504,12 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
   const [colleagues, setColleagues] = useState(false);
   const [imported, setImported] = useState<ParsedBoard | null>(null);
   const list = useRoomList();
+  const riffModels = useRiffModels();
+  const useRiff = riffModels === true && config.models === "riff";
   // Signed in, your GitHub login is the default name.
   const shownName = name || (user?.login ?? "");
 
-  function updateConfig(field: keyof SavedHostConfig, value: string) {
+  function updateConfig(field: Exclude<keyof SavedHostConfig, "models">, value: string) {
     setConfig((current) => ({ ...current, [field]: value }));
   }
 
@@ -535,7 +557,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
           <form onSubmit={(event) => {
             event.preventDefault();
             saveName(name);
-            localStorage.setItem("riff-host-config", JSON.stringify(config));
+            localStorage.setItem("riff-host-config", JSON.stringify(riffModels === false ? { ...config, models: "own" } : config));
             void submit(async () => {
               const access = await createRoom(shownName.trim(), keepBoard);
               if (imported) await seedCopy(access.room.id, (doc) => applyBoardFile(doc, imported));
@@ -543,15 +565,24 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
             });
           }}>
             <label>Your name<input required maxLength={40} value={shownName} onChange={(event) => setName(event.target.value)} placeholder="e.g. Corey" /></label>
+            {riffModels && (
+              <fieldset className="model-choice">
+                <legend>Model</legend>
+                <label className="check"><input type="radio" name="models" checked={config.models === "riff"} onChange={() => setConfig((current) => ({ ...current, models: "riff" }))} /><span>Riff's free models<small>No key needed. Nemotron 3 Ultra through Riff's OpenRouter account, shared by every room, so it can be slow or busy.</small></span></label>
+                <label className="check"><input type="radio" name="models" checked={config.models === "own"} onChange={() => setConfig((current) => ({ ...current, models: "own" }))} /><span>Your own endpoint<small>An Anthropic-compatible API and its token.</small></span></label>
+              </fieldset>
+            )}
+            {!useRiff && <>
             <label>Claude base URL<input type="url" required value={config.baseUrl} onChange={(event) => updateConfig("baseUrl", event.target.value)} /></label>
             <label>API token<input type="password" required value={config.token} onChange={(event) => updateConfig("token", event.target.value)} placeholder="Stored on this device" /></label>
+            </>}
             <label>Git repository <small>Optional</small><input value={config.repo} onChange={(event) => updateConfig("repo", event.target.value)} placeholder="https://github.com/group/project.git" /></label>
             <GitHubPush user={user} back="/?setup=host" beforeLeaving={() => { saveName(name); localStorage.setItem("riff-host-config", JSON.stringify(config)); }} />
             <ImportBoard imported={imported} onChange={setImported} />
             <label className="check"><input type="checkbox" checked={keepBoard} onChange={(event) => setKeepBoard(event.target.checked)} /><span>Keep the board after the room ends<small>{keepBoard ? "Kept on the server while space allows, read-only. Everyone who joins is told." : "Deleted from the server when the room ends. Everyone who joins is told."}</small></span></label>
             <p className="local-note">These settings stay in this browser and are never included in the room link.</p>
             {error && <p className="form-error" role="alert">{error}</p>}
-            <button className="primary" disabled={busy}>{busy ? "Creating..." : "Create room"}</button>
+            <button className="primary" disabled={busy || riffModels === null}>{busy ? "Creating..." : "Create room"}</button>
           </form>
         )}
         </>}
@@ -1100,7 +1131,27 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
       </main>
     );
   }
-  const hostConfig = storedConfig && githubToken ? { ...storedConfig, githubToken } : storedConfig;
+  const modelKey = state.access.member.modelKey;
+  if (storedConfig?.models === "riff" && !modelKey) {
+    return (
+      <main className="landing">
+        <section className="entry-card">
+          <h2>Riff's free models aren't available</h2>
+          <p>The server has no model key right now, so Claude can't start with them. Host with your own endpoint instead.</p>
+          <button className="primary" onClick={() => {
+            localStorage.setItem("riff-host-config", JSON.stringify({ ...storedConfig, models: "own" }));
+            location.assign(`${location.pathname}?setup=host`);
+          }}>Use your own endpoint</button>
+        </section>
+      </main>
+    );
+  }
+  const { models: _models, ...ownConfig } = storedConfig ?? { models: "own" as const };
+  const modelConfig: HostConfig | null = !storedConfig ? null
+    : storedConfig.models === "riff" && modelKey
+      ? { repo: storedConfig.repo, baseUrl: riffModelsUrl(), token: modelKey, env: RIFF_MODEL_ENV }
+      : ownConfig as HostConfig;
+  const hostConfig = modelConfig && githubToken ? { ...modelConfig, githubToken } : modelConfig;
   return <RoomApp access={state.access} hostConfig={hostConfig} />;
 }
 

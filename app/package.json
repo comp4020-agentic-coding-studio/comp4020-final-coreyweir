@@ -57,6 +57,7 @@
     "test:audit-log": "node --test --test-force-exit scripts/audit-log.test.mjs",
     "test:board-file": "node --test scripts/board-file.test.mjs",
     "test:models": "node --test --test-force-exit scripts/models.test.mjs",
+    "test:models-browser": "node scripts/models-browser-smoke.mjs",
     "test:rooms": "node --test --test-force-exit scripts/rooms.test.mjs",
     "test:rooms-browser": "node scripts/rooms-browser-smoke.mjs",
     "test:lifecycle-browser": "node scripts/lifecycle-browser-smoke.mjs",

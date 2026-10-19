@@ -49,14 +49,17 @@ async function host(context, name) {
   const tab = await page(context);
   await tab.goto(baseUrl, { waitUntil: "networkidle0" });
   await tab.click(".entry-card > nav button:nth-child(2)");
-  const inputs = await tab.$$(".entry-card form input");
+  // Riff's own models are the default when the server has a key; this
+  // smoke runs Claude against a fake endpoint of its own.
+  await tab.$(".model-choice label:nth-of-type(2) input").then((own) => own?.click());
+  const inputs = await tab.$$(".entry-card form input:not([type=radio])");
   await inputs[0].click({ clickCount: 3 });
   await inputs[0].type(name);
   await inputs[1].click({ clickCount: 3 });
   await inputs[1].type(`${baseUrl}/fake-anthropic`);
   await inputs[2].type("invalid-limits-smoke-token");
   // Not kept, so ending the room afterwards deletes what this filled it with.
-  await tab.click(".entry-card form label.check input");
+  await tab.click(".entry-card form label.check input[type=checkbox]");
   await tab.click(".entry-card form .primary");
   await tab.waitForFunction(() => location.search.startsWith("?id="), { timeout: 10_000 });
   await tab.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 10_000 });

@@ -21,7 +21,9 @@ export type RoomInfo = {
 };
 // previewKey goes in the preview relay's path: the participant's iframe
 // can't send the secret, so the relay checks this instead.
-export type MemberInfo = { id: number; name: string; host: boolean; previewKey: string; secret?: string };
+// modelKey (hosts only, when the server has Riff's own model key) lets the
+// host's Claude Code use /api/model (docs/adr/0009).
+export type MemberInfo = { id: number; name: string; host: boolean; previewKey: string; modelKey?: string; secret?: string };
 export type User = { id: number; login: string; avatarUrl: string | null };
 // Everything a page needs to be in a room: which room, who you are in it,
 // and the guest secret (null for a signed-in member).
@@ -110,6 +112,35 @@ export async function enterRoom(roomId: string): Promise<Access | null> {
       return enterRoom(roomId);
     }
     return null;
+  }
+}
+
+// Riff's own free models (docs/adr/0009): the server forwards the host's
+// Claude Code to OpenRouter with Riff's key. Model ids are OpenRouter's
+// Anthropic-format ones; "[1m]" tells Claude Code the context is 1M tokens.
+// Every alias points at a free model: the key is limited to free models,
+// so Claude Code's own default (a paid Haiku for small background calls)
+// would be refused.
+export const RIFF_MODEL = "anthropic/nvidia/nemotron-3-ultra-550b-a55b:free[1m]";
+export const RIFF_SMALL_MODEL = "anthropic/nvidia/nemotron-3.5-lightning:free";
+export const RIFF_MODEL_ENV: Record<string, string> = {
+  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
+  ANTHROPIC_MODEL: RIFF_MODEL,
+  ANTHROPIC_DEFAULT_OPUS_MODEL: RIFF_MODEL,
+  ANTHROPIC_DEFAULT_SONNET_MODEL: RIFF_MODEL,
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: RIFF_SMALL_MODEL,
+  ANTHROPIC_SMALL_FAST_MODEL: RIFF_SMALL_MODEL,
+};
+
+export function riffModelsUrl() {
+  return `${location.origin}/api/model`;
+}
+
+export async function riffModelsAvailable() {
+  try {
+    return (await call<{ available: boolean }>("/api/model")).available === true;
+  } catch {
+    return false;
   }
 }
 
