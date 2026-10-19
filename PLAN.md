@@ -40,6 +40,7 @@ README, PROCESS.md and the reflections are mine to write.
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
 | [0007](docs/adr/0007-credentials-stay-in-the-tab.md) | The host's tokens stay in the page; the guest holds placeholders, swapped by our service worker (P1.6) | Yes (18 Oct) |
 | [0008](docs/adr/0008-your-rooms-invites-and-colleagues.md) | Your rooms (members' and invited rooms only, live over a websocket), host-only invites by GitHub id, colleagues you keep; the room state half of 0003 | Yes (`a0bee0f`, `ef1401f`, `7e6023e`, `79a008f`, 18 Oct) |
+| [0009](docs/adr/0009-riffs-own-free-models-for-hosts.md) | Hosts can use Riff's own free models (OpenRouter), through a host-only proxy on our server; the key never leaves the server | Not yet |
 
 ## Work, in order
 
@@ -415,11 +416,11 @@ auto-release at the latest.
   past rooms, not everything needs to be on the landing page.
 
 ### P3: if there's time
-- **A mode with no API key.** OpenCode Zen is likely ruled out: its terms
-  restrict use to "your own internal use", it only offers
-  `/v1/chat/completions`, and it sends no CORS headers. Options: an
-  in-browser model (WebLLM, transformers.js, Chrome's built-in model), or the
-  marker's course key.
+- **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own
+  OpenRouter key behind a host-only proxy on our server. OpenCode Zen is
+  out: measured 19 Oct, its free models answer 403 `FreeTierError` to
+  anything but OpenCode itself. Being built now, ahead of the rest of P2,
+  because without it a marker with no key can't see Claude work.
 
 ## Still open
 
