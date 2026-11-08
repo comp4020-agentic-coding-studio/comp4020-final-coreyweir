@@ -22,6 +22,11 @@ BlueOak). The licenses below need more than a mention:
   `third_party/licenses/lemon-tls-Apache-2.0.txt`.
 - **fflate** (0.8.3, unmodified, from npm; writes the workspace export zip):
   MIT, © Arjun Barrett. See `third_party/licenses/fflate-MIT.txt`.
+- **ncurses terminal description** (the `xterm-256color` entry in
+  `app/src/sessionSystem.ts`, `XTERM_TERMCAP`: `infocmp -C` output from
+  ncurses 6.6's terminfo database, empty fields dropped): MIT-style,
+  © Thomas E. Dickey and the Free Software Foundation. See
+  `third_party/licenses/ncurses-MIT.txt`.
 
 ## WebAssembly command binaries
 

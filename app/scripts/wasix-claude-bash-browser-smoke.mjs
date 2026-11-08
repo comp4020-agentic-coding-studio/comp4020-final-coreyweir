@@ -221,6 +221,7 @@ try {
             pythonSubprocess: 'cd py && python3 sub.py',
             // The session's user and host (sessionSystem.ts): libc reads /etc.
             identity: 'whoami && id && hostname && echo ~',
+            helpers: 'which node; man ls 2>&1; echo "man=$?"; clear | od -An -c | tr -s " "; echo a | less',
           };
           for (const [name, command] of Object.entries(commands)) {
             const { commandString, cwdFilePath } = await provider.buildExecCommand(command, { id: name, useSandbox: false });
@@ -347,6 +348,7 @@ try {
   assert.match(snapshot.commands.nodeVersion.stdout, /^v\d+\./);
   assert.match(snapshot.commands.npmVersion.stdout, /^\d+\./);
   assert.equal(snapshot.commands.identity.stdout, "user\nuid=0(user) gid=0(user) groups=0(user)\nriff\n/home/user\n");
+  assert.equal(snapshot.commands.helpers.stdout, "/opt/riff/.wasix-session/bin/node\nman: Riff's terminal has no manual pages. Try: ls --help\nman=1\n 033 [ H 033 [ 2 J 033 [ 3 J\na\n");
   assert.equal(snapshot.commands.pythonPrint.stdout, "42\n");
   assert.equal(snapshot.commands.pythonVersion.stdout, "Python 3.12.0\n");
   assert.equal(snapshot.commands.pythonStdin.stdout, "HI\n\n");

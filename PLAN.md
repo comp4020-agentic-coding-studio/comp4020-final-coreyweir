@@ -679,6 +679,34 @@ auto-release at the latest.
   `test:wasix-terminal-browser` (prompt, `cd ~`, whoami/id/~/hostname) and
   `test:wasix-claude-bash-browser` (the same through Claude's Bash tool).
   An edit to /etc/passwd lasts one command.
+- **A first-time user's Bash** (9 Nov), from a fresh host terminal. Working:
+  `ls`, `cd ~`, Tab completion, history, `node -v`, `npm -v`, `python3 -V`,
+  `git status` (says the empty workspace isn't a repository), nano. Fixed
+  (`app/src/sessionSystem.ts`):
+  - ~~`less` hung~~: it drew the file and then ignored every key, which
+    queued up for bash (`q` turned the next command into `qecho`), until
+    Ctrl-C. It reads keys from /dev/tty, which the session doesn't connect to
+    the terminal. `less` and `more` now print the file; the terminal keeps
+    scrollback.
+  - ~~Long commands scrolled sideways~~ (a row starting `<`, the rest cut
+    off): the session has no terminal description, so readline treated
+    xterm as dumb. Bash's GNU termcap now gets an `xterm-256color` entry
+    inline in `TERMCAP` (from ncurses, in THIRD_PARTY_NOTICES).
+  - ~~`clear`, `which`, `man`~~ were "command not found"; `clear` and
+    `which` are small scripts, `man` says there are no manual pages and to
+    try `--help`.
+  Checked by `test:wasix-terminal-browser` (less returns, a long line wraps;
+  red without either fix) and `test:wasix-claude-bash-browser`.
+  Left as they are: `ls -l` shows owners as `somebody somegroup` (the bash
+  package's old uutils `ls`; GNU `ls` names `user` but shows every mode as
+  `----------`, which is worse). Missing with bash's plain "command not
+  found": `sudo`, `apt`/`apt-get`, `make`, `ssh`, `wget` (curl is there),
+  `diff`, `patch`, `file`, `tput`, `ps`, `top`, `free`, `df`, `vi`/`vim`,
+  `zip`/`unzip`; no /etc/os-release, and `uname` says
+  `wasi riff 0.0.0 wasm32`. Any other program that reads keys from
+  /dev/tty would hang the way less did. A `sudo` that runs its command
+  (the guest is uid 0 already) would be cheap, but it pretends, so it's a
+  call for Corey.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own

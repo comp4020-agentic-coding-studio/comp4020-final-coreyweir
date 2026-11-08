@@ -89,6 +89,19 @@ try {
   await page.keyboard.press("Enter");
   await waitForTerminal(page, (text) => text.trimEnd().endsWith("user@riff:/work/repo$"), "the prompt back in /work/repo");
   assert.doesNotMatch(await page.$eval(".terminal-target .xterm-rows", (element) => element.textContent ?? ""), /I have no name/);
+  // less can't read keys here (/dev/tty isn't the terminal), so it used to
+  // draw the file and then hang; now it prints and returns.
+  await page.keyboard.type("less /etc/passwd; printf '[pager:%s]' \"$?\"");
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.includes("Riff host:/home/user:/bin/bash") && text.includes("[pager:0]"), "less to print and return");
+  // A command longer than the terminal is wide wraps. Without a terminal
+  // description readline scrolled it sideways, starting a row with "<".
+  const longArgument = "w".repeat(initialCols + 20);
+  await page.keyboard.type(`echo ${longArgument} [long-line]`);
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("[long-line]"), "the long line to run");
+  const rows = await page.$$eval(".terminal-target .xterm-rows > div", (elements) => elements.map((row) => (row.textContent ?? "").replace(/\u00a0/g, " ")));
+  assert.ok(!rows.some((row) => row.startsWith("<")), `readline scrolled a long line sideways: ${JSON.stringify(rows.filter((row) => row.startsWith("<")))}`);
   await page.keyboard.type("printf 'newline-one\\nnewline-two\\nnewline-three\\n'");
   await page.keyboard.press("Enter");
   await page.waitForFunction(

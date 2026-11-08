@@ -26,7 +26,7 @@ import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./wor
 import { cloneRepository, githubRepoUrl } from "./repoClone";
 import { credentialFor, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
-import { SESSION_ENV_FILE, SESSION_HOME, SESSION_HOSTNAME, SESSION_USER, sessionEnvScript, sessionHelperCommands } from "./sessionSystem";
+import { SESSION_ENV_FILE, SESSION_HOME, SESSION_HOSTNAME, SESSION_USER, sessionEnvScript, sessionHelperCommands, XTERM_TERMCAP } from "./sessionSystem";
 import { createPythonFetchHandler, isPythonFetch, PYTHON_FETCH_COMMAND, pythonLaunchers, pythonSessionFiles } from "./pythonCommand";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
 import bridgeStubUrl from "./assets/wasmer/bridge-stub.wasm?url";
@@ -741,6 +741,7 @@ export class ClaudePodController {
   private wasixBaseEnv(bridge: { pipeEnv: Record<string, string>; pathEntry: string }): Record<string, string> {
     return {
       TERM: "xterm-256color",
+      TERMCAP: XTERM_TERMCAP,
       COLORTERM: "truecolor",
       HOME: SESSION_HOME,
       USER: SESSION_USER,
