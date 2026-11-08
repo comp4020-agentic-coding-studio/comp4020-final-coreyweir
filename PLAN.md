@@ -607,7 +607,23 @@ auto-release at the latest.
     `npm create vite@latest` and `npx create-vite other-app` each scaffold
     in under a second. Left: the bridge still has no stdin at all, so
     `echo x | node script.js` and interactive `node` in the host's Bash
-    get nothing (a change to the bridge stub and protocol).
+    get nothing (a change to the bridge stub and protocol). Until 9 Nov a
+    bridged program that read stdin also *hung*, even under `< /dev/null`:
+    the bridge never ended its input, and Nodepod's EOF released only one
+    of the two refs a data+end reader holds (fixed in riff.47, with a unit
+    test). Now the host ends every bridged process's stdin at once, and the
+    bridge stub says what the guest offered (`RIFF_BRIDGE_STDIN`, by
+    `fstat`, since `isatty` is true for every fd here). When the terminal
+    was stdin and the program starts reading, Nodepod prints one line
+    saying keys can't reach it (`NODEPOD_STDIN_NOTICE`). A pipe gets end of
+    input with no notice: measured, `< /dev/null` under Claude's Bash tool
+    fstat's like a pipe, so a pipe notice would be wrong on every command
+    Claude runs. Checked by `test:wasix-claude-bash-browser` (pipe,
+    /dev/null, a non-reader: end of input, no notice) and
+    `test:wasix-terminal-browser` (a readline prompt ends with the notice).
+    `echo x | node` still silently reads nothing.
+    Not covered: programs reading /dev/tty directly (WASIX ones, like less)
+    still hang; a WASIX program's own stdin is fine.
   - ~~git failures.~~ Nodepod's git talks to GitHub's REST API, always with a
     token, so measured on dev: with no GitHub connected even a public clone
     fails ("authentication required. Set GITHUB_TOKEN", wrong advice in

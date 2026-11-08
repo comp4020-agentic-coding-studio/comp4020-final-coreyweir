@@ -222,6 +222,12 @@ try {
             // The session's user and host (sessionSystem.ts): libc reads /etc.
             identity: 'whoami && id && hostname && echo ~',
             helpers: 'which node; man ls 2>&1; echo "man=$?"; clear | od -An -c | tr -s " "; echo a | less',
+            // No stdin crosses the bridge: a bridged reader gets end of input
+            // at once (it used to hang, even under < /dev/null). Only a
+            // terminal reader is told why (wasix-terminal smoke).
+            stdinEof: \`node -e "process.stdin.on('data',()=>{}).on('end',()=>console.log('eof'))" < /dev/null; echo "exit=$?"\`,
+            stdinPipe: \`echo hi | node -e "process.stdin.on('data',d=>console.log('got',String(d))).on('end',()=>console.log('end'))"; echo "exit=$?"\`,
+            stdinUnread: \`echo hi | node -e "console.log('no read')"\`,
           };
           for (const [name, command] of Object.entries(commands)) {
             const { commandString, cwdFilePath } = await provider.buildExecCommand(command, { id: name, useSandbox: false });
@@ -356,6 +362,13 @@ try {
   assert.equal(snapshot.commands.pythonScript.stdout, "read:from-bash\n/work/repo/py from-bash");
   assert.equal(snapshot.commands.pythonScriptExit.stdout, "read:from-bash\nexit=5\n");
   assert.equal(snapshot.commands.pythonSubprocess.stdout, "from-bash\n/work/repo/py\nmissing:riff-no-such-program\n");
+  const stdinCheck = (name) => JSON.stringify(snapshot.commands[name]);
+  assert.equal(snapshot.commands.stdinEof.stdout, "eof\nexit=0\n", stdinCheck("stdinEof"));
+  assert.doesNotMatch(snapshot.commands.stdinEof.stderr, /riff:/, stdinCheck("stdinEof"));
+  assert.equal(snapshot.commands.stdinPipe.stdout, "end\nexit=0\n", stdinCheck("stdinPipe"));
+  assert.doesNotMatch(snapshot.commands.stdinPipe.stderr, /riff:/, stdinCheck("stdinPipe"));
+  assert.equal(snapshot.commands.stdinUnread.stdout, "no read\n", stdinCheck("stdinUnread"));
+  assert.doesNotMatch(snapshot.commands.stdinUnread.stderr, /riff:/, stdinCheck("stdinUnread"));
   console.log(`Claude-bash E2E: both $SHELL forms intercepted; tools/bridge/token/exit-code verified; first output at ${firstTickTime} ms of ${result.stream.exitedAt} ms.`);
 } finally {
   await browser.close();

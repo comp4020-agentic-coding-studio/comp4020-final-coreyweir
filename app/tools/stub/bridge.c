@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* Bridge stub v4: a WASIX binary that forwards argv/env/cwd to the host over
@@ -172,6 +173,23 @@ static int build_request(char *buf, size_t cap, int argc, char **argv, const cha
   return (int)pos;
 }
 
+/* What the guest gave this command as stdin. The bridge carries no stdin
+ * yet, so the host ends the bridged process's input at once and uses this to
+ * say so when it matters: "tty" (the terminal: someone could be typing),
+ * "data" (a pipe, or a file with something in it, that the command won't
+ * see) or "empty" (/dev/null, an empty file: end of input is the truth).
+ * Measured in this WASIX libc: isatty() is true for every fd, so it can't
+ * tell; the terminal is a character device, /dev/null an empty regular file,
+ * and a pipe reports no file type at all. */
+static const char *stdin_kind(void) {
+  struct stat st;
+  if (fstat(0, &st) != 0) return "empty";
+  if (S_ISCHR(st.st_mode)) return "tty";
+  if (S_ISREG(st.st_mode)) return st.st_size > 0 ? "data" : "empty";
+  if (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode) || (st.st_mode & S_IFMT) == 0) return "data";
+  return "empty";
+}
+
 int main(int argc, char **argv) {
   const char *pipe_path = getenv("RIFF_BRIDGE_PIPE");
   const char *root = getenv("RIFF_BRIDGE_ROOT");
@@ -195,6 +213,8 @@ int main(int argc, char **argv) {
     fprintf(stderr, "bridge stub: cannot open %s: %s\n", pipe_path, strerror(errno));
     return 127;
   }
+
+  setenv("RIFF_BRIDGE_STDIN", stdin_kind(), 1);
 
   static char req[MAX_BUF];
   int req_len = build_request(req, sizeof(req), argc, argv, cwd, g_pid);

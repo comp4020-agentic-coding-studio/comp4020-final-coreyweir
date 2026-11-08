@@ -96,6 +96,13 @@ try {
   await page.keyboard.type("less /etc/passwd; printf '[pager:%s]' \"$?\"");
   await page.keyboard.press("Enter");
   await waitForTerminal(page, (text) => text.includes("Riff host:/home/user:/bin/bash") && text.includes("[pager:0]"), "less to print and return");
+  // A bridged program that asks for keyboard input used to wait forever:
+  // keys typed in Bash never reach it. Now it hears end of input at once,
+  // and Riff says why it got none.
+  await page.keyboard.type(`node -e "require('readline').createInterface({input:process.stdin}).on('close',()=>console.log('[prompt:'+(6*7)+']'))"`);
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.includes("[prompt:42]") && text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("[prompt:42]"), "a reading node to end instead of hanging");
+  assert.match(await page.$eval(".terminal-target .xterm-rows", (element) => element.textContent ?? ""), /riff: node wanted keyboard input, which Riff can't pass to it from Bash yet/);
   // A command longer than the terminal is wide wraps. Without a terminal
   // description readline scrolled it sideways, starting a row with "<".
   const longArgument = "w".repeat(initialCols + 20);
