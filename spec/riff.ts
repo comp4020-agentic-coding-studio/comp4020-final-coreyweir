@@ -25,6 +25,9 @@ export type Member = {
   // Goes in the preview's path: `/room-preview/<room id>/<key>/<generation>/`.
   // An iframe can't send the secret, so the key is what the relay checks.
   previewKey: string;
+  // Where the room's preview is served (ADR 0011): its own origin, never
+  // the app's. The path above only answers there.
+  previewOrigin: string;
   // Only the host's, and only when the server has a model key (ADR 0009):
   // `Authorization: Bearer` on `/api/model/v1/...`.
   modelKey?: string;
@@ -76,6 +79,7 @@ async function member(res: Response, what: string): Promise<Member> {
     host: body.member.host,
     secret: body.member.secret,
     previewKey: body.member.previewKey,
+    previewOrigin: body.member.previewOrigin,
     modelKey: body.member.modelKey,
   };
 }

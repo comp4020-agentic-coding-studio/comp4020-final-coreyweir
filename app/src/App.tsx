@@ -16,7 +16,7 @@ import { TerminalPane, githubRefusalText, type TerminalPaneHandle } from "./Term
 import { checkGitHubToken } from "./githubCheck";
 import { useLookOnly } from "./lookOnly";
 import type { HostConfig } from "./claudePod";
-import { previewRelayUrl } from "./previewChannel";
+import { previewFrameUrl } from "./previewChannel";
 import {
   BoardFileError, MAX_FILE_BYTES, ROOM_LIMIT_BYTES, type BoardFile, type FilePrompt, type ParsedBoard,
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
@@ -925,23 +925,23 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, h
   );
 }
 
-function PreviewView({ roomId, previewKey, live, generation, facilitator, preview }: {
+function PreviewView({ roomId, previewKey, previewOrigin, live, generation, facilitator, preview }: {
   roomId: string;
   previewKey: string;
+  previewOrigin: string;
   live: boolean;
   generation: number;
   facilitator: boolean;
   preview: { url: string; revision: number } | null;
 }) {
-  const localLive = facilitator && preview !== null;
   const [reload, setReload] = useState(0);
-  const source = localLive ? preview.url : live && generation > 0
-    ? previewRelayUrl(roomId, previewKey, generation)
-    : null;
+  // Both roles load the room's preview origin (docs/adr/0011), so the frame
+  // may keep its own storage (allow-same-origin) without reaching Riff's.
+  const source = live && generation > 0 ? previewFrameUrl(previewOrigin, roomId, previewKey, generation) : null;
   return (
     <section className="preview-pane">
-      <header className="preview-heading"><div><h2>Preview</h2><span className={live ? "live" : "offline"}><i></i>{live ? "Live" : "Not live"}</span></div>{source && <nav className="preview-actions"><button onClick={() => setReload((value) => value + 1)}>Refresh</button>{localLive && <a href={source} target="_blank" rel="noreferrer">Open in new tab</a>}</nav>}</header>
-      {source ? <iframe className="preview-frame" key={`${generation}:${preview?.revision ?? 0}:${reload}`} src={source} title="Workspace preview" sandbox={facilitator ? undefined : "allow-forms allow-modals allow-scripts"} /> : <div className="preview-empty">
+      <header className="preview-heading"><div><h2>Preview</h2><span className={live ? "live" : "offline"}><i></i>{live ? "Live" : "Not live"}</span></div>{source && <nav className="preview-actions"><button onClick={() => setReload((value) => value + 1)}>Refresh</button>{facilitator && <a href={source} target="_blank" rel="noreferrer">Open in new tab</a>}</nav>}</header>
+      {source ? <iframe className="preview-frame" key={`${generation}:${preview?.revision ?? 0}:${reload}`} src={source} title="Workspace preview" sandbox="allow-forms allow-modals allow-scripts allow-same-origin" /> : <div className="preview-empty">
         {live ? <><span className="preview-icon live-icon"></span><h3>Preview is connecting</h3><p>Waiting for the facilitator's preview relay.</p></> : <><span className="preview-icon"></span><h3>No preview yet</h3><p>Start a development server in the workspace to show it here.</p></>}
       </div>}
     </section>
@@ -1328,7 +1328,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
         {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} />}
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
-        {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
+        {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}
         {panel === "share" && <SharePanel access={access} room={room} onClose={() => setPanel(null)} />}

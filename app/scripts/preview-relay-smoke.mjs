@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import WebSocket from "ws";
+import { createPreviewOrigins } from "../server/previewOrigin.mjs";
 import { createPreviewRelay } from "../server/previewRelay.mjs";
 
 // Stand-in for rooms.resolve: the token names the role the server would
@@ -9,7 +10,15 @@ const authorize = (_room, hello) =>
   hello.token === "host-token" ? { memberId: 1, role: "host" } : hello.token ? { memberId: 2, role: "participant" } : null;
 // Stand-in for rooms.resolvePreview: "view-key" is a member's key for any room.
 const authorizeView = (_room, key) => (key === "view-key" ? { memberId: 2, role: "participant" } : null);
-const relay = createPreviewRelay({ authorize, authorizeView });
+// Each room's preview has its own origin (docs/adr/0011); the port is only
+// known once the server listens.
+let origins;
+const relay = createPreviewRelay({
+  authorize,
+  authorizeView,
+  labelOf: (request) => origins.labelOf(request),
+  labelFor: (roomName) => origins.labelFor(roomName),
+});
 const server = createServer((request, response) => {
   relay.middleware(request, response, () => {
     response.writeHead(404);
@@ -25,7 +34,9 @@ server.listen(0, "127.0.0.1");
 await new Promise((resolve) => server.once("listening", resolve));
 
 const { port } = server.address();
+origins = createPreviewOrigins({ template: `http://{room}.preview.localhost:${port}`, secret: "test" });
 const room = "riff-preview-test";
+const previewOrigin = origins.originFor(room);
 const host = new WebSocket(`ws://127.0.0.1:${port}/preview-control/${room}`);
 const messages = [];
 
@@ -89,7 +100,7 @@ try {
   await waitFor(() => messages.some((message) => message.type === "host-accepted"), "Preview host was not accepted");
   host.send(JSON.stringify({ type: "preview-up", generation: 7 }));
 
-  const base = `http://127.0.0.1:${port}/room-preview/${room}/view-key/7`;
+  const base = `${previewOrigin}/room-preview/${room}/view-key/7`;
   const textResponse = await fetch(`${base}/hello?name=riff`);
   assert.equal(textResponse.status, 200);
   assert.equal(await textResponse.text(), "GET /hello?name=riff ");
@@ -132,12 +143,23 @@ try {
   const stylesheet = await (await fetch(`${base}/styles.css`)).text();
   assert.equal(stylesheet, `@import "${prefix}/reset.css";body{background:url(${prefix}/img/bg.png)}`);
 
-  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/${room}/view-key/6/`)).status, 404);
-  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/other-room/view-key/7/`)).status, 404);
-  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/%FF/view-key/7/`)).status, 404);
+  assert.equal((await fetch(`${previewOrigin}/room-preview/${room}/view-key/6/`)).status, 404);
+  assert.equal((await fetch(`${previewOrigin}/room-preview/other-room/view-key/7/`)).status, 404);
+  assert.equal((await fetch(`${previewOrigin}/room-preview/%FF/view-key/7/`)).status, 404);
   // no key, or a wrong one: refused before the relay looks for a preview
-  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/${room}/7/`)).status, 403);
-  assert.equal((await fetch(`http://127.0.0.1:${port}/room-preview/${room}/other-key/7/`)).status, 403);
+  assert.equal((await fetch(`${previewOrigin}/room-preview/${room}/7/`)).status, 403);
+  assert.equal((await fetch(`${previewOrigin}/room-preview/${room}/other-key/7/`)).status, 403);
+  // A preview document is served on its own room's origin only: not on the
+  // server's own host, another room's origin, or a made-up label.
+  const elsewhere = async (origin) => {
+    const response = await fetch(`${origin}/room-preview/${room}/view-key/7/hello`);
+    return [response.status, await response.text()];
+  };
+  assert.deepEqual(await elsewhere(`http://127.0.0.1:${port}`), [404, "Previews open on their own origin"]);
+  assert.deepEqual(await elsewhere(origins.originFor("other-room")), [404, "Preview not found"]);
+  assert.deepEqual(await elsewhere(`http://made-up.preview.localhost:${port}`), [404, "Preview not found"]);
+  assert.deepEqual(await elsewhere(`http://${new URL(previewOrigin).hostname.replace(".preview.", ".x.preview.")}:${port}`), [404, "Preview not found"]);
+  assert.equal(messages.filter((message) => message.type === "request" && message.path === "/hello").length, 0);
 
   host.send(JSON.stringify({ type: "preview-down", generation: 6 }));
   host.send(JSON.stringify({ type: "hello", token: "host-token" }));

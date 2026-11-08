@@ -115,9 +115,14 @@ function fail(response, status, message) {
 // `authorizeView(roomName, key)` does the same for the key in a preview
 // request's path (`/room-preview/<room>/<key>/<generation>/…`): an iframe
 // can't send a secret, so the key is the member's credential here.
-export function createPreviewRelay({ authorize, authorizeView, onRefused } = {}) {
+// `labelOf(request)` is the preview-host label a request arrived on (null
+// on Riff's own host) and `labelFor(roomName)` the one that room's preview
+// lives on (docs/adr/0011): a preview document is served only on its own
+// room's origin, never on Riff's.
+export function createPreviewRelay({ authorize, authorizeView, labelOf, labelFor, onRefused } = {}) {
   if (typeof authorize !== "function") throw new Error("createPreviewRelay needs authorize");
   if (typeof authorizeView !== "function") throw new Error("createPreviewRelay needs authorizeView");
+  if (typeof labelOf !== "function" || typeof labelFor !== "function") throw new Error("createPreviewRelay needs labelOf and labelFor");
   const socketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_SOCKET_BYTES });
   const rooms = new Map();
 
@@ -247,6 +252,11 @@ export function createPreviewRelay({ authorize, authorizeView, onRefused } = {})
     } catch {
       return fail(response, 404, "Preview not found");
     }
+    // Riff's own host never serves a preview document, and a room's
+    // preview only answers on that room's origin.
+    const label = labelOf(request);
+    if (label === null) return fail(response, 404, "Previews open on their own origin");
+    if (label !== labelFor(roomName)) return fail(response, 404, "Preview not found");
     // The key first, so a stranger learns nothing, not even whether a
     // preview is live.
     if (!authorizeView(roomName, key)) return fail(response, 403, "Not a member of this room");

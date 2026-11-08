@@ -21,18 +21,16 @@ try {
       baseUrl: "https://api.anthropic.com",
       token: "unused",
       repo: "",
-    }, () => {}, (url) => {
-      window.__previewEvents.push(url);
-      document.querySelector(".preview-frame")?.remove();
-      if (!url) return;
-      const iframe = document.createElement("iframe");
-      iframe.className = "preview-frame";
-      iframe.src = url;
-      document.body.append(iframe);
-    });
+    }, () => {}, (url) => window.__previewEvents.push(url));
     await controller.boot();
     window.__previewController = controller;
   });
+
+  // What the preview relay asks of the host's pod (previewChannel.ts).
+  const request = (path) => page.evaluate(async (path) => {
+    const response = await window.__previewController.requestPreview({ method: "GET", path, headers: {}, body: null });
+    return { status: response.status, type: response.headers["content-type"], body: new TextDecoder().decode(response.body) };
+  }, path);
 
   async function startServer(text) {
     await page.evaluate(async ({ body, port }) => {
@@ -44,41 +42,39 @@ try {
         source,
       ]);
     }, { body: text, port: previewPort });
-    await page.waitForSelector(".preview-frame", { timeout: 30_000 });
-    const frame = await page.waitForFrame((candidate) => candidate.url().includes("/__virtual__/") && candidate.url().endsWith(`/${previewPort}`));
-    await frame.waitForFunction((expected) => document.body.textContent?.includes(expected), { timeout: 30_000 }, text);
+    await page.waitForFunction(() => Boolean(window.__previewEvents.at(-1)), { timeout: 30_000, polling: 100 });
+    assert.match((await request("/")).body, new RegExp(text));
   }
 
   await startServer("Riff preview ready");
-  const firstUrl = await page.$eval(".preview-frame", (frame) => frame.src);
+  const firstUrl = await page.evaluate(() => window.__previewEvents.at(-1));
   assert.match(firstUrl, new RegExp(`/__virtual__/[^/]+/${previewPort}$`));
-  const firstFrame = await (await page.$(".preview-frame")).contentFrame();
-  assert(firstFrame);
-  assert.equal(await firstFrame.evaluate(() => document.querySelector("base")?.href), `${firstUrl}/`);
-  assert.equal(await firstFrame.$eval("#links", (link) => link.href), `${firstUrl}/links.html`);
-  await firstFrame.click("#links");
-  await firstFrame.waitForSelector("#home");
-  assert.equal(firstFrame.url(), `${baseUrl}/links.html`);
-  assert.equal(await firstFrame.$eval("h1", (heading) => heading.textContent), "Riff preview ready links");
-  assert.equal(await firstFrame.$eval("#home", (link) => link.href), `${firstUrl}/index.html`);
-  await firstFrame.click("#home");
-  await firstFrame.waitForSelector("#links");
-  assert.equal(firstFrame.url(), `${baseUrl}/index.html`);
-  assert.equal(await firstFrame.$eval("h1", (heading) => heading.textContent), "Riff preview ready");
-  assert.equal(await firstFrame.evaluate(() => getComputedStyle(document.body).getPropertyValue("--preview-styled")), "yes");
+  assert.deepEqual(await request("/links.html"), { status: 200, type: "text/html", body: '<link rel="stylesheet" href="./styles.css"><a id="home" href="./index.html">Home</a><h1>Riff preview ready links</h1>' });
+  assert.deepEqual(await request("/styles.css"), { status: 200, type: "text/css", body: "body{--preview-styled:yes}" });
+
+  // A pod's page never loads as a document on Riff's origin (docs/adr/0011):
+  // Riff's worker refuses the URL Nodepod reports before Nodepod can serve it.
+  // The relay smokes check the preview on its own origin.
+  const framed = await page.evaluate(async (src) => {
+    const frame = document.createElement("iframe");
+    frame.src = src;
+    document.body.append(frame);
+    await new Promise((resolve) => frame.addEventListener("load", resolve, { once: true }));
+    return frame.contentDocument?.body?.textContent ?? "";
+  }, firstUrl);
+  assert.match(framed, /Previews open on their own origin/);
+  assert.doesNotMatch(framed, /Riff preview ready/);
 
   await page.evaluate(() => window.__previewProcess.kill());
-  await page.waitForFunction(
-    () => window.__previewEvents.at(-1) === null && !document.querySelector(".preview-frame"),
-    { timeout: 30_000 },
-  );
+  await page.waitForFunction(() => window.__previewEvents.at(-1) === null, { timeout: 30_000, polling: 100 });
+  await assert.rejects(request("/"), /Preview is offline/);
 
   await startServer("Riff preview restarted");
-  assert.equal(await page.$eval(".preview-frame", (frame) => frame.src), firstUrl);
+  assert.equal(await page.evaluate(() => window.__previewEvents.at(-1)), firstUrl);
   assert.equal(await page.evaluate(() => window.__previewEvents.filter(Boolean).length), 2);
   await page.evaluate(() => window.__previewController.dispose());
   assert.deepEqual(pageErrors, []);
-  console.log("Nodepod Preview start, stop, iframe rendering, and restart passed.");
+  console.log("Nodepod preview start, stop, serving to the relay, refusal on Riff's origin, and restart passed.");
 } finally {
   await browser.close();
 }

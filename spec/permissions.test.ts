@@ -271,7 +271,7 @@ describe("the terminal mirror and the preview", () => {
     const outsider = await createRoom(baseUrl);
     const preview = await servePreview(baseUrl, host, '<html><head></head><body><a href="/next">next</a></body></html>');
     try {
-      const at = (key: string) => new URL(`/room-preview/${host.roomId}/${key}/${preview.generation}/`, baseUrl);
+      const at = (key: string) => new URL(`/room-preview/${host.roomId}/${key}/${preview.generation}/`, host.previewOrigin);
       const status = async (key: string) => (await fetch(at(key))).status;
 
       // a member's key gets the page, with its links kept under that key
@@ -281,7 +281,7 @@ describe("the terminal mirror and the preview", () => {
       expect(await status(host.previewKey)).toBe(200);
 
       // the room id alone, someone else's room, and forged keys
-      expect((await fetch(new URL(`/room-preview/${host.roomId}/${preview.generation}/`, baseUrl))).status).toBe(403);
+      expect((await fetch(new URL(`/room-preview/${host.roomId}/${preview.generation}/`, host.previewOrigin))).status).toBe(403);
       expect(await status(outsider.previewKey)).toBe(403);
       const [memberId, mac] = guest.previewKey.split(".");
       const flipped = mac.slice(0, -1) + (mac.endsWith("A") ? "B" : "A");

@@ -646,13 +646,16 @@ auto-release at the latest.
 
 ## Still open
 
-- **The host's preview runs Claude-written code on our origin, unsandboxed**
-  (to revisit after the first P2 items)
-  (`App.tsx:214`; participants' frames are sandboxed without
-  `allow-same-origin`). It can read localStorage and call `/api` with the
-  host's cookie. Accepted for now: the alternative routes the host's own
-  preview through the server and back. Revisit with the guest-preview
-  subdomain question.
+- ~~**The host's preview runs Claude-written code on our origin, unsandboxed**~~
+  Closed 8 Nov by ADR 0011 (option 2a, Corey's call): every member's
+  preview loads from its room's own origin, `<label>.preview.airiff.tech`,
+  through the relay, with `allow-same-origin` (storage works); a preview
+  host reaches only the relay, Riff's host serves no relay documents, and
+  Riff's worker refuses `/__virtual__/` navigations. Cost, measured: the
+  host loses hot reload and its app's sockets, and round-trips. **Next
+  (2b):** a service worker on the preview origin that forwards the host's
+  frame's requests to its own Nodepod by `postMessage`, so the host's
+  preview is local again.
 - **Phone hosts and the 5-minute grace.** Android suspends background tabs,
   and how soon may vary by device and settings. Worth measuring on the
   Pixel before settling on 5 minutes; not urgent.

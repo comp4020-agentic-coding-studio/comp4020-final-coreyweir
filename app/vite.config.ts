@@ -20,6 +20,8 @@ function riffServer(): Plugin {
       const riff = createRiff({
         dbPath,
         origin: process.env.RIFF_ORIGIN ?? "http://127.0.0.1:8093",
+        // unset: http://{room}.preview.localhost:<the dev port> (docs/adr/0011)
+        previewOrigin: process.env.RIFF_PREVIEW_ORIGIN,
         githubClientId: process.env.GITHUB_CLIENT_ID,
         githubClientSecret: process.env.GITHUB_CLIENT_SECRET,
         sessionSecret: process.env.SESSION_SECRET,

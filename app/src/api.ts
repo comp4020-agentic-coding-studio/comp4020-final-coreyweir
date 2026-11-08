@@ -20,10 +20,11 @@ export type RoomInfo = {
   pruned: boolean;
 };
 // previewKey goes in the preview relay's path: the participant's iframe
-// can't send the secret, so the relay checks this instead.
+// can't send the secret, so the relay checks this instead. previewOrigin
+// is where this room's preview is served (docs/adr/0011), never Riff's own.
 // modelKey (hosts only, when the server has Riff's own model key) lets the
 // host's Claude Code use /api/model (docs/adr/0009).
-export type MemberInfo = { id: number; name: string; host: boolean; previewKey: string; modelKey?: string; secret?: string };
+export type MemberInfo = { id: number; name: string; host: boolean; previewKey: string; previewOrigin: string; modelKey?: string; secret?: string };
 export type User = { id: number; login: string; avatarUrl: string | null };
 // Everything a page needs to be in a room: which room, who you are in it,
 // and the guest secret (null for a signed-in member).

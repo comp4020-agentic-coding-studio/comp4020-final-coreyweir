@@ -208,7 +208,9 @@ differs from the plan, or stops short:
   own policy. Since a key names its member and dies with their removal, a
   leaked one is traceable and revocable. This is a stop-gap: serving the
   preview from a separate origin (still open, with the host's unsandboxed
-  preview) would change how the preview is reached anyway.
+  preview) would change how the preview is reached anyway. (8 Nov: ADR
+  0011 serves every preview from its room's own origin; the key in the
+  path stays the credential there, and the frames keep their storage.)
   Checked by `spec/permissions.test.ts` ("serves the preview only to
   members, by their own key"). Mutations that turn it red: removed members'
   keys still resolving, and skipping the MAC check. Also checked by

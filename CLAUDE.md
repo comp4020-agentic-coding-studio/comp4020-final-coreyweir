@@ -201,9 +201,17 @@ same commit. Each README quality turns into what it means for a change:
   way out, for that credential's origins only (`docs/adr/0007`). Nodepod
   must keep booting with `swUrl: "/riff-sw.js"`, and a new credential needs
   its own origins. `npm run test:credentials-browser` checks it.
-- Preview relaying routes on path prefixes (`/room-preview/`,
-  `/preview-control/`). fly.dev can't do wildcard subdomains, so keep it that
-  way.
+- **A preview never runs on Riff's origin** (`docs/adr/0011`). Each room's
+  preview is served on `<label>.preview.airiff.tech` (`RIFF_PREVIEW_ORIGIN`
+  in `fly.toml`: a custom domain with a wildcard DNS name and certificate
+  on this same fly app); dev uses `*.preview.localhost:<port>`, which
+  Chrome and Node resolve to loopback. A preview host reaches only the
+  relay, and Riff's host refuses `/room-preview/`; the node server enforces
+  both, so check on dev, not just behind nginx. Don't frame or open
+  `/__virtual__/` on Riff's origin (`riff-sw.js` refuses it), and don't drop
+  `allow-same-origin` from the preview frame "to be safe": storage needs it,
+  and the foreign origin is what keeps it safe. The relay itself still
+  routes on path prefixes (`/room-preview/`, `/preview-control/`).
 
 ## Working rules
 
