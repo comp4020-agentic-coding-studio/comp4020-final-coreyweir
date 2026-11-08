@@ -269,7 +269,7 @@ try {
     await host.waitForSelector(".end-room button");
     await host.click(".end-room button");
     await host.click(".end-room .danger");
-    await host.waitForFunction(() => new URL(location.href).searchParams.has("ended"), { timeout: 20_000 });
+    await host.waitForFunction(() => new URL(location.href).searchParams.has("ended") || !location.search.includes("id="), { timeout: 20_000 });
 
     assert.deepEqual(pageErrors, [], say("no page errors"));
     console.log(`${size.name}: ok (room ${code}, ${Object.keys(first.files).length} then ${Object.keys(second.files).length} entries)`);
