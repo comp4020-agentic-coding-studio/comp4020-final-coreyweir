@@ -72,3 +72,29 @@ tool calls, which everyone in the room can watch.
 - A server that doesn't allow CORS from Riff's origin, or needs OAuth,
   can't be used.
 - The host's GitHub token now reaches one more GitHub origin.
+
+## Implementation (9 Nov)
+
+Built in `25f7cbf` (GitHub's MCP), `395e666` (Apply on a Claude still
+starting), `6c3fafb` (custom servers) and `f4df1d7` (built-in entries).
+
+- `app/src/mcp.ts` holds the settings, the form's rules and the servers
+  as Claude's config sees them; `app/src/McpSettings.tsx` is the dialog;
+  `app/src/credentials.ts` adds the `mcp` placeholder kind, one credential
+  per server; `ClaudePodController` in `app/src/claudePod.ts` writes
+  `mcpServers` into `~/.claude.json` and restarts Claude on Apply.
+- Claude drops an `/exit` typed while it is still drawing its first
+  screen, so Apply straight after a start hung once; it now asks again,
+  then stops Claude.
+- Names the host can't take: `github`, and `web`, kept for a built-in web
+  server that isn't on main yet. Apply keeps any entry the host didn't
+  set, so a built-in server isn't wiped by the host's changes.
+
+**Checked:** `npm run test:mcp` (the form's rules and the config) and
+`npm run test:mcp-browser` (dev, needs the network): the placeholder in
+Claude's config, the refusal shown as an MCP notice, Apply on a running
+Claude keeping the conversation, a local mock server getting its own
+token (and no placeholder leaving the browser), one that refuses its
+token, Jina's open server when reachable, a planted built-in entry
+surviving Apply, and the dialog at W x H. With `GITHUB_TOKEN` set,
+GitHub's tools are listed. **Not recorded:** a run on live.
