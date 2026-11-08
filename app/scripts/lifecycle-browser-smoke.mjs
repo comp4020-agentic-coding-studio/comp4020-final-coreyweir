@@ -97,7 +97,13 @@ async function endRoom(tab, code) {
   await tab.waitForSelector(".end-room.asking");
   await shot(tab, `end-confirm-${code}`);
   await Promise.all([tab.waitForNavigation({ waitUntil: "networkidle0" }), tab.click(".end-room button.danger")]);
-  assert.match(await textOf(tab, ".ended-note"), new RegExp(`Room ${code} has ended`));
+  // The host knows they ended it: no notice in the card, only the room's
+  // row saying so, and not again after a reload.
+  assert.equal(await tab.$(".ended-note"), null, "no ended notice for the host who ended it");
+  assert.doesNotMatch(await tab.$eval(".entry-card", (element) => element.textContent), /has ended/);
+  assert.equal(new URL(tab.url()).searchParams.has("ended"), false, "the URL forgets it");
+  await tab.waitForFunction((room) => [...document.querySelectorAll(".your-rooms li")].some((row) => row.textContent.includes(`Room ${room}`) && row.textContent.includes("Ended just now")), { timeout: 10_000, polling: 100 }, code)
+    .catch(async (error) => assert.fail(`no "Ended just now" row for ${code}: ${error.message}; rows: ${JSON.stringify(await tab.$$eval(".your-rooms li", (rows) => rows.map((row) => row.textContent)))}`));
 }
 
 try {

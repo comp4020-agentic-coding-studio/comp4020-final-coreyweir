@@ -158,7 +158,12 @@ async function endRoom(tab, code) {
   await tab.click(".end-room > button");
   await tab.waitForSelector(".end-room.asking");
   await Promise.all([tab.waitForNavigation({ waitUntil: "networkidle0" }), tab.click(".end-room button.danger")]);
-  assert.match(await tab.$eval(".ended-note", (element) => element.textContent), new RegExp(`Room ${code} has ended`));
+  // The host knows they ended it: no notice in the card.
+  assert.equal(await tab.$(".ended-note"), null, "no ended notice for the host who ended it");
+  assert.doesNotMatch(await tab.$eval(".entry-card", (element) => element.textContent), /has ended/);
+  assert.equal(new URL(tab.url()).searchParams.has("ended"), false, "the URL forgets it");
+  // (Its row is checked in the lifecycle smoke: here the host's first tab is
+  // still in the room, so the server may list it again.)
 }
 
 // A fresh profile: nothing in OPFS to start with, and nothing left after.

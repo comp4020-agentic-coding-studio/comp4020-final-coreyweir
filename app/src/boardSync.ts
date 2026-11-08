@@ -31,7 +31,9 @@ function invert(diff: Diff): Diff {
   return { added: diff.removed, removed: diff.added, updated };
 }
 
-export function useBoardSync(doc: Y.Doc, store: Store, limit?: { current: BoardLimit }) {
+// oneWay: the doc fills the store and nothing goes back (a copy you look
+// at, docs/adr/0003: nothing in it can be changed).
+export function useBoardSync(doc: Y.Doc, store: Store, limit?: { current: BoardLimit }, { oneWay = false } = {}) {
   useEffect(() => {
     const records = doc.getMap<BoardRecord>("boardRecords");
 
@@ -40,7 +42,7 @@ export function useBoardSync(doc: Y.Doc, store: Store, limit?: { current: BoardL
       records.forEach((record) => store.put(cloneRecord(record), "remote"));
     }, "remote");
 
-    const stopStoreListener = store.listen((diff, source) => {
+    const stopStoreListener = oneWay ? () => {} : store.listen((diff, source) => {
       if (source !== "user") return;
       // Only images are big enough to matter; strokes and notes are bytes.
       const { limitBytes, bytesUsed, onTooBig } = limit?.current ?? { limitBytes: null };
@@ -86,5 +88,5 @@ export function useBoardSync(doc: Y.Doc, store: Store, limit?: { current: BoardL
       stopStoreListener();
       records.unobserve(onRemoteRecords);
     };
-  }, [doc, store]);
+  }, [doc, store, oneWay]);
 }

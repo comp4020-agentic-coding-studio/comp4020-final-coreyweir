@@ -14,6 +14,7 @@ import * as Y from "yjs";
 import { type BoardLimit, useBoardSync } from "./boardSync";
 import { TerminalPane, githubRefusalText, type TerminalPaneHandle } from "./TerminalPane";
 import { checkGitHubToken } from "./githubCheck";
+import { useLookOnly } from "./lookOnly";
 import type { HostConfig } from "./claudePod";
 import { previewRelayUrl } from "./previewChannel";
 import {
@@ -94,6 +95,9 @@ function downloadBoard(file: BoardFile) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
+
+// What a read-only board says about itself: look around, don't change.
+const LOOK_HINT = "Look only: drag to move around, pinch or ctrl + scroll to zoom.";
 
 function shortDate(at: number) {
   return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
@@ -403,6 +407,28 @@ function ColleaguesPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+// The account in a page's header, with colleagues over the page: the
+// start page and a board copy's page share it.
+function SiteAccount({ user }: { user: User | null | undefined }) {
+  const [colleagues, setColleagues] = useState(false);
+  useEffect(() => {
+    if (!colleagues) return;
+    const close = (event: KeyboardEvent) => event.key === "Escape" && setColleagues(false);
+    addEventListener("keydown", close);
+    return () => removeEventListener("keydown", close);
+  }, [colleagues]);
+  return (
+    <>
+      <Account user={user} onColleagues={() => setColleagues((open) => !open)} />
+      {colleagues && (
+        <div className="overlay" onClick={(event) => event.target === event.currentTarget && setColleagues(false)}>
+          <div role="dialog" aria-modal="true" aria-label="Colleagues"><ColleaguesPanel onClose={() => setColleagues(false)} /></div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // One row per room: the rooms you're in, as the server lists them (by
 // GitHub account when signed in, by this browser's guest secrets
 // otherwise; never anyone else's, docs/adr/0008), merged with every board
@@ -457,8 +483,10 @@ async function exportCopy(copy: LocalCopy) {
   }
 }
 
-function RoomsList({ list, copies, workspaces, peeking, onOpen, onChanged }: {
+function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChanged }: {
   list: RoomList | null;
+  // the room this browser's host just ended, which says so quietly
+  endedNow: string | null;
   copies: LocalCopy[] | null;
   workspaces: WorkspaceSummary[];
   peeking: string | null;
@@ -495,7 +523,9 @@ function RoomsList({ list, copies, workspaces, peeking, onOpen, onChanged }: {
               ? <button className="room-link" onClick={() => room ? goToRoom(room.id) : copy && onOpen(copy)}>{code ? <>Room <code>{code}</code></> : "A room"}</button>
               : <span className="room-link">A room you hosted</span>}
             <span className="room-state">
-              {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept" : "board not kept"}</> : <><i className="gone"></i>Not live</>}
+              {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept" : "board not kept"}</>
+                : endedNow && (copy?.roomId === endedNow || workspace?.room === endedNow) ? <><i className="gone"></i>Ended just now</>
+                : <><i className="gone"></i>Not live</>}
             </span>
             <span className="room-detail">
               {copy ? <small>{copyDetail(copy, Boolean(room))}</small> : workspace && !room && <small>no board copy</small>}
@@ -544,14 +574,15 @@ function RoomsList({ list, copies, workspaces, peeking, onOpen, onChanged }: {
 function PeekBoard({ doc }: { doc: Y.Doc }) {
   const store = useQuickdrawStore();
   const board = useRef<QuickdrawRef>(null);
-  useBoardSync(doc, store);
+  useBoardSync(doc, store, undefined, { oneWay: true });
+  useLookOnly(board, true, { guard: true });
   useEffect(() => {
     board.current?.editor?.fitContent({ margin: 32, maxZoom: 1 });
   }, [doc]);
   return (
     <section className="board-wrap">
-      <div className="board-actions"><span>This browser's copy: look, but not change.</span></div>
-      <Quickdraw ref={board} className="quickdraw-surface" store={store} grid="dots" theme="light" readonly autoFit themeToggle={false} watermark={false} />
+      <div className="board-actions"><span>{LOOK_HINT}</span></div>
+      <Quickdraw ref={board} className="quickdraw-surface" store={store} grid="dots" theme="light" hideUi autoFit themeToggle={false} watermark={false} />
     </section>
   );
 }
@@ -660,14 +691,21 @@ function ImportBoard({ imported, onChange }: { imported: ParsedBoard | null; onC
 function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; keep?: boolean }) {
   const user = useUser();
   const [keepBoard, setKeepBoard] = useState(true);
-  const ended = new URLSearchParams(location.search).get("ended")?.replace(/[^A-Z0-9]/gi, "").slice(0, 16);
+  // The host who just ended a room: no notice (they know), only its row
+  // saying so. Dropped from the URL so a reload doesn't say "just now".
+  const [endedNow] = useState(() => new URLSearchParams(location.search).get("ended")?.replace(/[^\w-]/g, "").slice(0, 64) || null);
+  useEffect(() => {
+    if (!endedNow) return;
+    const url = new URL(location.href);
+    url.searchParams.delete("ended");
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+  }, [endedNow]);
   const [mode, setMode] = useState<"join" | "host">(() => new URLSearchParams(location.search).get("setup") === "host" ? "host" : "join");
   const [code, setCode] = useState(sharedCode);
   const [name, setName] = useState(savedName);
   const [config, setConfig] = useState(savedHostConfig);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [colleagues, setColleagues] = useState(false);
   const [imported, setImported] = useState<ParsedBoard | null>(null);
   const list = useRoomList();
   const [copies, setCopies] = useState<LocalCopy[] | null>(null);
@@ -682,12 +720,6 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
   const [peek, setPeek] = useState<string | null>(null);
   const narrow = useNarrow();
   const peeked = narrow ? undefined : copies?.find((copy) => copy.database === peek);
-  useEffect(() => {
-    if (!colleagues) return;
-    const close = (event: KeyboardEvent) => event.key === "Escape" && setColleagues(false);
-    addEventListener("keydown", close);
-    return () => removeEventListener("keydown", close);
-  }, [colleagues]);
   const riffModels = useRiffModels();
   const useRiff = riffModels === true && config.models === "riff";
   // Signed in, your GitHub login is the default name.
@@ -711,7 +743,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
 
   return (
     <main className="landing home">
-      <header><strong className="brand">riff</strong><span>Collaborative design crits</span><Account user={user} onColleagues={() => setColleagues((open) => !open)} /></header>
+      <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
       {peeked ? <BoardPeek copy={peeked} room={list?.rooms.find((room) => room.id === peeked.roomId) ?? null} onClose={() => setPeek(null)} /> : (
       <section className="landing-copy">
         <span className="overline">A shared studio for small groups</span>
@@ -720,7 +752,6 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
       </section>
       )}
       <section className="entry-card">
-        {ended && <p className="ended-note" role="status">Room <code>{ended}</code> has ended.</p>}
         <Invites name={shownName} list={list} />
         <nav><button className={mode === "join" ? "active" : ""} onClick={() => setMode("join")}>Join</button><button className={mode === "host" ? "active" : ""} onClick={() => setMode("host")}>Host</button></nav>
         {mode === "join" ? (
@@ -769,15 +800,10 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
           </form>
         )}
       </section>
-      <RoomsList list={list} copies={copies} workspaces={workspaces} peeking={peeked?.database ?? null} onChanged={refreshCopies} onOpen={(copy) => {
+      <RoomsList list={list} copies={copies} workspaces={workspaces} peeking={peeked?.database ?? null} endedNow={endedNow} onChanged={refreshCopies} onOpen={(copy) => {
         if (narrow) location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`);
         else setPeek((current) => current === copy.database ? null : copy.database);
       }} />
-      {colleagues && (
-        <div className="overlay" onClick={(event) => event.target === event.currentTarget && setColleagues(false)}>
-          <div role="dialog" aria-modal="true" aria-label="Colleagues"><ColleaguesPanel onClose={() => setColleagues(false)} /></div>
-        </div>
-      )}
     </main>
   );
 }
@@ -843,16 +869,20 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   onSelection: (ids: string[]) => void;
   onStageSelection: () => void;
 }) {
+  const board = useRef<QuickdrawRef>(null);
+  // read-only still pans and zooms; nothing else reaches the board
+  useLookOnly(board, readOnly !== null);
   return (
     <section className="board-wrap">
       <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span>Draw, write, paste images, or move things around.</span><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button></>}</div>
       {notice && <p className="board-notice" role="alert">{notice}</p>}
       <Quickdraw
+        ref={board}
         className="quickdraw-surface"
         store={store}
         grid="dots"
         theme="light"
-        readonly={readOnly !== null}
+        hideUi={readOnly !== null}
         styles={{ dash: "solid" }}
         themeToggle={false}
         watermark={false}
@@ -1031,7 +1061,7 @@ function EndRoom({ access, code, keep }: { access: Access; code: string; keep: b
     try {
       await endRoom(access);
       // Leave at once: the host's page reconnecting would revive the room.
-      location.assign(`${location.pathname}?${new URLSearchParams({ ended: code })}`);
+      location.assign(`${location.pathname}?${new URLSearchParams({ ended: access.room.id })}`);
     } catch (failure) {
       setError(problem(failure));
       setBusy(false);
@@ -1144,13 +1174,20 @@ function RoomClosed({ reason, roomId }: { reason: string; roomId?: string }) {
   useEffect(() => {
     if (ended && roomId) findCopy(`room/${roomId}/shared`).then(setCopy, () => {});
   }, [ended, roomId]);
+  // A page of its own, with the start page's header: the participant
+  // didn't choose to leave, so it says why before anything else.
   return (
-    <main className="landing">
+    <main className="landing closed">
+      <header><strong className="brand">riff</strong><span>Collaborative design crits</span></header>
       <section className="entry-card">
         <h2>{ended ? "This room has ended" : reason === "removed" ? "The host removed you from this room" : "You're no longer in this room"}</h2>
+        {ended && copy?.code && <p className="closed-room">Room <code>{copy.code}</code>{copy.hostName ? `, hosted by ${copy.hostName}` : ""}</p>}
         <p>{reason === "board-pruned" ? "The server deleted this board to make space." : ended ? "The server doesn't keep this board." : reason === "removed" ? "You can't open it again unless they invite you back." : "The host removed you, or the room has ended."}</p>
-        {copy && <p>This browser kept its own copy. <button className="link" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Open it</button></p>}
-        <button className="primary" onClick={() => location.assign(location.pathname)}>Back to start</button>
+        {copy && <p>This browser kept its own copy of the board, which you can still look at and export.</p>}
+        <div className="closed-actions">
+          {copy && <button className="primary" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Open this browser's copy</button>}
+          <button className={copy ? "secondary" : "primary"} onClick={() => location.assign(location.pathname)}>Back to start</button>
+        </div>
       </section>
     </main>
   );
@@ -1363,23 +1400,46 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
 }
 
 // A board from this browser's copy alone: no server, nobody else, nothing
-// to change. Export works the same as in the room.
+// to change, but you can look around it. The start page's header (sign
+// in, colleagues) above the copy's own bar; the prompts open beside the
+// board, or in its place on a phone, never over it. Export works the same
+// as in the room.
 function CopyBoard({ copy, doc }: { copy: LocalCopy; doc: Y.Doc }) {
+  const user = useUser();
   const store = useQuickdrawStore();
-  useBoardSync(doc, store);
+  const board = useRef<QuickdrawRef>(null);
+  const [showPrompts, setShowPrompts] = useState(false);
+  useBoardSync(doc, store, undefined, { oneWay: true });
+  useLookOnly(board, true, { guard: true });
+  useEffect(() => {
+    board.current?.editor?.fitContent({ margin: 48, maxZoom: 1 });
+  }, [doc]);
   const prompts = snapshotPrompts(doc.getMap("prompts"));
   const name = copy.code ? `room ${copy.code}` : "a room";
+  const asOf = copy.lastOpened && new Date(copy.lastOpened).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
   return (
     <div className="app copy-view">
-      <header className="topbar">
+      <header className="site-bar">
         <button className="brand brand-button" onClick={() => location.assign(location.pathname)}>riff</button>
-        <div className="room-name"><span>Copy of {name}</span>{copy.lastOpened && <small>last opened {shortDate(copy.lastOpened)}</small>}</div>
-        <button className="share" onClick={() => downloadBoard(exportBoard({ code: copy.code ?? "board", doc }))}>Export</button>
+        <span>Collaborative design crits</span>
+        <SiteAccount user={user} />
       </header>
-      <p className="room-banner ended" role="status">This is the copy this browser kept of {name}. It isn't connected to anyone, and nothing here can be changed.</p>
-      <main className="workspace">
-        <BoardView store={store} selected={[]} readOnly="A copy: look, but not change." notice={null} onSelection={() => {}} onStageSelection={() => {}} />
-        <Staging prompts={prompts} canQueue={false} readOnly onAdd={() => {}} onQueue={() => {}} onDelete={() => {}} />
+      <div className="copy-bar">
+        <div>
+          <strong>Copy of {copy.code ? <>room <code>{copy.code}</code></> : "a room"}</strong>
+          <small>{asOf ? `As of ${asOf}. ` : ""}The copy this browser kept: not connected to anyone, and nothing here can be changed.</small>
+        </div>
+        <span className="copy-actions">
+          {prompts.length > 0 && <button className={`prompts-toggle${showPrompts ? " active" : ""}`} aria-pressed={showPrompts} onClick={() => setShowPrompts((open) => !open)}>Prompts <span>{prompts.length}</span></button>}
+          <button className="copy-export" onClick={() => downloadBoard(exportBoard({ code: copy.code ?? "board", doc }))}>Export</button>
+        </span>
+      </div>
+      <main className={`copy-board${showPrompts ? " with-prompts" : ""}`} aria-label={`Board of ${name}`}>
+        <section className="board-wrap">
+          <div className="board-actions"><span>{LOOK_HINT}</span></div>
+          <Quickdraw ref={board} className="quickdraw-surface" store={store} grid="dots" theme="light" hideUi autoFit themeToggle={false} watermark={false} />
+        </section>
+        {showPrompts && <Staging prompts={prompts} canQueue={false} readOnly onAdd={() => {}} onQueue={() => {}} onDelete={() => {}} />}
       </main>
     </div>
   );
