@@ -42,6 +42,17 @@ const SITE_DIR = "python";
 // whenever ls wasn't in the first PATH directory. Resolve the name in the
 // parent instead, and raise FileNotFoundError for a missing program as
 // CPython does elsewhere. Popen._execute_child's signature is CPython 3.12's.
+//
+// A Python server can't be reached: WASIX keeps a guest's listening socket
+// inside the runtime, and nothing connects to it there (measured 2026-11-08:
+// `python3 -m http.server` printed "Serving HTTP", then curl, the preview
+// and Python's own client all failed to connect). So listen() fails, saying
+// why and what works instead, rather than a server that looks up but is
+// never reachable.
+export const PYTHON_LISTEN_REFUSED =
+  "Riff: a server started from Python can't be reached here, not by curl and not by the room's preview. " +
+  "Serve with Node instead, e.g. `npx serve -l 8000` for static files or `node server.js`.";
+
 const SITECUSTOMIZE = `import os, sys
 os.chdir(os.getcwd())
 sys.executable = sys._base_executable = "${CONTROL}/${PACKAGE_PATH}"
@@ -72,6 +83,15 @@ def _riff_resolve_programs():
 
 _riff_resolve_programs()
 del _riff_resolve_programs
+
+def _riff_refuse_listen():
+    import errno, socket
+    def listen(self, *args):
+        raise OSError(errno.EOPNOTSUPP, ${JSON.stringify(PYTHON_LISTEN_REFUSED)})
+    socket.socket.listen = listen
+
+_riff_refuse_listen()
+del _riff_refuse_listen
 `;
 
 const LAUNCHER = `#!/bin/bash

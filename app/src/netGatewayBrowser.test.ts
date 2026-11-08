@@ -17,7 +17,7 @@ import {
   encodeSocketAddr,
   type DecodedRequest,
 } from "./netGatewayCodec.ts";
-import { attachNetGatewayBrowser } from "./netGatewayBrowser.ts";
+import { attachNetGatewayBrowser, type LocalServers } from "./netGatewayBrowser.ts";
 
 // --- guest-side frame builders (Uint8Array/DataView; no Buffer) ---
 
@@ -138,9 +138,9 @@ interface Guest {
   wait(predicate: (frame: Uint8Array) => boolean): Promise<Uint8Array>;
 }
 
-function makeGuest(t: test.TestContext, dispose: (fn: () => void) => void): { guest: Guest } {
+function makeGuest(t: test.TestContext, dispose: (fn: () => void) => void, local?: LocalServers): { guest: Guest } {
   const channel = new MessageChannel();
-  const handle = attachNetGatewayBrowser(channel.port1);
+  const handle = attachNetGatewayBrowser(channel.port1, undefined, local);
   dispose(() => {
     handle.dispose();
     channel.port2.close();
@@ -335,4 +335,63 @@ test("codec: decodeMessageRequest accepts well-formed Send and rejects truncatio
     assert.throws(() => decodeMessageRequest(valid.subarray(0, length)));
   }
   assert.throws(() => decodeMessageRequest(bytesOf([valid, 0])));
+});
+
+test("localhost: a loopback connect reaches the workspace's server, not the network, and is refused where nothing listens", async (t) => {
+  const disposals: Array<() => void> = [];
+  t.after(() => {
+    for (const dispose of disposals.splice(0).reverse()) dispose();
+  });
+  // A real origin on the same port: a request that went out through fetch
+  // would land here instead of in the workspace's server.
+  let originHits = 0;
+  const port = await listenHttp(t, (_req, res) => {
+    originHits += 1;
+    res.end("from the machine");
+  });
+  const seen: Array<{ port: number; method: string; path: string; headers: Record<string, string>; body: string | null }> = [];
+  const local: LocalServers = {
+    listening: (candidate) => candidate === port,
+    request: async (candidate, init) => {
+      seen.push({ port: candidate, method: init.method, path: init.path, headers: init.headers, body: init.body && new TextDecoder().decode(init.body) });
+      return { status: 201, headers: { "content-type": "text/plain", "set-cookie": ["a=1", "b=2"], "transfer-encoding": "chunked" }, body: new TextEncoder().encode("from the workspace") };
+    },
+  };
+  const { guest } = makeGuest(t, (fn) => disposals.push(fn), local);
+
+  guest.send(connectFrame(1, port + 1, ip4("127.0.0.1")));
+  const refused = await guest.wait(isReply(1));
+  assert.equal(readU32(refused, 12), 1); // ResponseType::Err
+  assert.equal(readU32(refused, 16), NETWORK_ERROR.ConnectionRefused);
+
+  guest.clear();
+  guest.send(connectFrame(2, port, ip4("127.0.0.1")));
+  await guest.wait(isSent(2));
+  guest.clear();
+  guest.send(sendFrame(2, `POST /api?x=1 HTTP/1.1\r\nHost: localhost:${port}\r\nConnection: keep-alive\r\nContent-Length: 5\r\n\r\nhello`));
+  await guest.wait(isClosed(2));
+  assert.deepEqual(seen.map(({ port: p, method, path, body }) => ({ port: p, method, path, body })), [{ port, method: "POST", path: "/api?x=1", body: "hello" }]);
+  assert.equal(seen[0].headers.host, `localhost:${port}`);
+  assert.equal(seen[0].headers.connection, undefined);
+  const text = receivedText(guest.frames);
+  assert.match(text, /^HTTP\/1\.1 201 /);
+  assert.match(text, /set-cookie: a=1\r\nset-cookie: b=2/);
+  assert.doesNotMatch(text, /transfer-encoding/i);
+  assert.match(text, /content-length: 18\r\n/);
+  assert.ok(text.endsWith("\r\n\r\nfrom the workspace"));
+
+  // 0.0.0.0 is this machine too; anything else still goes out through fetch.
+  guest.clear();
+  guest.send(connectFrame(3, port, ip4("0.0.0.0")));
+  await guest.wait(isSent(3));
+  guest.send(sendFrame(3, `GET / HTTP/1.1\r\nHost: 0.0.0.0:${port}\r\n\r\n`));
+  await guest.wait(isClosed(3));
+  assert.equal(seen.length, 2);
+  guest.clear();
+  guest.send(connectFrame(4, port, ip4("93.184.216.34")));
+  await guest.wait(isSent(4));
+  guest.send(sendFrame(4, `GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`));
+  await guest.wait(isClosed(4));
+  assert.equal(responseBody(receivedText(guest.frames)), "from the machine");
+  assert.equal(originHits, 1);
 });

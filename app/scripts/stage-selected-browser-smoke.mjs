@@ -41,6 +41,7 @@ writeFileSync(boardPath, JSON.stringify({
     "shape:arrow": shape("shape:arrow", "arrow", 250, 600, { dx: 100, dy: 0, bend: 0, color: "black", size: "m", dash: "solid" }, 3),
   } } },
 }));
+const FRESH = "Written just now";
 const AT = { note: [130, 210], geo: [130, 440], arrow: [300, 600], empty: [330, 300] };
 
 const browser = await puppeteer.launch({
@@ -128,6 +129,22 @@ try {
     await click(tab, "arrow");
     await expectButton(tab, say, false, /no text in the selection/);
     await barFits(tab, say, size.width);
+    // A new sticky, written and left with Esc: still selected, and its words
+    // arrive after the selection did, so the button has to follow the board.
+    await click(tab, "empty");
+    // On a phone the note tool is in the dock's "more" flyout.
+    const shown = (name) => tab.evaluate((name) => [...document.querySelectorAll(`button[data-name=${name}]`)].find((b) => b.offsetParent) ? true : false, name);
+    if (!(await shown("note"))) await tab.click(".qd-dock button[data-name=more]");
+    await tab.evaluate(() => [...document.querySelectorAll("button[data-name=note]")].find((b) => b.offsetParent).click());
+    await click(tab, "empty");
+    await tab.waitForSelector(".qd-text-edit");
+    await expectButton(tab, say, false, /no text in the selection/);
+    await tab.keyboard.type(FRESH);
+    await tab.keyboard.press("Escape");
+    await tab.waitForFunction(() => !document.querySelector(".qd-text-edit"), { timeout: 5000, polling: 100 });
+    await expectButton(tab, say, true);
+    await stageAndCheck(tab, say, FRESH);
+    await click(tab, "arrow");
     // A box with an arrow off it: one of them has words, so those go.
     await click(tab, "geo", true);
     await tab.waitForFunction(() => document.querySelector(".send-board-button")?.getAttribute("aria-label") === "Send 2 selected to Claude", { timeout: 5000, polling: 100 });
