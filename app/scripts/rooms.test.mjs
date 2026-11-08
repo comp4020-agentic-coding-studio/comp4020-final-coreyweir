@@ -156,12 +156,18 @@ function connect(app, roomId, part, { secret, cookie } = {}) {
     WebSocketPolyfill: socketClass(app.origin, cookie),
   });
   let refused = () => {};
+  let shut = () => {};
+  // the reason the server gave if it later turns this session away
+  const shutOut = new Promise((resolve) => (shut = resolve));
   const provider = new HocuspocusProvider({
     websocketProvider: socket,
     name: `room/${roomId}/${part}`,
     document: doc,
     token: secret ?? "",
-    onAuthenticationFailed: ({ reason }) => refused(reason),
+    onAuthenticationFailed: ({ reason }) => {
+      shut(reason);
+      refused(reason);
+    },
   });
   provider.attach();
   return new Promise((resolve, reject) => {
@@ -177,6 +183,7 @@ function connect(app, roomId, part, { secret, cookie } = {}) {
       clearTimeout(timer);
       resolve({
         doc,
+        shutOut,
         leave() {
           provider.destroy();
           socket.destroy();
@@ -598,6 +605,111 @@ test("a host's list offers the last 10 rooms that ended, within 30 days", async 
     } finally {
       adaWatch.close();
     }
+  } finally {
+    await app.stop();
+  }
+});
+
+// Leaving (ADR 0008, "Leaving"): a member drops their own place, like the
+// host removing them, but the code or an invite brings them back.
+test("a member leaves by themselves, disappears from every list, and can come back by code or invite", async () => {
+  const app = await start();
+  try {
+    const ada = app.signIn("ada");
+    const bo = app.signIn("bo");
+    const created = await call(app, "/api/rooms", { body: { name: "Ada" }, cookie: ada });
+    const { id: roomId, code } = created.body.room;
+    assert.equal((await call(app, "/api/rooms/join", { body: { code, name: "Bo" }, cookie: bo })).status, 201);
+    const gil = await call(app, "/api/rooms/join", { body: { code, name: "Gil" } });
+    const boElsewhere = watch(app, { cookie: app.signIn("bo") });
+    await boElsewhere.until((l) => l.rooms.length === 1);
+    const open = await connect(app, roomId, "shared", { cookie: bo });
+
+    // the host can't leave; a stranger isn't a member
+    assert.equal((await call(app, `/api/rooms/${roomId}/leave`, { body: {}, cookie: ada })).status, 400);
+    assert.equal((await call(app, `/api/rooms/${roomId}/leave`, { body: {} })).status, 401);
+
+    assert.equal((await call(app, `/api/rooms/${roomId}/leave`, { body: {}, cookie: bo })).status, 204);
+    assert.equal(await open.shutOut, "left", "told in-band why");
+    await boElsewhere.until((l) => l.rooms.length === 0);
+    assert.equal((await get(app, `/api/rooms/${roomId}/me`, { cookie: bo })).status, 401);
+    assert.equal((await call(app, `/api/rooms/${roomId}/leave`, { body: {}, cookie: bo })).status, 401, "only once");
+    // others are untouched
+    assert.equal((await get(app, `/api/rooms/${roomId}/me`, { secret: gil.body.member.secret })).status, 200);
+
+    // back by the code, under the same name, as the same member
+    const back = await call(app, "/api/rooms/join", { body: { code, name: "Bo" }, cookie: bo });
+    assert.equal(back.status, 201);
+    await boElsewhere.until((l) => l.rooms.length === 1);
+
+    // a guest leaving frees the name for whoever joins next
+    assert.equal((await call(app, `/api/rooms/${roomId}/leave`, { body: {}, secret: gil.body.member.secret })).status, 204);
+    assert.equal((await get(app, `/api/rooms/${roomId}/me`, { secret: gil.body.member.secret })).status, 401);
+    assert.equal((await call(app, "/api/rooms/join", { body: { code, name: "Gil" } })).status, 201);
+
+    // left again, then invited back
+    await call(app, `/api/rooms/${roomId}/leave`, { body: {}, cookie: bo });
+    await call(app, `/api/rooms/${roomId}/invites`, { body: { login: "bo" }, cookie: ada });
+    assert.equal((await call(app, `/api/invites/${roomId}/accept`, { body: {}, cookie: bo })).status, 200);
+    boElsewhere.close();
+    open.leave();
+
+    const events = app.events();
+    assert.equal(events.filter(by("member.leave")).length, 3);
+    assert.deepEqual(events.filter((row) => row.action === "denied" && row.detail.what === "room.leave").map((row) => row.detail.reason), ["host", "no_credential", "not_a_member"]);
+  } finally {
+    await app.stop();
+  }
+});
+
+// Deleting (ADR 0003, "Leaving and deleting"): the host takes the room off
+// the server; it's refused from then on, to everyone, and can't come back.
+test("the host deletes a room: board gone from disk, everyone let go, refused everywhere, never revived", async () => {
+  const app = await start();
+  try {
+    const ada = app.signIn("ada");
+    const bo = app.signIn("bo");
+    const created = await call(app, "/api/rooms", { body: { name: "Ada" }, cookie: ada });
+    const { id: roomId, code } = created.body.room;
+    await call(app, "/api/rooms/join", { body: { code, name: "Bo" }, cookie: bo });
+    const other = await call(app, "/api/rooms", { body: { name: "Ada" }, cookie: ada });
+    const hostOpen = await connect(app, roomId, "shared", { cookie: ada });
+    const boOpen = await connect(app, roomId, "shared", { cookie: bo });
+    boOpen.doc.getText("board").insert(0, "kept until deleted");
+    await sleep(300);
+    await call(app, `/api/rooms/${roomId}/invites`, { body: { login: "cy" }, cookie: ada });
+    const rows = () => app.db.prepare("SELECT COUNT(*) AS n FROM doc_updates WHERE doc LIKE ?").get(`room/${roomId}/%`).n;
+    assert.ok(rows() > 0);
+
+    assert.equal((await call(app, `/api/rooms/${roomId}`, { method: "DELETE", cookie: bo })).status, 403, "a member can't");
+    assert.equal((await call(app, `/api/rooms/${roomId}`, { method: "DELETE" })).status, 401);
+    assert.equal((await call(app, `/api/rooms/${roomId}`, { method: "DELETE", cookie: ada })).status, 204);
+    assert.equal(await boOpen.shutOut, "room-deleted");
+    assert.equal(await hostOpen.shutOut, "room-deleted", "the host's own sockets too");
+    assert.equal(rows(), 0, "the board is gone from disk");
+
+    for (const cookie of [ada, bo]) {
+      assert.equal((await get(app, `/api/rooms/${roomId}/me`, { cookie })).status, 401);
+      await assert.rejects(connect(app, roomId, "shared", { cookie }), /refused/);
+    }
+    assert.equal((await call(app, `/api/rooms/${roomId}/reopen`, { body: {}, cookie: ada })).status, 401, "can't be revived");
+    assert.equal((await get(app, `/api/rooms/by-code/${code}`)).status, 404);
+    assert.equal((await call(app, "/api/rooms/join", { body: { code, name: "Late" } })).status, 404);
+    const adaWatch = watch(app, { cookie: ada });
+    const listed = await adaWatch.until(() => true);
+    adaWatch.close();
+    assert.deepEqual(listed.rooms.map((room) => room.id), [other.body.room.id], "only the other room is left");
+    assert.equal(app.db.prepare("SELECT COUNT(*) AS n FROM invites WHERE room_id = ?").get(roomId).n, 0);
+    assert.ok(app.db.prepare("SELECT deleted_at FROM rooms WHERE id = ?").get(roomId).deleted_at, "the row stays, marked");
+    // the other room is untouched
+    assert.equal((await get(app, `/api/rooms/${other.body.room.id}/me`, { cookie: ada })).status, 200);
+
+    const events = app.events();
+    assert.deepEqual(events.filter(by("room.delete")).map((row) => row.detail), [{ members: 1 }]);
+    assert.deepEqual(events.filter(by("room.end")).map((row) => row.detail.reason), ["deleted"]);
+    assert.deepEqual(events.filter((row) => row.action === "denied" && row.detail.what === "room.delete").map((row) => row.detail.reason), ["host_only", "no_credential"]);
+    hostOpen.leave();
+    boOpen.leave();
   } finally {
     await app.stop();
   }

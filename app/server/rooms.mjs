@@ -38,7 +38,10 @@ export function createRooms({
   limitBytes = 4 * 1024 * 1024,
   now = () => Date.now(),
   onRoomChanged = () => {},
+  // (roomId, memberId, reason): "removed" by the host, or "left"
   onRemoved = () => {},
+  // (roomId, memberIds): the host deleted the room; everyone is let go
+  onDeleted = () => {},
   // the room's state or invites changed: "your rooms" lists need resending
   onListsChanged = () => {},
   // the room ended or came back: open connections change what they may do
@@ -92,7 +95,7 @@ export function createRooms({
   // (ADR 0008); the host resolving revives it, unless `revive` is false.
   function resolve(roomId, { token, cookie }, { revive = true } = {}) {
     let room = typeof roomId === "string" ? s.roomById.get(roomId) : undefined;
-    if (!room) return null;
+    if (!room || room.deleted_at !== null) return null;
     let member;
     if (token) {
       member = s.memberBySecret.get(hashToken(token));
@@ -196,7 +199,7 @@ export function createRooms({
   function resolvePreview(roomId, key) {
     const match = PREVIEW_KEY.exec(typeof key === "string" ? key : "");
     const room = typeof roomId === "string" ? s.roomById.get(roomId) : undefined;
-    if (!match || !room || room.state === "ended") return null;
+    if (!match || !room || room.state === "ended" || room.deleted_at !== null) return null;
     const expected = Buffer.from(previewMac(room.id, Number(match[1])));
     const given = Buffer.from(match[2]);
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
@@ -227,7 +230,7 @@ export function createRooms({
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
     const room = s.roomById.get(match[1]);
     const member = s.memberById.get(Number(match[2]));
-    if (!room || !member || member.room_id !== room.id || member.removed_at !== null) return null;
+    if (!room || !member || member.room_id !== room.id || member.removed_at !== null || room.deleted_at !== null) return null;
     return { ...who(room, member), state: room.state };
   }
 
@@ -312,11 +315,11 @@ export function createRooms({
 
     if (current) {
       const existing = s.memberByUser.get(room.id, current.user.id);
-      if (existing && existing.removed_at !== null) {
+      if (existing && existing.removed_at !== null && existing.left_at === null) {
         audit.record(who(room, existing), "denied", { what: "room.join", reason: "removed" });
         throw new HttpError(403, "removed");
       }
-      if (existing) return sendJson(response, 200, { room: roomJson(room), member: memberJson(existing) });
+      if (existing && existing.removed_at === null) return sendJson(response, 200, { room: roomJson(room), member: memberJson(existing) });
     }
     if (room.locked) {
       audit.record({ roomId: room.id, code: room.code }, "denied", { what: "room.join", reason: "locked" });
@@ -324,6 +327,16 @@ export function createRooms({
     }
     const chosen = name(body, current?.user.login);
     if (s.memberByNameKey.get(room.id, chosen.key)) throw new HttpError(409, "name_taken");
+    // Someone who left, back by the code: their own row again, so a GitHub
+    // user stays one member of the room.
+    const left = current && s.memberByUser.get(room.id, current.user.id);
+    if (left) {
+      s.rejoinMember.run(chosen.name, chosen.key, left.id);
+      const member = s.memberById.get(left.id);
+      audit.record(who(room, member), "room.join", { again: true });
+      onRoomChanged(room.id);
+      return sendJson(response, 201, { room: roomJson(room), member: memberJson(member) });
+    }
     let added;
     try {
       added = store.addMember({ roomId: room.id, name: chosen, userId: current?.user.id });
@@ -377,8 +390,64 @@ export function createRooms({
     if (target.id === actor.memberId) throw new HttpError(400, "cannot_remove_host");
     s.removeMember.run(Date.now(), target.id);
     audit.record(actor, "member.remove", { target: target.id, target_name: target.name });
-    onRemoved(roomId, target.id);
+    onRemoved(roomId, target.id, "removed");
     onRoomChanged(roomId);
+    response.writeHead(204, { "cache-control": "no-store" });
+    response.end();
+  }
+
+  // A member leaving by themselves (ADR 0008, "Leaving"): like the host
+  // removing them, but the code or an invite brings them back, and their
+  // name is free again. The host can't leave their own room; they end it
+  // or delete it.
+  function leave(request, response, roomId) {
+    const actor = resolve(roomId, { token: bearer(request), cookie: request.headers.cookie }, { revive: false });
+    if (!actor) {
+      audit.record(null, "denied", { what: "room.leave", reason: hasCredential(request) ? "not_a_member" : "no_credential" });
+      throw new HttpError(401, "not_a_member");
+    }
+    if (actor.role === "host") {
+      audit.record(actor, "denied", { what: "room.leave", reason: "host" });
+      throw new HttpError(400, "host_cannot_leave");
+    }
+    s.leaveMember.run(now(), actor.memberId);
+    audit.record(actor, "member.leave");
+    onRemoved(roomId, actor.memberId, "left");
+    onRoomChanged(roomId);
+    onListsChanged(roomId);
+    response.writeHead(204, { "cache-control": "no-store" });
+    response.end();
+  }
+
+  // The host deleting the room (ADR 0003, "Leaving and deleting"): a live
+  // room ends first, as End room would; then its board is deleted from the
+  // server whether or not it was kept, every member's place goes, and the
+  // room is refused from then on, its host included, so it can't be
+  // revived. The row stays (marked deleted_at) so the log can still name
+  // it. Members keep whatever copy their own browsers hold.
+  function deleteRoom(request, response, roomId) {
+    const actor = resolve(roomId, { token: bearer(request), cookie: request.headers.cookie }, { revive: false });
+    if (!actor) {
+      audit.record(null, "denied", { what: "room.delete", reason: hasCredential(request) ? "not_a_member" : "no_credential" });
+      throw new HttpError(401, "not_a_member");
+    }
+    if (actor.role !== "host") {
+      audit.record(actor, "denied", { what: "room.delete", reason: "host_only" });
+      throw new HttpError(403, "host_only");
+    }
+    const memberIds = s.members.all(roomId).filter((row) => row.removed_at === null).map((row) => row.id);
+    store.transaction(() => {
+      s.deleteRoomInvites.run(roomId);
+      s.removeAllMembers.run(now(), roomId);
+      s.markDeleted.run(now(), roomId);
+    });
+    // everyone told "room-deleted" and let go, the board's rows deleted;
+    // then ended like End room, if it hadn't already
+    onDeleted(roomId, memberIds);
+    endRoom(roomId, "deleted", actor);
+    audit.record(actor, "room.delete", { members: memberIds.length - 1 });
+    onRoomChanged(roomId);
+    onListsChanged(roomId);
     response.writeHead(204, { "cache-control": "no-store" });
     response.end();
   }
@@ -486,7 +555,11 @@ export function createRooms({
     const body = await readJson(request);
     let member = s.memberByUser.get(roomId, user.id);
     let status = 200;
-    if (member && member.removed_at !== null) s.restoreMember.run(member.id);
+    if (member && member.removed_at !== null && member.left_at !== null) {
+      const chosen = name(body, account.login);
+      if (s.memberByNameKey.get(roomId, chosen.key)) throw new HttpError(409, "name_taken");
+      s.rejoinMember.run(chosen.name, chosen.key, member.id);
+    } else if (member && member.removed_at !== null) s.restoreMember.run(member.id);
     else if (!member) {
       const chosen = name(body, account.login);
       if (s.memberByNameKey.get(roomId, chosen.key)) throw new HttpError(409, "name_taken");
@@ -615,6 +688,8 @@ export function createRooms({
     else if (request.method === "DELETE" && (m = /^\/api\/rooms\/([\w-]+)\/members\/(\d+)$/.exec(path))) remove(request, response, m[1], Number(m[2]));
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/end$/.exec(path))) end(request, response, m[1]);
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/reopen$/.exec(path))) reopen(request, response, m[1]);
+    else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/leave$/.exec(path))) leave(request, response, m[1]);
+    else if (request.method === "DELETE" && (m = /^\/api\/rooms\/([\w-]+)$/.exec(path))) deleteRoom(request, response, m[1]);
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/keep$/.exec(path))) await setKeep(request, response, m[1]);
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/invites$/.exec(path))) await invite(request, response, m[1]);
     else if (request.method === "DELETE" && (m = /^\/api\/rooms\/([\w-]+)\/invites\/(\d+)$/.exec(path))) cancelInvite(request, response, m[1], Number(m[2]));
