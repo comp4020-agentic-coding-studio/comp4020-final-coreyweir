@@ -77,7 +77,7 @@ async function startBash(tab) {
   });
   assert.ok(clicked, "Start Bash");
   await tab.waitForFunction(
-    () => document.querySelector(".terminal-heading span")?.textContent === "WASIX Bash ready",
+    () => document.querySelector(".terminal-heading span")?.textContent === "Bash ready",
     { timeout: 240_000, polling: 200 },
   );
   await atPrompt(tab);

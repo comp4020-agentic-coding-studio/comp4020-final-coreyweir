@@ -45,7 +45,7 @@ try {
   });
   try {
     await page.waitForFunction(
-      () => (document.querySelector(".terminal-heading")?.textContent ?? "") + " " + (document.querySelector(".terminal-heading")?.dataset.report ?? "")?.includes("WASIX Bash ready"),
+      () => (document.querySelector(".terminal-heading")?.textContent ?? "") + " " + (document.querySelector(".terminal-heading")?.dataset.report ?? "")?.includes("Bash ready"),
       { timeout: 120_000 },
     );
   } catch (error) {

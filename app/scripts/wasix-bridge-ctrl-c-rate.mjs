@@ -89,7 +89,7 @@ async function bootPage() {
     button.click();
   });
   await page.waitForFunction(
-    () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
+    () => document.querySelector(".terminal-heading")?.textContent?.includes("Bash ready"),
     { timeout: 180_000 },
   );
   await page.locator(".terminal-target textarea").click();
