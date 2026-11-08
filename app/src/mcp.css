@@ -1,0 +1,15 @@
+/* The host's MCP servers dialog (McpSettings.tsx), in the export dialog's
+   frame (.ws-export). */
+.mcp-settings{width:min(500px,100%);font-size:13px}
+.mcp-settings h2{font-size:16px}
+.mcp-settings .ws-export-option small,.mcp-settings .ws-export-quiet{font-size:12px}
+.mcp-settings .ws-export-actions button{font-size:13px}
+.mcp-settings fieldset{margin:0;padding:12px;display:grid;gap:10px;border:1px solid #e3e3de;border-radius:5px}
+.mcp-github-options{display:grid;gap:10px;padding-left:22px}
+.mcp-mode{display:grid;gap:6px}
+.mcp-mode label{display:grid;grid-template-columns:auto 1fr;column-gap:8px;align-items:start}
+.mcp-mode input,.mcp-toolsets input{margin:2px 0 0;width:auto;height:auto}
+.mcp-mode small{grid-column:2;color:#777;font-size:12px}
+.mcp-toolsets{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4px 12px;font-size:12px}
+.mcp-toolsets label{display:flex;gap:6px;align-items:flex-start}
+.mcp-done{margin:0;padding:8px 10px;border-left:2px solid #4d9c55;background:#eef6ef;color:#2f5f35}

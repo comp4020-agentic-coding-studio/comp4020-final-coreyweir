@@ -12,6 +12,9 @@ import { ACTUAL_FONT_SIZE, fitMirror, type MirrorMode } from "./mirrorFit";
 import { TERMINAL_THEME } from "./terminalTheme";
 import { takeAutoBoot } from "./autoBoot";
 import "./terminal-stream.css";
+import { McpSettingsButton } from "./McpSettings";
+import type { ClaudeState } from "./queueRelease";
+import { loadMcp } from "./mcp";
 
 export type TerminalPaneHandle = {
   sendPrompt: (prompt: string) => boolean;
@@ -138,9 +141,11 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   onPodReady?: (ready: boolean) => void;
   /** The room has ended: nothing will appear, so don't say "waiting". */
   ended?: boolean;
+  /** What Claude is doing, for the host's MCP dialog (applying restarts it). */
+  claudeState?: ClaudeState;
   /** Host: what booting is doing, or null when it isn't, for the other tabs. */
   onBootStatus?: (status: string | null) => void;
-}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent, onPodReady, ended = false, onBootStatus }, ref) {
+}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent, onPodReady, ended = false, onBootStatus , claudeState }, ref) {
   const targetRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ClaudePodController | null>(null);
   const previewChangeRef = useRef(onPreviewUrlChange);
@@ -291,7 +296,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       if (!controller) {
         const { ClaudePodController } = await import("./claudePod");
         controller = new ClaudePodController(
-          { ...config, workspaceRoom: roomId },
+          { ...config, workspaceRoom: roomId, mcp: loadMcp(roomId) },
           // Bridge and bash diagnostics ("[bridge] pid=2 node -e ...") are
           // for debugging, not the room: they go to the console and a data
           // attribute, and the header keeps saying what state it's in.
@@ -354,7 +359,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
     <article className="terminal-pane">
       <header className="section-title terminal-heading" data-report={report ?? undefined}>
         <div><h2>Workspace</h2><span className={facilitator && (status === "Claude running" || status === "WASIX Bash ready") || !facilitator && participantLive ? "live-dot" : "idle-dot"}>{facilitator ? status : participantStatus}</span></div>
-        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : controllerRef.current ? "Start Claude" : "Boot Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} ready={attached} /></div>}
+        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : controllerRef.current ? "Start Claude" : "Boot Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} ready={attached} /><McpSettingsButton roomId={roomId} getController={() => controllerRef.current} hasGithub={Boolean(config?.githubToken)} claudeState={claudeState} /></div>}
         {!facilitator && <div className="terminal-controls"><button className="mirror-mode" aria-pressed={mirrorMode === "actual"} title={mirrorMode === "fit" ? "Show the host's terminal at its own text size, and scroll" : "Shrink or grow the host's terminal to fit this box"} onClick={() => {
           const next = mirrorMode === "fit" ? "actual" : "fit";
           setMirrorMode(next);
