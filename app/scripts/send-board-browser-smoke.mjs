@@ -112,6 +112,8 @@ const view = (tab, name) => tab.evaluate((name) => [...document.querySelectorAll
 const sendButton = (tab) => tab.$eval(".send-board-button", (b) => ({ text: b.textContent, disabled: b.disabled, title: b.title, rect: b.getBoundingClientRect().toJSON() }));
 
 async function host(tab, model) {
+  // The smoke boots Bash or Claude itself and checks the button before boot
+  await tab.evaluateOnNewDocument(() => sessionStorage.removeItem("riff-auto-boot"));
   await tab.goto(baseUrl, { waitUntil: "networkidle0" });
   await tab.click(".entry-card > nav button:nth-child(2)");
   await tab.waitForSelector(".model-choice", { timeout: 10_000 });
