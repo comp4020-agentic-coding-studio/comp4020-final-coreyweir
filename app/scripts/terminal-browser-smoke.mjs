@@ -128,6 +128,20 @@ try {
   await participant.waitForFunction(() => [...document.querySelectorAll(".participants span")].some((element) => element.getAttribute("title") === "Browser Participant"));
   // A participant has none of the host's terminal controls, only the mirror's size.
   assert.equal((await participant.$$(".terminal-controls button:not(.mirror-mode)")).length, 0);
+  // On a phone the views share one scrolling page. Scrolled down to the
+  // staging list, then Board, then Room: the terminal is in sight again,
+  // not scrolled away above.
+  await participant.evaluate(() => {
+    const workspace = document.querySelector(".workspace");
+    workspace.scrollTo(0, workspace.scrollHeight);
+    scrollTo(0, document.body.scrollHeight);
+  });
+  for (const label of ["Board", "Room"]) {
+    await participant.evaluate((next) => [...document.querySelectorAll(".topbar nav button")].find((element) => element.textContent === next)?.click(), label);
+  }
+  await participant.waitForSelector(".readonly-terminal");
+  const terminalTop = await participant.$eval(".terminal-pane", (element) => element.getBoundingClientRect().top);
+  assert.ok(terminalTop >= 0 && terminalTop < 120, `the Room tab opens with the terminal in sight (top at ${terminalTop}px)`);
   await participantContext.close();
   assert.deepEqual(pageErrors, []);
   console.log("Tab layouts, one-click Claude rendering, live participant data, and a prompt from staging to the queue passed.");

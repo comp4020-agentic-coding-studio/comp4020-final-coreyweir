@@ -1132,6 +1132,14 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     const requested = new URLSearchParams(location.search).get("view");
     return requested === "room" || requested === "preview" ? requested : "board";
   });
+  // On a phone the views share one scrolling page: a tab opens at its top,
+  // not wherever the last one was scrolled to (where the terminal can be out
+  // of sight above).
+  const workspaceRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    workspaceRef.current?.scrollTo(0, 0);
+    scrollTo(0, 0);
+  }, [view]);
   const [selected, setSelected] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
   const [people, setPeople] = useState(false);
@@ -1218,7 +1226,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       </header>
 
       {room.full ? <FullBanner limitBytes={room.limitBytes} onExport={exportRoom} /> : <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} onExport={exportRoom} />}
-      <main className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
+      <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
         {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} />}
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
