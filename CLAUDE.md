@@ -163,9 +163,14 @@ same commit. Each README quality turns into what it means for a change:
   deliberately without the `workflow` scope). When a push is refused
   because it changes `.github/workflows/`, push the same commits through
   the `ssh` remote. Don't suggest changing the token's scopes.
-- No local Docker. Build and deploy with `flyctl deploy --remote-only
-  --ha=false -a comp4020-final-coreyweir`, run through `mise exec` from the
-  repo root (the fly token lives in `mise.local.toml`).
+- Deploy only with `flyctl deploy --remote-only --ha=false -a
+  comp4020-final-coreyweir`, run through `mise exec` from the repo root
+  (the fly token lives in `mise.local.toml`). Local Docker works and is
+  for reproducing CI, never for deploying: build the image and run it as
+  `.github/workflows/checks.yml` does (`docker build -t riff-ci .`, then
+  `docker run` with its env on a spare port, then `pnpm check` with
+  `APP_URL` on that port). It's the only local setup with nginx in front,
+  so a fault that passes on dev and fly but fails in CI shows up there.
 - Don't assume the host is on a desktop. Hosting works on a phone (tested on
   a Pixel 6), so both roles have to work at 390×844.
 - **`RIFF_ORIGIN` is required.** The server checks `Origin` on every POST and
