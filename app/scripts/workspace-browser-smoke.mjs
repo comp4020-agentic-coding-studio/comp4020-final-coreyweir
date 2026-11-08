@@ -19,6 +19,9 @@
 // Also measured: saving and restoring FILES small files (default 10000,
 // about the size of a small node_modules).
 //
+// It imports the controller from /src, so it runs on dev only; the live
+// check is workspace-ui-browser-smoke.mjs, through the real UI.
+//
 // Can't tell apart: a save that only reached OPFS's in-memory cache from
 // one on disk (a reload doesn't clear it, a browser crash might); a real
 // browser crash from a reload.
