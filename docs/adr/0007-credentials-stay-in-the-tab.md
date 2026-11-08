@@ -78,7 +78,9 @@ Option 5.
   worker's cache. But the host's preview frame is a same-origin window that
   isn't sandboxed (`App.tsx`), and code there could read the page's stored
   host config. That was already an open risk (PLAN, "Still open"); this
-  decision doesn't change it.
+  decision doesn't change it. (8 Nov: ADR 0011 closes it. The preview is
+  on its room's own origin, and Riff's worker refuses to serve a pod page
+  as a document on Riff's.)
 - **One more moving part on every request.** Requests without a placeholder
   fall through to Nodepod's handler untouched. Ours costs a header scan.
 - **A tab still controlled by Nodepod's old worker moves over** when the

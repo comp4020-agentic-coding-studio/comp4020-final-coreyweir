@@ -146,7 +146,9 @@ app is pending; pulling from org repos already works.
   it the token directly. The host's preview frame is such code: Claude
   writes it, and it isn't sandboxed (`App.tsx:214`). That risk is accepted
   for now; it's in PLAN.md's open questions. The token no longer reaches
-  the guest's environment (ADR 0007, 2026-10-18).
+  the guest's environment (ADR 0007, 2026-10-18). (8 Nov: closed by ADR
+  0011. Every preview now runs on its room's own origin, so it has
+  neither Riff's storage nor its cookie, and the API refuses its Origin.)
 - **Old rooms aren't migrated.** Links to `riff-<code>` documents get a
   "this room predates sign-in" page.
 - **Two flows until the web flow covers pushing.** Then the device flow and
