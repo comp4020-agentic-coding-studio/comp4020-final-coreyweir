@@ -358,6 +358,15 @@ auto-release at the latest.
       (`POST /api/rooms/:id/reopen`); see ADR 0003's "Reopening". Checked by
       `spec/rooms.test.ts`, `npm run test:rooms`, `npm run
       test:reopen-browser` (dev, both sizes). Needs live.
+    - ~~Leaving a room, and a host deleting one from the server~~ (Corey's
+      decisions, 8 Nov; `f890f56` server, `c055309` client): a row's
+      Delete only cleared this browser, so a GitHub member's room came
+      back everywhere. Leave room (People panel, row) frees the name and
+      the code or an invite brings them back; the host's Delete can also
+      delete the room from the server, ending it for everyone for good.
+      See ADR 0003's "Leaving and deleting". Checked by
+      `spec/rooms.test.ts`, `spec/models.test.ts`, `npm run test:rooms`,
+      `npm run test:leave-delete-browser` (dev, both sizes). Needs live.
     - Left: the 5-minute grace on a phone host (Still open).
   - ~~pruning (oldest opened first, past a volume threshold) and a per-room
     size cap~~. Decided 18 Oct (ADR 0003's amendment): the proposed 16 MB

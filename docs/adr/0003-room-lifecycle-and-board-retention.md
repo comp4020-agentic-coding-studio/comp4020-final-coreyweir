@@ -299,6 +299,56 @@ copy, reading it from the server. The smoke can't tell Reopen's request
 from the page opening the room, which revives it too; `test:rooms` and
 the spec cover the request.
 
+### Leaving and deleting (2026-11-08)
+
+A row's Delete only ever cleared this browser. A GitHub member's room came
+back in "Your rooms" on every page, because the server still listed them;
+and a host had no way to take a room off the server short of ending it
+unkept and waiting for nothing. Corey decided (8 Nov):
+
+- **A member can leave.** Leave room, in the People panel and on their
+  room's row, asks first. It works like the host removing them (told
+  in-band, `left`, then let go; gone from their list on every browser),
+  except that their name is freed and the code or a new invite brings
+  them back as the same member (`room.join again=true`). This browser's
+  copy stays; a guest's room secret is forgotten. The host can't leave
+  (400 `host_cannot_leave`); they end or delete. `POST
+  /api/rooms/:id/leave`, logged `member.leave`.
+- **The host can delete a room from the server**, live or ended. The
+  row's Delete gains "Also delete the room from the server", which says
+  it ends the room for everyone and is gone for good, and that members
+  keep their own copies; a host row with no copy here offers the server
+  delete alone. `DELETE /api/rooms/:id`, host only: every socket (the
+  host's too) told `room-deleted` in-band and let go, the board's rows
+  deleted whether kept or not, invites and every member's place dropped,
+  then ended as End room ends it. Logged `room.delete members=N`.
+- **No new kind of room state.** The room's row stays, for the log,
+  marked `deleted_at`; reviving, Reopen, pruning, previews, model keys
+  and every list refuse it. A member's `left_at` sits beside
+  `removed_at`, so a removal and a leave read differently in the store.
+
+What it costs: a deleted room can't be undone, and members lose it from
+their lists without being asked (their copies, which the server never
+had, are untouched). Leaving frees a name that someone else may take
+before the leaver comes back.
+
+Checked: `spec/rooms.test.ts` ("leaving a room", "deleting a room", with
+the terminal relay told `room-deleted`) and `spec/models.test.ts` (a
+deleted room's model key refused), guests; red with the delete's host
+check removed and with leaving not freeing the name. `npm run test:rooms`
+(GitHub members leaving and coming back by code and by invite, the
+board's rows gone from disk, the log). `npm run test:leave-delete-browser`
+on dev at 1920x1080 and 390x844: a guest member leaves from the People
+panel (gone from the host's people, their copy's row left), comes back
+by the code under the same name, leaves again from the row (secret
+forgotten); then the host deletes from the row, the member's open page
+says the host deleted the room, their copy stays, the host's row goes,
+and the code leads nowhere. Not checked in a browser: a leaver's other
+tab saying "You left this room" (the server side of it, `left` in-band,
+is in `test:rooms`). Not told apart: the `deleted_at` check where a member is resolved
+is belt and braces, since deleting already removed every member, so no
+test goes red without it.
+
 ## Amendment (2026-10-18): pruning and the size cap
 
 The Decision above left the numbers open. We proposed a 16 MB cap per room
