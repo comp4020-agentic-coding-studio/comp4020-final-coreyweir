@@ -18,3 +18,56 @@
 .readonly-terminal.mirror-actual {
   overflow: auto;
 }
+
+/* On a phone the host's four controls don't fit beside the heading: they
+   take a row of their own, one line each, instead of wrapping inside. */
+.terminal-controls button,
+.terminal-heading .idle-dot,
+.terminal-heading .live-dot {
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .terminal-heading:has(.terminal-controls > :nth-child(2)) {
+    height: auto;
+    min-height: 46px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .terminal-heading .terminal-controls:has(> :nth-child(2)) {
+    flex-basis: 100%;
+    margin-left: 0;
+    display: flex;
+    gap: 6px;
+  }
+}
+
+/* The terminal's box, with a line in the middle until there's a screen. */
+.terminal-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.terminal-stage > .terminal-target {
+  flex: 1;
+}
+
+.terminal-empty {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 24px;
+  display: grid;
+  place-content: center;
+  color: #9b9e94;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  pointer-events: none;
+}

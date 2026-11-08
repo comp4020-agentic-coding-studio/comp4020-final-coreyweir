@@ -94,3 +94,8 @@
   .home>.your-rooms li{padding:9px 2px;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name actions" "state state" "detail detail"}
   .home>.your-rooms .actions.asking{grid-row:4}
 }
+
+/* "Optional" sits on its label's line, as it does for GitHub for pushing,
+   not on a line of its own under it. */
+.entry-card form label:not(.check):has(>small){grid-template-columns:minmax(0,1fr) auto;align-items:baseline}
+.entry-card form label:not(.check):has(>small)>:not(small){grid-column:1/-1}
