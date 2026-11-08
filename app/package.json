@@ -66,6 +66,8 @@
     "test:wasix-concurrent-bash-browser": "node scripts/wasix-concurrent-bash-browser-smoke.mjs",
     "test:audit-log": "node --test --test-force-exit scripts/audit-log.test.mjs",
     "test:board-file": "node --test scripts/board-file.test.mjs",
+    "test:board-for-claude": "node --test scripts/board-for-claude.test.mjs",
+    "test:send-board-browser": "node scripts/send-board-browser-smoke.mjs",
     "test:workspace-export": "node --test scripts/workspace-export.test.mjs",
     "test:workspace-import": "node --test scripts/workspace-import.test.mjs",
     "test:workspace-import-ui": "node scripts/workspace-import-ui-smoke.mjs",

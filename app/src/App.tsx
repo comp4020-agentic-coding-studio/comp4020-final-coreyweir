@@ -1,4 +1,4 @@
-import { Children, useEffect, useRef, useState } from "react";
+import { Children, useEffect, useRef, useState, type RefObject } from "react";
 import { Quickdraw, useQuickdrawStore, type QuickdrawRef, type ShapeRecord } from "@quickdrawjs/react";
 import { addPrompt, replaceYText, saveName, savedName, snapshotPrompts, type PromptSnapshot, type QueuedPrompt, type RoomMember, type SentBy, useRoom } from "./room";
 import { QueuePanel, useQueueRelease } from "./QueuePanel";
@@ -13,6 +13,7 @@ import {
 import * as Y from "yjs";
 import { type BoardLimit, useBoardSync } from "./boardSync";
 import { TerminalPane, githubRefusalText, type TerminalPaneHandle } from "./TerminalPane";
+import { useSendBoard } from "./SendBoard";
 import { checkGitHubToken } from "./githubCheck";
 import { useLookOnly } from "./lookOnly";
 import type { HostConfig } from "./claudePod";
@@ -916,21 +917,24 @@ function Staging({ prompts, canQueue, readOnly, onAdd, onQueue, onDelete }: {
   );
 }
 
-function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection }: {
+function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, sendBoard }: {
   store: ReturnType<typeof useQuickdrawStore>;
   readOnly: string | null;
   notice: string | null;
   selected: string[];
   onSelection: (ids: string[]) => void;
   onStageSelection: () => void;
+  /** The host's "Send board to Claude" (SendBoard.tsx). */
+  sendBoard?: ReturnType<typeof useSendBoard>;
 }) {
   const board = useRef<QuickdrawRef>(null);
   // read-only still pans and zooms; nothing else reaches the board
   useLookOnly(board, readOnly !== null);
   return (
     <section className="board-wrap">
-      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span>Draw, write, paste images, or move things around.</span><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button></>}</div>
+      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span>Draw, write, paste images, or move things around.</span><div className="board-buttons"><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}>{sendBoard.button.label}</button>}</div></>}</div>
       {notice && <p className="board-notice" role="alert">{notice}</p>}
+      {sendBoard?.error && <p className="board-notice" role="alert">{sendBoard.error}</p>}
       <Quickdraw
         ref={board}
         className="quickdraw-surface"
@@ -947,8 +951,10 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   );
 }
 
-function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, hostHere, full, auto, claudeState, roomState, controlSynced, onSend, onDelete, onPreviewUrlChange }: {
+function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, hostHere, full, auto, claudeState, roomState, controlSynced, onSend, onDelete, onPreviewUrlChange, terminalRef, onPodReady }: {
   roomId: string;
+  terminalRef: RefObject<TerminalPaneHandle | null>;
+  onPodReady: (ready: boolean) => void;
   ended: boolean;
   hostHere: boolean;
   // A full room's queue is read-only for the host too.
@@ -966,12 +972,11 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, h
   onDelete: (id: string) => void;
   onPreviewUrlChange: (url: string | null, generation: number) => void;
 }) {
-  const terminalRef = useRef<TerminalPaneHandle>(null);
   const release = useQueueRelease({ facilitator, roomState, synced: controlSynced, terminalRef, queued, auto, full, onSend });
   return (
     <section className="crit-room" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
       {/* A participant's terminal stops asking once the room ends; a new one starts if the host revives it. Never remount the host's: it runs Claude. */}
-      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} />
+      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} onPodReady={onPodReady} />
       <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} ended={ended} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
     </section>
   );
@@ -1351,6 +1356,16 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     addPrompt(room.doc, room.identity.name, text, records[0].id);
   }
 
+  const terminalRef = useRef<TerminalPaneHandle>(null);
+  const [podReady, setPodReady] = useState(false);
+  const sendBoard = useSendBoard({
+    store,
+    selected,
+    pod: () => terminalRef.current?.podFiles() ?? null,
+    ready: podReady,
+    onStage: (text) => addPrompt(room.doc, room.identity.name, text),
+  });
+
   function handlePreviewUrlChange(url: string | null, generation: number) {
     setPreview((current) => url ? { url, revision: (current?.revision ?? 0) + 1 } : null);
     room.control.transact(() => {
@@ -1379,8 +1394,9 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 
       {room.full ? <FullBanner limitBytes={room.limitBytes} onExport={exportRoom} /> : <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} onExport={exportRoom} />}
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
-        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} />}
-        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
+        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} sendBoard={facilitator ? sendBoard : undefined} />}
+        {sendBoard.dialog}
+        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} terminalRef={terminalRef} onPodReady={setPodReady} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}
