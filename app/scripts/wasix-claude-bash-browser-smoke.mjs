@@ -146,6 +146,10 @@ try {
       // as untracked files and anything that emptied the workspace took every
       // tool at once. Empty it here; the snapshot commands below (git, jq, rg,
       // nano, node, npm) then have to run from a wiped workspace.
+      // docs/week-12.md, "npx create hangs": the bridge carries no stdin, so
+      // a bridged process must not claim a TTY there, or prompting CLIs wait
+      // forever for keys.
+      out.stdinTty = await spawnCollect("bash", ["-c", "node -e 'console.log(String(process.stdin.isTTY))'"], { cwd: "/work/repo", env: {} });
       out.workspaceGit = await spawnCollect("bash", ["-c", "git init -q && git status --porcelain --untracked-files=all"], { cwd: "/work/repo", env: {} });
       out.wipe = await spawnCollect("bash", ["-c", "rm -rf /work/repo/* /work/repo/.[!.]* && ls -A /work/repo | wc -l"], { cwd: "/work/repo", env: {} });
 
@@ -262,6 +266,7 @@ try {
   assert.ok(firstTickTime !== undefined && result.stream.exitedAt - firstTickTime >= 500,
     `output arrived late: first chunk at ${firstTickTime} ms, exit at ${result.stream.exitedAt} ms`);
 
+  assert.equal(result.stdinTty.stdout, "false\n", result.stdinTty.stderr);
   assert.equal(result.workspaceGit.code, 0, result.workspaceGit.stderr);
   assert.doesNotMatch(result.workspaceGit.stdout, /wasix-session/, "the session's control files must not show up in the user's repo");
   assert.equal(result.wipe.code, 0, result.wipe.stderr);

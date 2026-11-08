@@ -162,7 +162,11 @@ export function createBridgeHostHandler(
     const argv = request.argv.length > 1 ? request.argv.slice(1) : [];
     const commandName = request.argv[0] ?? "";
     report(`[bridge] pid=${request.pid} ${commandName} ${argv.join(" ")}`);
-    const process = await pod.spawn(commandName, argv, { cwd, env: envFromBridge(request) });
+    // The bridge carries no stdin, so a bridged process can never be
+    // answered. Without a TTY on stdin, prompting CLIs (create-vite and the
+    // like) take their non-interactive path or stop with an error, instead
+    // of waiting forever (docs/week-12.md, "npx create hangs").
+    const process = await pod.spawn(commandName, argv, { cwd, env: { ...envFromBridge(request), NODEPOD_STDIN_TTY: "0" } });
     const encoder = new TextEncoder();
     process.on("output", (chunk: string) => {
       void output.writeStdout(encoder.encode(chunk));
