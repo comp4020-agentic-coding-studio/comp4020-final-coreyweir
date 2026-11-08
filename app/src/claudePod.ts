@@ -28,6 +28,7 @@ import { cloneRepository, githubRepoUrl } from "./repoClone";
 import type { PodFiles } from "./boardForClaude";
 import { credentialFor, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
+import { SESSION_ENV_FILE, SESSION_HOME, SESSION_HOSTNAME, SESSION_USER, sessionEnvScript, sessionHelperCommands, XTERM_TERMCAP } from "./sessionSystem";
 import { createPythonFetchHandler, isPythonFetch, PYTHON_FETCH_COMMAND, pythonLaunchers, pythonSessionFiles } from "./pythonCommand";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
 import bridgeStubUrl from "./assets/wasmer/bridge-stub.wasm?url";
@@ -89,7 +90,7 @@ const WASINIX_BINARIES = [
  * `wasmer/coreutils@1.0.25` so `env` is no longer the old-libc uutils 0.0.7
  * atom. sha256 7534fb8088b1fb508878cab3cd37dcb22db4076e0579255b914b8b22d9b71296.
  */
-const WASINIX_COREUTILS_NAMES = ["env", "stat", "du", "id", "timeout", "chmod"] as const;
+const WASINIX_COREUTILS_NAMES = ["env", "stat", "du", "id", "timeout", "chmod", "whoami", "groups"] as const;
 
 // env: extra variables for Claude Code (model choice for Riff's own
 // models, docs/adr/0009). Never a credential: those go through
@@ -696,6 +697,7 @@ export class ClaudePodController {
       // The store dropped file modes on its way in (workspace.ts).
       this.workspace?.reapplyModes();
       await session.installSessionFile("ca.pem", new TextEncoder().encode(certificateAuthority.pem));
+      await session.installSessionFile(SESSION_ENV_FILE, sessionEnvScript());
       const bridgeStubBytes = await fetchBytes(bridgeStubUrl);
       // Every name here but PYTHON_FETCH_COMMAND resolves host-side via createBridgeHostHandler →
       // pod.spawn; these are all native Nodepod commands like npm/git
@@ -730,6 +732,7 @@ export class ClaudePodController {
         const bytes = await fetchBytes(binary.url);
         await session.installBinaries(new Map([[binary.name, bytes]]));
       }
+      await session.installBinaries(sessionHelperCommands());
       // python/python3 launchers; the package itself comes on first use.
       await session.installBinaries(pythonLaunchers());
       for (const [path, data] of pythonSessionFiles()) await session.installSessionFile(path, data);
@@ -755,13 +758,19 @@ export class ClaudePodController {
   private wasixBaseEnv(bridge: { pipeEnv: Record<string, string>; pathEntry: string }): Record<string, string> {
     return {
       TERM: "xterm-256color",
+      TERMCAP: XTERM_TERMCAP,
       COLORTERM: "truecolor",
-      HOME: "/home/user",
-      USER: "user",
+      HOME: SESSION_HOME,
+      USER: SESSION_USER,
+      // Bash keeps an inherited HOSTNAME; the prompt shows it.
+      HOSTNAME: SESSION_HOSTNAME,
       TMPDIR: "/tmp",
       // curl verifies the browser-generated leaf presented by the in-tab TLS
       // server. The subsequent browser fetch performs real-origin TLS checks.
       CURL_CA_BUNDLE: `${WASIX_SESSION_CONTROL_ROOT}/${WASIX_SESSION_CONTROL_DIR}/ca.pem`,
+      // Every non-interactive bash sources it: it writes this run's /etc
+      // (sessionSystem.ts). The terminal's rc sources it too.
+      BASH_ENV: `${WASIX_SESSION_CONTROL_ROOT}/${WASIX_SESSION_CONTROL_DIR}/${SESSION_ENV_FILE}`,
       // Bridged processes inherit the guest env verbatim (ProcessContext
       // env is replace-not-merge), so the GitHub placeholder must ride the
       // session env for `git push` et al to work. Same pair Claude mode sets.
