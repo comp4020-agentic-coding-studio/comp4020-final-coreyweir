@@ -49,6 +49,8 @@ const PROMPTS = {
   rapidSecond: "Rapid, second: waits for Claude to take the first.",
   slow: "A slow one, so Claude is busy.",
   followUp: "A follow-up sent\nwhile Claude was busy.",
+  ask: "Ask the host (askuser) which colour to use.",
+  afterAsk: "After the host answered Claude's question.",
 };
 
 try {
@@ -212,12 +214,41 @@ try {
   await until(() => fake.count(PROMPTS.followUp) === 1, "the follow-up to reach the model", 30_000);
   await until(async () => (await stateOn(participant)) === "idle", "Claude idle at the end", 15_000);
 
+  // A dialog mid-turn: Claude asks the host a question (AskUserQuestion).
+  // Keys typed now answer it, so a Send would go into the dialog (measured:
+  // the prompt was lost and the first option chosen). Send is off and says
+  // why, auto waits, and the room sees Claude asking. The host answers in
+  // the terminal; when the turn ends, auto sends the next.
+  await queue(PROMPTS.ask);
+  await sendFirst();
+  await until(async () => (await stateOn(participant)) === "asking", "the participant to see Claude asking", 20_000);
+  await until(async () => /Which colour should the button be\?/.test(await screen()), "the question on the host's screen", 10_000);
+  await queue(PROMPTS.afterAsk);
+  const sendButton = () => host.$eval(".queue-row .send-prompt", (button) => ({ disabled: button.disabled, title: button.title }));
+  assert.deepEqual(await sendButton(), { disabled: true, title: "Claude is asking something in the terminal. Answer it first." });
+  assert.equal(await participant.$eval(".claude-state", (element) => element.textContent), "Claude is asking the host");
+  await host.click(".auto-release input");
+  await until(() => autoOn(participant), "the participant to see auto on", 10_000);
+  await sleep(2_000);
+  assert.equal(fake.count(PROMPTS.afterAsk), 0, "auto waits while Claude asks");
+  assert.deepEqual(await queuedTexts(host), [PROMPTS.afterAsk]);
+  await host.click(".terminal-target .xterm");
+  await host.keyboard.press("Enter");
+  await until(() => fake.count(PROMPTS.afterAsk) === 1, "auto to send once the question was answered and the turn ended", 30_000);
+  const toolResults = fake.requests.flatMap((request) => JSON.parse(request.text))
+    .flatMap((message) => Array.isArray(message.content) ? message.content : [])
+    .filter((block) => block.type === "tool_result")
+    .map((block) => typeof block.content === "string" ? block.content : JSON.stringify(block.content));
+  assert.ok(toolResults.some((text) => /Which colour[\s\S]*Teal/.test(text)), `the host's answer reached the model: ${JSON.stringify(toolResults)}`);
+  assert.ok(!toolResults.some((text) => text.includes("After the host")), "no prompt went into the dialog");
+  await until(async () => (await stateOn(participant)) === "idle", "Claude idle after the question", 15_000);
+
   // Every prompt exactly once, and nothing else asked of the model.
   await sleep(3_000);
   const counts = Object.fromEntries(Object.entries(PROMPTS).map(([key, text]) => [key, fake.count(text)]));
   console.log(JSON.stringify({ counts, turns: fake.turns.length }));
   for (const [key, count] of Object.entries(counts)) assert.equal(count, 1, `${key} reached the model ${count} times`);
-  assert.equal(fake.turns.length, Object.keys(PROMPTS).length, "one turn per prompt");
+  assert.equal(fake.turns.filter((turn) => !turn.toolResult).length, Object.keys(PROMPTS).length, "one turn per prompt (the question's answer is a tool result)");
   assert.deepEqual(await queuedTexts(participant), []);
   // Everything was sent: the empty queue says so to each in their role,
   // not that nothing was ever queued.

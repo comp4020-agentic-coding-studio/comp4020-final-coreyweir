@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type * as Y from "yjs";
 import type { QueuedPrompt, SentBy } from "./room";
 import type { TerminalPaneHandle } from "./TerminalPane";
-import { acknowledgesSend, canSend, CLAUDE_STATE_LABEL, isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease";
+import { acknowledgesSend, canSend, CLAUDE_STATE_LABEL, DIALOG_OPEN, hasDialog, isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease";
 
 /**
  * The host's side: follows Claude's events, publishes Claude's state to the
@@ -110,8 +110,10 @@ export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostH
     ? "Waiting for Claude to take the last prompt"
     : canSendNow
     ? claudeState === "working" ? "Claude is working: this goes in as a follow-up" : "Send to Claude"
+    : hasDialog(claudeState) ? DIALOG_OPEN
     : claudeState === "starting" ? "Claude is still starting" : "Start Claude first";
-  const stateTitle = claudeState === "paused" ? "A turn was interrupted or failed, or a slash command ran: auto waits until Claude finishes a turn, or the host turns auto on again" : undefined;
+  const stateTitle = claudeState === "paused" ? "A turn was interrupted or failed, or a slash command ran: auto waits until Claude finishes a turn, or the host turns auto on again"
+    : hasDialog(claudeState) ? "Claude asked something in the host's terminal: nothing is sent until the host answers" : undefined;
   return (
     <article className="queue">
       <header className="section-title queue-heading">

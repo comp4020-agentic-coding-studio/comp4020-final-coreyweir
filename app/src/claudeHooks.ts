@@ -19,9 +19,40 @@ export type ClaudeHookEvent =
   | { event: "SessionStart"; source: string }
   | { event: "UserPromptSubmit"; prompt: string }
   | { event: "Stop"; stopHookActive: boolean }
-  | { event: "StopFailure" };
+  | { event: "StopFailure" }
+  | DialogEvent;
 
-const EVENTS = ["SessionStart", "UserPromptSubmit", "Stop", "StopFailure"] as const;
+/**
+ * A dialog Claude opened mid-turn, which typed keys (and so a Send) would
+ * answer. Measured on 2.1.221 in Nodepod:
+ * - PermissionRequest fires as the dialog opens, for a tool's permission
+ *   prompt, plan approval, and AskUserQuestion (which asks even in bypass
+ *   mode). Elicitation is an MCP server's form.
+ * - Notification `permission_prompt` (also for AskUserQuestion) or
+ *   `elicitation_dialog` comes 6 s later, and only if nobody has typed:
+ *   `late`, a fallback for a dialog no earlier hook announced.
+ * - Answering a question or allowing a tool fires PostToolUse (or
+ *   PostToolUseFailure) once the tool has run; an elicitation's answer
+ *   fires ElicitationResult.
+ * - Nothing fires when the host says No to a permission prompt or Esc to
+ *   a question: the turn just ends. Esc is an interrupt the page sees
+ *   already; a No is one key in the host's terminal (queueRelease.ts).
+ */
+export type DialogEvent =
+  | { event: "DialogOpened"; kind: "question" | "permission" | "elicitation"; late: boolean }
+  | { event: "DialogClosed" };
+
+const EVENTS = [
+  "SessionStart", "UserPromptSubmit", "Stop", "StopFailure",
+  "PermissionRequest", "Notification", "Elicitation", "ElicitationResult", "PostToolUse", "PostToolUseFailure", "PermissionDenied",
+] as const;
+
+const LATE_DIALOGS: Record<string, "permission" | "elicitation"> = {
+  permission_prompt: "permission",
+  worker_permission_prompt: "permission",
+  elicitation_dialog: "elicitation",
+  elicitation_url_dialog: "elicitation",
+};
 
 /** The `hooks` block for ~/.claude/settings.json. Exec form, so no shell parses it. */
 export function riffHookSettings() {
@@ -45,6 +76,20 @@ export function parseHookInput(text: string): ClaudeHookEvent | null {
       return { event: "Stop", stopHookActive: input.stop_hook_active === true };
     case "StopFailure":
       return { event: "StopFailure" };
+    case "PermissionRequest":
+      return { event: "DialogOpened", kind: input.tool_name === "AskUserQuestion" ? "question" : "permission", late: false };
+    case "Elicitation":
+      return { event: "DialogOpened", kind: "elicitation", late: false };
+    case "Notification": {
+      const type = input.notification_type;
+      const kind = typeof type === "string" && Object.hasOwn(LATE_DIALOGS, type) ? LATE_DIALOGS[type] : undefined;
+      return kind ? { event: "DialogOpened", kind, late: true } : null;
+    }
+    case "PostToolUse":
+    case "PostToolUseFailure":
+    case "PermissionDenied":
+    case "ElicitationResult":
+      return { event: "DialogClosed" };
     default:
       return null;
   }

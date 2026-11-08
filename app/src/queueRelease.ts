@@ -20,8 +20,17 @@ import type { ClaudeHookEvent } from "./claudeHooks";
  *   /model, /compact with nothing to compact), and some leave a dialog
  *   open that the next prompt would land in. Auto waits for a turn to
  *   finish normally, `/clear`, or the host turning auto on again.
+ * - asking: mid-turn, Claude asked the host a question (AskUserQuestion)
+ *   or an MCP server's form is open. Typed keys answer it, so a Send would
+ *   go into the dialog (measured: the prompt was lost and the first option
+ *   chosen). Nothing is sent until the answer's hook, Esc, or the turn's
+ *   end (claudeHooks.ts, DialogEvent).
+ * - approving: the same for a permission prompt or plan approval. Saying
+ *   No to one fires no hook, so the host's own answer key (Enter or a
+ *   digit, typed in Claude's terminal) moves on to paused; a Yes then
+ *   fires PostToolUse when the tool has run, and Stop ends the turn.
  */
-export const CLAUDE_STATES = ["off", "starting", "idle", "working", "paused"] as const;
+export const CLAUDE_STATES = ["off", "starting", "idle", "working", "paused", "asking", "approving"] as const;
 export type ClaudeState = (typeof CLAUDE_STATES)[number];
 
 export type ClaudeEvent =
@@ -36,7 +45,9 @@ export type ClaudeEvent =
   /** A slash command was sent; it may never reach the model, so no hook may follow. */
   | { event: "SentCommand" }
   /** The host turned auto on: after an interrupt or an API error Claude is at its prompt again. */
-  | { event: "AutoOn" };
+  | { event: "AutoOn" }
+  /** The host typed a key that answers a permission prompt (Enter or a digit) into Claude. */
+  | { event: "AnswerKey" };
 
 export function nextClaudeState(state: ClaudeState, event: ClaudeEvent): ClaudeState {
   switch (event.event) {
@@ -63,8 +74,22 @@ export function nextClaudeState(state: ClaudeState, event: ClaudeEvent): ClaudeS
     case "StopFailure":
       return "paused";
     case "Interrupt":
-      return state === "working" ? "paused" : state;
+      return state === "working" || state === "asking" || state === "approving" ? "paused" : state;
+    case "DialogOpened":
+      // A late notification only stands in for a dialog nothing announced:
+      // after the host's answer it would reopen one that's gone.
+      if (event.late ? state !== "working" : state !== "working" && state !== "paused") return state;
+      return event.kind === "permission" ? "approving" : "asking";
+    case "DialogClosed":
+      return state === "asking" || state === "approving" ? "working" : state;
+    case "AnswerKey":
+      return state === "approving" ? "paused" : state;
   }
+}
+
+/** Keys that answer a permission prompt: Enter, or an option's number. */
+export function isAnswerKey(data: string) {
+  return data === "\r" || /^[1-9]$/.test(data);
 }
 
 /** Whether Send can type into Claude now (while working, it queues as a follow-up). */
@@ -108,7 +133,16 @@ export const CLAUDE_STATE_LABEL: Record<ClaudeState, string> = {
   idle: "Claude is waiting",
   working: "Claude is working",
   paused: "Paused for the host",
+  asking: "Claude is asking the host",
+  approving: "Claude is asking the host",
 };
+
+/** Why Send is off while Claude has a dialog open. */
+export const DIALOG_OPEN = "Claude is asking something in the terminal. Answer it first.";
+
+export function hasDialog(state: ClaudeState) {
+  return state === "asking" || state === "approving";
+}
 
 /** A prompt Claude Code reads as a slash command. */
 export function isSlashCommand(prompt: string) {
