@@ -22,7 +22,7 @@ import {
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
 } from "./boardFile";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
-import { SAVED_SUMMARY, type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
+import { type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
 
 type View = "board" | "room" | "preview";
 // models: "riff" is Riff's own free models through the server
@@ -95,6 +95,9 @@ function downloadBoard(file: BoardFile) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
+
+// Only hosts have files: what the landing list says they are.
+const FILES_NOTE = "Files: the /work and /home/user directories from the session, for continuation or export.";
 
 // What a read-only board says about itself: look around, don't change.
 const LOOK_HINT = "Look only: drag to move around, pinch or ctrl + scroll to zoom.";
@@ -436,7 +439,7 @@ function SiteAccount({ user }: { user: User | null | undefined }) {
 // files of every room hosted here (docs/adr/0010). A live room enters; a
 // copy opens read-only, beside the forms on a wide screen and as its own
 // page on a phone. Delete takes the copy, this browser's place in the
-// room and the host's files with it; Delete files takes the files alone.
+// room and the files with it; Delete files takes the files alone.
 type RoomRow = { key: string; room: ListedRoom | null; copy: LocalCopy | null; workspace: WorkspaceSummary | null; code: string | null };
 
 function roomRows(rooms: ListedRoom[], copies: LocalCopy[], workspaces: WorkspaceSummary[]): RoomRow[] {
@@ -523,7 +526,7 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
               ? <button className="room-link" onClick={() => room ? goToRoom(room.id) : copy && onOpen(copy)}>{code ? <>Room <code>{code}</code></> : "A room"}</button>
               : <span className="room-link">A room you hosted</span>}
             <span className="room-state">
-              {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept" : "board not kept"}</>
+              {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept on server" : "board not kept on server"}</>
                 : endedNow && (copy?.roomId === endedNow || workspace?.room === endedNow) ? <><i className="gone"></i>Ended just now</>
                 : <><i className="gone"></i>Not live</>}
             </span>
@@ -533,13 +536,13 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
             </span>
             {workspace && asking === `workspace:${workspace.room}` ? (
               <span className="actions asking">
-                <span>Delete the host's files for this room from this browser? Anything not pushed is lost.</span>
+                <span>Delete the files for this room from this browser? Anything not pushed is lost.</span>
                 <button className="danger" onClick={() => void act(() => deleteWorkspace(workspace.room))}>Delete files</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
             ) : copy && asking === copy.database ? (
               <span className="actions asking">
-                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}{workspace ? ", and the host's files (anything not pushed is lost)" : ""}?</span>
+                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}{workspace ? ", and the files (anything not pushed is lost)" : ""}?</span>
                 <button className="danger" onClick={() => void act(() => deleteCopy(copy))}>Delete</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
@@ -557,10 +560,10 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
           </li>
         ))}
       </ul>
-      {workspaces.length > 0 && <p className="workspace-note"><small>Files: what the host's terminal had, kept so a reload or crash loses nothing. {SAVED_SUMMARY}</small></p>}
+      {workspaces.length > 0 && <p className="workspace-note"><small>{FILES_NOTE}</small></p>}
       {deletable > 1 && (asking === "all" ? (
         <p className="delete-all asking">
-          <span>Delete all {copyCount} copies{workspaces.length ? ` and ${workspaces.length === 1 ? "the host's files" : `${workspaces.length} rooms' host files`}` : ""} on this browser, and its place in every room?</span>
+          <span>Delete all {copyCount} copies{workspaces.length ? ` and ${workspaces.length === 1 ? "the files" : `${workspaces.length} rooms' files`}` : ""} on this browser, and its place in every room?</span>
           <button className="danger" onClick={() => void act(deleteAllCopies)}>Delete all</button>
           <button className="link" onClick={() => setAsking(null)}>Cancel</button>
         </p>
@@ -631,7 +634,7 @@ function BoardPeek({ copy, room, onClose }: { copy: LocalCopy; room: ListedRoom 
 function WorkspaceMarker({ workspace }: { workspace: WorkspaceSummary }) {
   const saved = workspace.savedAt ? `saved ${shortDate(workspace.savedAt)} ${new Date(workspace.savedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : "not saved yet";
   return (
-    <small className="workspace-marker" title={SAVED_SUMMARY}>
+    <small className="workspace-marker" title={FILES_NOTE}>
       Files: {workspace.files.toLocaleString()} ({formatBytes(workspace.bytes)}), {saved}
     </small>
   );
@@ -793,7 +796,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
             <label>Git repository <small>Optional</small><input value={config.repo} onChange={(event) => updateConfig("repo", event.target.value)} placeholder="https://github.com/group/project.git" /></label>
             <GitHubPush user={user} back="/?setup=host" beforeLeaving={() => { saveName(name); localStorage.setItem("riff-host-config", JSON.stringify(config)); }} />
             <ImportBoard imported={imported} onChange={setImported} />
-            <label className="check"><input type="checkbox" checked={keepBoard} onChange={(event) => setKeepBoard(event.target.checked)} /><span>Keep the board after the room ends<small>{keepBoard ? "Kept on the server while space allows, read-only. Everyone who joins is told." : "Deleted from the server when the room ends. Everyone who joins is told."}</small></span></label>
+            <label className="check"><input type="checkbox" checked={keepBoard} onChange={(event) => setKeepBoard(event.target.checked)} /><span>Keep the board on the server after the room ends<small>{keepBoard ? "Read-only, while space allows." : "Deleted from the server when the room ends."}</small></span></label>
             <p className="local-note">These settings stay in this browser and are never included in the room link.</p>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="primary" disabled={busy || riffModels === null}>{busy ? "Creating..." : "Create room"}</button>
@@ -1033,7 +1036,7 @@ function RoomBanner({ state, endsAt, keep, facilitator, onExport }: { state: Roo
   return (
     <p className="room-banner ended" role="status">
       This room has ended. {keep ? "The server keeps this board while space allows; you can look, but not change it." : "The server doesn't keep this board."}{" "}
-      <button className="link" onClick={onExport}>Export it</button> to keep your own copy.
+      <button className="link" onClick={onExport}>Export it</button> as a file.
     </p>
   );
 }
@@ -1133,20 +1136,6 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
   return (
     <aside className="people-panel" aria-label="People in this room">
       <header className="section-title"><h2>People</h2><button onClick={onClose} aria-label="Close">&times;</button></header>
-      <p className="room-code">Code <strong>{room.code}</strong>{room.locked && <small> · locked</small>}</p>
-      {host && (
-        <div className="room-controls">
-          <button onClick={() => act(() => rotateCode(access))} title="The old code stops working; everyone already here stays">New code</button>
-          <button onClick={() => act(() => setLocked(access, !room.locked))} title="A locked room takes no new joins by code">{room.locked ? "Unlock" : "Lock"}</button>
-        </div>
-      )}
-      <div className="board-fate">
-        <p>{boardFate(room.keep)}</p>
-        {host && <button onClick={() => changeKeep(!room.keep)}>{room.keep ? "Stop keeping it" : "Keep it"}</button>}
-      </div>
-      {room.limitBytes && <p className="board-size">{room.full ? "Full: it holds" : "It holds"} {megabytes(bytes)} of the {megabytes(room.limitBytes)} a room can.</p>}
-      <p className="export-board"><button onClick={onExport}>Export the board</button><small>A file with the board, its images and the prompts. Anyone can start a new room from it.</small></p>
-      {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
         {present.map((member) => (
           <li key={member.id}>
@@ -1159,9 +1148,61 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
           </li>
         ))}
       </ul>
+      <div className="board-fate">
+        <p>{boardFate(room.keep)}</p>
+        {host && <button onClick={() => changeKeep(!room.keep)}>{room.keep ? "Stop keeping it" : "Keep it"}</button>}
+      </div>
+      {room.limitBytes && <p className="board-size">{room.full ? "Full: it holds" : "It holds"} {megabytes(bytes)} of the {megabytes(room.limitBytes)} a room can.</p>}
+      <p className="export-board"><button onClick={onExport}>Export the board</button><small>A file with the board, its images and the prompts. Anyone can start a new room from it.</small></p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {host && <EndRoom access={access} code={room.code} keep={room.keep} />}
+    </aside>
+  );
+}
+
+// Bringing people in, in one place: the link and the code for anyone in
+// the room; for the host, a new code, the lock, and invites by GitHub
+// username.
+function SharePanel({ access, room, onClose }: { access: Access; room: ReturnType<typeof useRoom>; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const host = access.member.host;
+  // The link carries the join code, never the room's id or anyone's secret.
+  const link = new URL(`${location.pathname}?${new URLSearchParams({ room: room.code })}`, location.origin).toString();
+
+  function copy() {
+    navigator.clipboard.writeText(link).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    }, () => setError("Couldn't copy. Select the link and copy it."));
+  }
+
+  async function act(action: () => Promise<unknown>) {
+    setError(null);
+    try {
+      await action();
+    } catch (failure) {
+      setError(problem(failure));
+    }
+  }
+
+  return (
+    <aside className="people-panel share-panel" aria-label="Share this room">
+      <header className="section-title"><h2>Share</h2><button onClick={onClose} aria-label="Close">&times;</button></header>
+      <div className="share-link">
+        <input readOnly aria-label="Room link" value={link} onFocus={(event) => event.target.select()} />
+        <button onClick={copy}>{copied ? "Copied" : "Copy link"}</button>
+      </div>
+      <p className="room-code">Code <strong>{room.code}</strong>{room.locked && <small> · locked</small>}</p>
+      {host && (
+        <div className="room-controls">
+          <button onClick={() => act(() => rotateCode(access))} title="The old code stops working; everyone already here stays">New code</button>
+          <button onClick={() => act(() => setLocked(access, !room.locked))} title="A locked room takes no new joins by code">{room.locked ? "Unlock" : "Lock"}</button>
+        </div>
+      )}
+      {error && <p className="form-error" role="alert">{error}</p>}
       {host && <InviteBox access={access} members={room.members} />}
       {host && <p className="local-note">If a code leaks: give the room a new code, remove anyone who shouldn't be here, then lock it.</p>}
-      {host && <EndRoom access={access} code={room.code} keep={room.keep} />}
     </aside>
   );
 }
@@ -1209,8 +1250,8 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     scrollTo(0, 0);
   }, [view]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [copied, setCopied] = useState(false);
-  const [people, setPeople] = useState(false);
+  // one panel at a time: who's here, or how to bring more people in
+  const [panel, setPanel] = useState<"people" | "share" | null>(null);
   const [preview, setPreview] = useState<{ url: string; revision: number } | null>(null);
   const store = useQuickdrawStore();
   const room = useRoom(access);
@@ -1258,16 +1299,6 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     addPrompt(room.doc, room.identity.name, text, records[0].id);
   }
 
-  // The link carries the join code, never the room's id or anyone's secret.
-  function copyRoomLink() {
-    const url = new URL(location.pathname, location.origin);
-    url.searchParams.set("room", room.code);
-    navigator.clipboard.writeText(url.toString()).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    });
-  }
-
   function handlePreviewUrlChange(url: string | null, generation: number) {
     setPreview((current) => url ? { url, revision: (current?.revision ?? 0) + 1 } : null);
     room.control.transact(() => {
@@ -1283,14 +1314,14 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     <div className="app">
       <header className="topbar">
         <button className="brand brand-button" onClick={() => location.assign(location.pathname)}>riff</button>
-        <div className="room-name"><i className={room.status}></i><span>Room {room.code}</span><small>{room.status}</small><small className="board-fate" title={boardFate(room.keep)}>· board {room.keep ? "kept" : "not kept"}</small></div>
+        <div className="room-name"><i className={room.status}></i><span>Room {room.code}</span><small>{room.status}</small><small className="board-fate" title={boardFate(room.keep)}>· board {room.keep ? "kept" : "not kept"} on server</small></div>
         <nav>
           <button className={view === "board" ? "active" : ""} onClick={() => setView("board")}>Board</button>
           <button className={view === "room" ? "active" : ""} onClick={() => setView("room")}>Room</button>
           <button className={view === "preview" ? "active" : ""} onClick={() => setView("preview")}>Preview</button>
         </nav>
-        <button className="participants" onClick={() => setPeople((open) => !open)} title="People in this room">{room.participants.slice(0, 4).map((participant) => <span key={participant.clientId} style={{ background: participant.colour }} title={`${participant.name}${participant.role === "facilitator" ? " (host)" : ""}`}>{participant.name.slice(0, 1).toUpperCase()}</span>)}</button>
-        <button className="share" onClick={copyRoomLink}>{copied ? "Copied" : "Share room"}</button>
+        <button className="participants" aria-expanded={panel === "people"} onClick={() => setPanel((open) => open === "people" ? null : "people")} title="People in this room">{room.participants.slice(0, 4).map((participant) => <span key={participant.clientId} style={{ background: participant.colour }} title={`${participant.name}${participant.role === "facilitator" ? " (host)" : ""}`}>{participant.name.slice(0, 1).toUpperCase()}</span>)}</button>
+        <button className="share" aria-expanded={panel === "share"} onClick={() => setPanel((open) => open === "share" ? null : "share")}>Share room</button>
       </header>
 
       {room.full ? <FullBanner limitBytes={room.limitBytes} onExport={exportRoom} /> : <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} onExport={exportRoom} />}
@@ -1299,7 +1330,8 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
-        {people && <PeoplePanel access={access} room={room} onClose={() => setPeople(false)} onExport={exportRoom} />}
+        {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}
+        {panel === "share" && <SharePanel access={access} room={room} onClose={() => setPanel(null)} />}
       </main>
     </div>
   );
@@ -1308,6 +1340,59 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 // Works out who this browser is in the room the URL names, before anything
 // connects: a shared link (?room=CODE) for someone already in the room goes
 // straight in; for anyone else it's the join form with the code filled in.
+// Opened from a room's link by a browser that isn't in the room yet: ask
+// for a name before going in, the last one used filled in.
+function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
+  const user = useUser();
+  const [name, setName] = useState(savedName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const [filledAt, setFilledAt] = useState(0);
+  const shownName = name;
+  // Signed in with no name used before, your GitHub login is the default.
+  useEffect(() => {
+    if (!user || savedName()) return;
+    setName((current) => current || user.login);
+    setFilledAt((count) => count + 1);
+  }, [user]);
+  // focused and selected, so typing replaces whatever is filled in
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, [filledAt]);
+
+  async function join() {
+    const chosen = shownName.trim();
+    if (!chosen) return;
+    setBusy(true);
+    setError(null);
+    saveName(chosen);
+    try {
+      goToRoom((await joinRoom(code, chosen)).room.id);
+    } catch (failure) {
+      setError(problem(failure));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="landing closed join-link">
+      <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
+      <section className="entry-card">
+        <h2>Join room <code>{code}</code></h2>
+        <form onSubmit={(event) => { event.preventDefault(); void join(); }}>
+          <label>Your name<input ref={input} required maxLength={40} value={shownName} onChange={(event) => setName(event.target.value)} placeholder="e.g. Corey" /></label>
+          {keep !== undefined && <p className="local-note board-fate">{boardFate(keep)}</p>}
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <button className="primary" disabled={busy || !shownName.trim()}>{busy ? "Joining..." : "Join room"}</button>
+        </form>
+        <button className="link" onClick={() => location.assign(location.pathname)}>Back to start</button>
+      </section>
+    </main>
+  );
+}
+
 function RoomGate({ roomId, code }: { roomId: string | null; code: string | null }) {
   const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean; pushRevoked?: string } | { join: string; keep?: boolean } | { error: string } | null>(null);
   const [withoutGitHub, setWithoutGitHub] = useState(false);
@@ -1345,7 +1430,7 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
   }, [code, roomId]);
 
   if (!state) return <main className="landing"><section className="entry-card"><p>Finding the room...</p></section></main>;
-  if ("join" in state) return <Landing code={state.join} keep={state.keep} />;
+  if ("join" in state) return <JoinByLink code={state.join} keep={state.keep} />;
   if ("error" in state) {
     return (
       <main className="landing">
