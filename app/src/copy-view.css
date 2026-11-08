@@ -1,0 +1,40 @@
+/* A board copy on its own page (?copy=): the start page's header (brand,
+   account, colleagues), the copy's own bar under it, then the board
+   across the whole width. The prompts open beside the board on a wide
+   screen and in its place on a phone, never over it. */
+
+.copy-view>.site-bar{height:52px;flex:0 0 auto;padding:0 18px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #d9d9d3;background:#f7f7f4}
+.copy-view>.site-bar>span{color:#777;font-size:11px}
+.copy-view>.site-bar .account{position:relative;margin:0 0 0 auto;padding:0;border:0;flex-wrap:nowrap;gap:12px;font-size:12px}
+.copy-view>.site-bar .account small{flex-basis:auto;order:-1;max-width:330px;text-align:right}
+.copy-view>.site-bar .account .link{margin-left:0;font-size:12px}
+.copy-view>.site-bar .account .signing-out{position:absolute;top:calc(100% + 12px);right:0;z-index:40;width:min(360px,88vw);padding:14px;border:1px solid #d3d3cd;border-radius:6px;background:white;box-shadow:0 12px 35px rgba(0,0,0,.1);line-height:1.45}
+
+.copy-view>.copy-bar{min-height:52px;flex:0 0 auto;padding:8px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #d9d9d3;background:white}
+.copy-bar>div{min-width:0;display:grid;gap:2px}
+.copy-bar strong{font-size:13px;font-weight:600}
+.copy-bar code{font-family:"SFMono-Regular",Consolas,monospace;letter-spacing:.08em}
+.copy-bar small{color:#777;font-size:11px;line-height:1.35}
+.copy-bar .copy-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.copy-bar .copy-actions button{padding:7px 11px;border:1px solid #d5d5cf;border-radius:4px;background:white;font-size:12px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.copy-bar .copy-actions button.active{border-color:#191919;background:#191919;color:white}
+.copy-bar .copy-actions button span{min-width:18px;height:18px;padding:0 5px;display:grid;place-items:center;border-radius:9px;background:#e7e7e2;color:#191919;font-size:11px}
+
+.copy-board{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
+.copy-board.with-prompts{grid-template-columns:minmax(0,1fr) 330px}
+.copy-board .board-wrap{border-right:0}
+.copy-board.with-prompts .board-wrap{border-right:1px solid #d9d9d3}
+.copy-board .staging{min-height:0;overflow:auto}
+
+@media(max-width:1100px){.copy-view>.site-bar>span{display:none}.copy-view>.site-bar .account small{max-width:220px}}
+@media(max-width:780px){
+  .copy-view>.site-bar .account small,.copy-view>.site-bar .signed-in-as{display:none}
+  .copy-board.with-prompts{grid-template-columns:minmax(0,1fr)}
+  .copy-board.with-prompts .board-wrap{display:none}
+  .copy-board .board-wrap{height:auto;border-bottom:0}
+  .copy-board .staging{min-height:0}
+}
+@media(max-width:480px){
+  .copy-view>.site-bar,.copy-view>.copy-bar{padding-left:12px;padding-right:12px}
+  .copy-bar small{display:none}
+}

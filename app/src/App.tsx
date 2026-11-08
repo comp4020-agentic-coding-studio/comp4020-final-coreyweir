@@ -12,6 +12,7 @@ import {
 } from "./api";
 import * as Y from "yjs";
 import { type BoardLimit, useBoardSync } from "./boardSync";
+import { useLookOnly } from "./lookOnly";
 import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
 import type { HostConfig } from "./claudePod";
 import { previewRelayUrl } from "./previewChannel";
@@ -93,6 +94,9 @@ function downloadBoard(file: BoardFile) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
+
+// What a read-only board says about itself: look around, don't change.
+const LOOK_HINT = "Look only: drag to move around, pinch or ctrl + scroll to zoom.";
 
 function shortDate(at: number) {
   return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
@@ -373,6 +377,28 @@ function ColleaguesPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+// The account in a page's header, with colleagues over the page: the
+// start page and a board copy's page share it.
+function SiteAccount({ user }: { user: User | null | undefined }) {
+  const [colleagues, setColleagues] = useState(false);
+  useEffect(() => {
+    if (!colleagues) return;
+    const close = (event: KeyboardEvent) => event.key === "Escape" && setColleagues(false);
+    addEventListener("keydown", close);
+    return () => removeEventListener("keydown", close);
+  }, [colleagues]);
+  return (
+    <>
+      <Account user={user} onColleagues={() => setColleagues((open) => !open)} />
+      {colleagues && (
+        <div className="overlay" onClick={(event) => event.target === event.currentTarget && setColleagues(false)}>
+          <div role="dialog" aria-modal="true" aria-label="Colleagues"><ColleaguesPanel onClose={() => setColleagues(false)} /></div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // One row per room: the rooms you're in, as the server lists them (by
 // GitHub account when signed in, by this browser's guest secrets
 // otherwise; never anyone else's, docs/adr/0008), merged with every board
@@ -518,14 +544,15 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
 function PeekBoard({ doc }: { doc: Y.Doc }) {
   const store = useQuickdrawStore();
   const board = useRef<QuickdrawRef>(null);
-  useBoardSync(doc, store);
+  useBoardSync(doc, store, undefined, { oneWay: true });
+  useLookOnly(board, true, { guard: true });
   useEffect(() => {
     board.current?.editor?.fitContent({ margin: 32, maxZoom: 1 });
   }, [doc]);
   return (
     <section className="board-wrap">
-      <div className="board-actions"><span>This browser's copy: look, but not change.</span></div>
-      <Quickdraw ref={board} className="quickdraw-surface" store={store} grid="dots" theme="light" readonly autoFit themeToggle={false} watermark={false} />
+      <div className="board-actions"><span>{LOOK_HINT}</span></div>
+      <Quickdraw ref={board} className="quickdraw-surface" store={store} grid="dots" theme="light" hideUi autoFit themeToggle={false} watermark={false} />
     </section>
   );
 }
@@ -649,7 +676,6 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
   const [config, setConfig] = useState(savedHostConfig);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [colleagues, setColleagues] = useState(false);
   const [imported, setImported] = useState<ParsedBoard | null>(null);
   const list = useRoomList();
   const [copies, setCopies] = useState<LocalCopy[] | null>(null);
@@ -664,12 +690,6 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
   const [peek, setPeek] = useState<string | null>(null);
   const narrow = useNarrow();
   const peeked = narrow ? undefined : copies?.find((copy) => copy.database === peek);
-  useEffect(() => {
-    if (!colleagues) return;
-    const close = (event: KeyboardEvent) => event.key === "Escape" && setColleagues(false);
-    addEventListener("keydown", close);
-    return () => removeEventListener("keydown", close);
-  }, [colleagues]);
   const riffModels = useRiffModels();
   const useRiff = riffModels === true && config.models === "riff";
   // Signed in, your GitHub login is the default name.
@@ -693,7 +713,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
 
   return (
     <main className="landing home">
-      <header><strong className="brand">riff</strong><span>Collaborative design crits</span><Account user={user} onColleagues={() => setColleagues((open) => !open)} /></header>
+      <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
       {peeked ? <BoardPeek copy={peeked} room={list?.rooms.find((room) => room.id === peeked.roomId) ?? null} onClose={() => setPeek(null)} /> : (
       <section className="landing-copy">
         <span className="overline">A shared studio for small groups</span>
@@ -754,11 +774,6 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
         if (narrow) location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`);
         else setPeek((current) => current === copy.database ? null : copy.database);
       }} />
-      {colleagues && (
-        <div className="overlay" onClick={(event) => event.target === event.currentTarget && setColleagues(false)}>
-          <div role="dialog" aria-modal="true" aria-label="Colleagues"><ColleaguesPanel onClose={() => setColleagues(false)} /></div>
-        </div>
-      )}
     </main>
   );
 }
@@ -824,16 +839,20 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   onSelection: (ids: string[]) => void;
   onStageSelection: () => void;
 }) {
+  const board = useRef<QuickdrawRef>(null);
+  // read-only still pans and zooms; nothing else reaches the board
+  useLookOnly(board, readOnly !== null);
   return (
     <section className="board-wrap">
       <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span>Draw, write, paste images, or move things around.</span><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button></>}</div>
       {notice && <p className="board-notice" role="alert">{notice}</p>}
       <Quickdraw
+        ref={board}
         className="quickdraw-surface"
         store={store}
         grid="dots"
         theme="light"
-        readonly={readOnly !== null}
+        hideUi={readOnly !== null}
         styles={{ dash: "solid" }}
         themeToggle={false}
         watermark={false}
@@ -1342,23 +1361,46 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
 }
 
 // A board from this browser's copy alone: no server, nobody else, nothing
-// to change. Export works the same as in the room.
+// to change, but you can look around it. The start page's header (sign
+// in, colleagues) above the copy's own bar; the prompts open beside the
+// board, or in its place on a phone, never over it. Export works the same
+// as in the room.
 function CopyBoard({ copy, doc }: { copy: LocalCopy; doc: Y.Doc }) {
+  const user = useUser();
   const store = useQuickdrawStore();
-  useBoardSync(doc, store);
+  const board = useRef<QuickdrawRef>(null);
+  const [showPrompts, setShowPrompts] = useState(false);
+  useBoardSync(doc, store, undefined, { oneWay: true });
+  useLookOnly(board, true, { guard: true });
+  useEffect(() => {
+    board.current?.editor?.fitContent({ margin: 48, maxZoom: 1 });
+  }, [doc]);
   const prompts = snapshotPrompts(doc.getMap("prompts"));
   const name = copy.code ? `room ${copy.code}` : "a room";
+  const asOf = copy.lastOpened && new Date(copy.lastOpened).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
   return (
     <div className="app copy-view">
-      <header className="topbar">
+      <header className="site-bar">
         <button className="brand brand-button" onClick={() => location.assign(location.pathname)}>riff</button>
-        <div className="room-name"><span>Copy of {name}</span>{copy.lastOpened && <small>last opened {shortDate(copy.lastOpened)}</small>}</div>
-        <button className="share" onClick={() => downloadBoard(exportBoard({ code: copy.code ?? "board", doc }))}>Export</button>
+        <span>Collaborative design crits</span>
+        <SiteAccount user={user} />
       </header>
-      <p className="room-banner ended" role="status">This is the copy this browser kept of {name}. It isn't connected to anyone, and nothing here can be changed.</p>
-      <main className="workspace">
-        <BoardView store={store} selected={[]} readOnly="A copy: look, but not change." notice={null} onSelection={() => {}} onStageSelection={() => {}} />
-        <Staging prompts={prompts} canQueue={false} readOnly onAdd={() => {}} onQueue={() => {}} onDelete={() => {}} />
+      <div className="copy-bar">
+        <div>
+          <strong>Copy of {copy.code ? <>room <code>{copy.code}</code></> : "a room"}</strong>
+          <small>{asOf ? `As of ${asOf}. ` : ""}The copy this browser kept: not connected to anyone, and nothing here can be changed.</small>
+        </div>
+        <span className="copy-actions">
+          {prompts.length > 0 && <button className={`prompts-toggle${showPrompts ? " active" : ""}`} aria-pressed={showPrompts} onClick={() => setShowPrompts((open) => !open)}>Prompts <span>{prompts.length}</span></button>}
+          <button className="copy-export" onClick={() => downloadBoard(exportBoard({ code: copy.code ?? "board", doc }))}>Export</button>
+        </span>
+      </div>
+      <main className={`copy-board${showPrompts ? " with-prompts" : ""}`} aria-label={`Board of ${name}`}>
+        <section className="board-wrap">
+          <div className="board-actions"><span>{LOOK_HINT}</span></div>
+          <Quickdraw ref={board} className="quickdraw-surface" store={store} grid="dots" theme="light" hideUi autoFit themeToggle={false} watermark={false} />
+        </section>
+        {showPrompts && <Staging prompts={prompts} canQueue={false} readOnly onAdd={() => {}} onQueue={() => {}} onDelete={() => {}} />}
       </main>
     </div>
   );

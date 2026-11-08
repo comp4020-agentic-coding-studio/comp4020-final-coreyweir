@@ -107,6 +107,30 @@ async function stage(tab, text) {
   await tab.waitForFunction((value) => [...document.querySelectorAll(".prompt-card textarea")].some((element) => element.value === value), { timeout: 10_000, polling: 100 }, text);
 }
 
+// A read-only board still moves: a drag pans it, ctrl and the wheel zoom
+// it (lookOnly.ts puts the camera on the board as data-camera).
+async function looksAround(tab, scope) {
+  const surface = `${scope} [data-camera]`;
+  await tab.waitForSelector(surface);
+  const camera = () => tab.$eval(surface, (element) => element.dataset.camera.split(",").map(Number));
+  const box = await (await tab.$(surface)).boundingBox();
+  const [x, y, z] = await camera();
+  await tab.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await tab.mouse.down();
+  await tab.mouse.move(box.x + box.width / 2 - 120, box.y + box.height / 2 - 60, { steps: 6 });
+  await tab.mouse.up();
+  const [x2, y2] = await camera();
+  assert.ok(Math.abs(x2 - x) > 20 || Math.abs(y2 - y) > 20, `a drag pans the board (${x},${y} -> ${x2},${y2})`);
+  await tab.keyboard.down("Control");
+  await tab.mouse.wheel({ deltaY: -200 });
+  await tab.keyboard.up("Control");
+  await tab.waitForFunction((sel, before) => Number(document.querySelector(sel).dataset.camera.split(",")[2]) !== before, { timeout: 2000, polling: 50 }, surface, (await camera())[2]).catch(() => {});
+  const [, , z2] = await camera();
+  assert.notEqual(z2, z, "ctrl and the wheel zoom it");
+  // and nothing on it moved: the hand tool, never select
+  assert.equal(await tab.$eval(surface, (element) => element.style.cursor || getComputedStyle(element).cursor), "grab");
+}
+
 const prompts = (tab) => tab.$$eval(".prompt-card textarea", (elements) => elements.map((element) => element.value));
 
 async function pasteImage(tab, side) {
@@ -201,16 +225,24 @@ try {
     assert.ok(await bo.$(".entry-card > nav"), "the forms stay beside the board");
     assert.equal(await bo.$(".board-peek .enter"), null, "no Enter for an ended room");
     await shot(bo, "board-peek");
+    await looksAround(bo, ".board-peek");
     await Promise.all([bo.waitForNavigation(), bo.click(".board-peek .full-page")]);
   } else {
     await Promise.all([bo.waitForNavigation(), clickText(bo, ".your-rooms li .actions button", /^Open$/)]);
   }
   assert.match(bo.url(), /\?copy=room%2F/, "an ended room opens as this browser's copy");
-  await waitText(bo, ".room-banner", /copy this browser kept of room/);
+  await waitText(bo, ".copy-bar", new RegExp(`Copy of room ${code}.*copy this browser kept`));
+  assert.ok(await bo.$(".site-bar .account"), "the copy's page has the start page's header");
+  await shot(bo, "copy-view");
+  await looksAround(bo, ".copy-board");
+  // The prompts open on request, beside the board (in its place on a phone).
+  assert.equal(await bo.$(".prompt-card"), null, "the prompts don't cover the board");
+  await waitText(bo, ".copy-bar .prompts-toggle", /Prompts\s*1/);
+  await bo.click(".copy-bar .prompts-toggle");
   await bo.waitForFunction(() => document.querySelectorAll(".prompt-card").length === 1 && !document.querySelector(".new-prompt"), { timeout: 10_000, polling: 100 });
   assert.deepEqual(await prompts(bo), ["staged idea"]);
-  await shot(bo, "copy-view");
-  await bo.click(".topbar .share");
+  await shot(bo, "copy-view-prompts");
+  await bo.click(".copy-bar .copy-export");
   const fromCopy = await lastDownload(bo, 1);
   assert.equal(assetsOf(fromCopy.file)[0].src, image.src, "the copy's image is the room's, byte for byte");
   assert.deepEqual(fromCopy.file.queue, []);
