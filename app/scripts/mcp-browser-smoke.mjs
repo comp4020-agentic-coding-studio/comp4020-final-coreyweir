@@ -118,14 +118,9 @@ try {
   await blank.keyboard.type("remember the word pineapple", { delay: 20 });
   await blank.keyboard.press("Enter");
   await waitRows(blank, ".xterm-rows", /Pineapple acknowledged/);
-  // A built-in server (Riff's own `web`, added at boot) survives Apply.
-  const BUILT_IN = { type: "stdio", command: "node", args: ["/opt/claude/web-mcp.mjs"] };
-  await blank.evaluate((builtIn) => {
-    const volume = window.__c.pod.volume;
-    const config = JSON.parse(volume.readFileSync("/home/user/.claude.json", "utf8"));
-    config.mcpServers = { ...config.mcpServers, web: builtIn };
-    volume.writeFileSync("/home/user/.claude.json", JSON.stringify(config));
-  }, BUILT_IN);
+  // A built-in server (Riff's own `web`, webTools.ts, added at boot) survives Apply.
+  const BUILT_IN = { type: "stdio", command: "node", args: ["/opt/claude/web-mcp.mjs", "--stdio"], env: {} };
+  assert.deepEqual(JSON.parse(config).mcpServers.web, BUILT_IN, "the built-in web server is there from boot");
   await blank.evaluate((entries) => { window.__custom = entries; }, custom);
   const restarted = await blank.evaluate(async () => {
     const { DEFAULT_TOOLSETS } = await import("/src/mcp.ts");
@@ -149,7 +144,8 @@ try {
   assert.deepEqual(next.blocks.at(-1), "which word?");
   assert.ok(next.messages >= 3, `the turn after the restart carries the conversation (${next.messages} messages)`);
   await waitRows(blank, ".xterm-rows", /which word\?[\s\S]*Pineapple acknowledged/);
-  const lines = await mcpLines(["github", ...custom.map((entry) => entry.name)]);
+  const lines = await mcpLines(["github", "web", ...custom.map((entry) => entry.name)]);
+  assert.match(lines.web ?? "", /web · ✔ connected · 2 tools/, "the built-in web server, after Apply");
   const after = lines.github;
   const log = await blank.evaluate(() => window.__log);
   // Custom servers: a placeholder per server in the config, the real value

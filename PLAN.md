@@ -740,6 +740,41 @@ auto-release at the latest.
   (the guest is uid 0 already) would be cheap, but it pretends, so it's a
   call for Corey.
 
+- ~~**Web search and page reading for the host's Claude**~~ (versatility;
+  done 9 Nov, Corey's call). Claude Code's WebFetch fetches from the host's
+  browser, so CORS refuses most sites (measured: example.com and Wikipedia
+  fail, raw.githubusercontent.com works), and its WebSearch is a provider
+  server tool. Rejected: Claude Code's remote-session web routes (an own
+  endpoint like the course's LiteLLM wouldn't serve them) and provider
+  server tools (Anthropic's `web_fetch`, OpenRouter's): the room would have
+  no evidence a fetch happened. Built: `app/public/claude/web-mcp.mjs`, a
+  dependency-free JavaScript port of Corey's duckduckgo-jina-mcp, written
+  into the pod at boot and started by Claude Code as a user-scoped stdio
+  MCP server (`~/.claude.json`, `app/src/webTools.ts`). `search` reads
+  DuckDuckGo's HTML results through Jina Reader and `fetch` reads a page
+  through it (12,000 characters); Jina allows any origin, so both work from
+  the browser, and each shows in the terminal as a tool call. The URL or
+  query goes to Jina (and DuckDuckGo); Jina's free tier is about 20
+  requests a minute per IP, the host's. On Riff's models WebSearch is
+  denied (ADR 0009). Checks: `npm run test:web-mcp` (8 tests: parsing,
+  adverts, redirect links, errors, the cut, MCP replies, stdio framing,
+  who loses WebSearch; red with the y.js advert rule or the deny removed);
+  `npm run test:web-mcp-browser` (fake API, real Jina: tools offered,
+  WebSearch not, real results and example.com come back through r.jina.ai
+  from the browser; red with no tools listed, no deny, redirects
+  unresolved, or fetching without Jina). Claude Code connects MCP servers
+  in the background: a prompt sent in the first second or so after Claude
+  starts may not be offered the tools. Tool results are plain text (a
+  numbered list, the page's markdown), not JSON, since verbose mode shows
+  them on everyone's mirror. Measured on dev with Riff's real free model
+  (Nemotron 3 Ultra), unprompted: "search the web for…" called `search`
+  and answered with the right GitHub URL; "read <Wikipedia page>" called
+  `fetch` (a site WebFetch can't read from the browser) and quoted its
+  first sentence. It sits beside the host's own MCP servers (ADR 0012) as
+  a built-in: `web` is written at boot, a host's Apply keeps it, and a host
+  server named `web` doesn't replace it (`test:mcp-browser` checks it's in
+  the config at boot and connected in `/mcp` after Apply). Left: live.
+
 - ~~**MCP servers for the host's Claude**~~ (ADR 0012; Corey, 9 Nov). An
   "MCPs" button in the host's terminal controls: GitHub's MCP server (read
   only or read and write, toolsets), then custom servers (name, https URL,

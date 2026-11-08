@@ -93,6 +93,8 @@
     "test:queue-release-resilience-browser": "node scripts/queue-release-resilience-browser-smoke.mjs",
     "test:image-paste-browser": "node scripts/image-paste-browser-smoke.mjs",
     "test:webfetch-browser": "node scripts/webfetch-browser-smoke.mjs",
+    "test:web-mcp": "node --test scripts/web-mcp.test.mjs",
+    "test:web-mcp-browser": "node scripts/web-mcp-browser-smoke.mjs",
     "test:claude-serve-browser": "node scripts/claude-serve-browser-smoke.mjs",
     "test:terminal-status-browser": "node scripts/terminal-status-browser-smoke.mjs",
     "test:github-reconnect-browser": "node scripts/github-reconnect-browser-smoke.mjs",

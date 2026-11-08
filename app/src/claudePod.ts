@@ -20,7 +20,8 @@ import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
 import { createRiffHook, promptKeystrokes, riffHookSettings, RIFF_HOOK_COMMAND } from "./claudeHooks";
 import { isInterruptKey, type ClaudeEvent } from "./queueRelease";
-import { RIFF_MODEL } from "./api";
+import { RIFF_MODEL, riffModelsUrl } from "./api";
+import { deniedWebTools, WEB_MCP_PATH, WEB_MCP_SOURCE, webMcpServers } from "./webTools";
 import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } from "./imagePaste";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
@@ -395,9 +396,10 @@ export class ClaudePodController {
   async boot() {
     if (this.pod) return;
     this.report("Loading Claude runtime");
-    const [shim, run, claude] = await Promise.all([
+    const [shim, run, webMcp, claude] = await Promise.all([
       fetchText("/claude/shim.cjs"),
       fetchText("/claude/run.cjs"),
+      fetchText(WEB_MCP_SOURCE),
       // Derived in-browser from the published npm tarball rather than served as
       // a prebuilt artifact; cached after the first cold boot.
       loadClaudeBundle({ report: this.report }),
@@ -452,18 +454,21 @@ export class ClaudePodController {
       files: {
         "/opt/claude/shim.cjs": shim,
         "/opt/claude/run.cjs": run,
+        [WEB_MCP_PATH]: webMcp,
         "/opt/claude/claude-booted.patched.js": claude,
         "/home/user/.claude.json": JSON.stringify({
           firstStartTime: new Date().toISOString(),
           hasCompletedOnboarding: true,
           projects: { "/work/repo": { hasTrustDialogAccepted: true } },
-          // The host's MCP servers for this room, tokens as placeholders.
-          mcpServers: this.claudeMcpServers({}, mcp.servers),
+          // Riff's built-in web server (webTools.ts), then the host's MCP
+          // servers for this room, tokens as placeholders. Built-in names
+          // win, and stay through every Apply.
+          mcpServers: this.claudeMcpServers(webMcpServers(), mcp.servers),
         }),
         "/home/user/.claude/settings.json": JSON.stringify({
           showThinkingSummaries: true,
           verbose: true,
-          permissions: { defaultMode: "bypassPermissions" },
+          permissions: { defaultMode: "bypassPermissions", deny: deniedWebTools(this.config.baseUrl, riffModelsUrl()) },
           // The host chose this mode by hosting; without this Claude Code
           // asks on every boot, in red on everyone's mirror, with "No,
           // exit" as the default. The key its own dialog writes on accept
