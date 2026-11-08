@@ -3,7 +3,8 @@
 // request and records each turn's prompt: the text blocks of the last user
 // message, which is what reached the model. A prompt containing "slow"
 // gets its reply after SLOW_MS, so a smoke can send while Claude is busy;
-// one containing "fail" gets a 400, so a turn ends in an API error.
+// one containing "fail" gets a 400, so a turn ends in an API error. Image
+// blocks reaching the model are recorded per turn.
 //
 // It listens on this machine's first non-loopback address: Nodepod keeps
 // 127.0.0.0/8 inside the guest.
@@ -24,6 +25,22 @@ const cors = {
   "access-control-allow-headers": "*, authorization, x-api-key",
   "access-control-allow-methods": "*",
 };
+
+// Image blocks in a message, including inside tool results (the Read tool
+// returns an image as one), as "media_type widthxheight", the size read
+// from a PNG's header (0x0 for other types).
+function imageBlocks(content) {
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((block) => {
+    if (block?.type === "image") {
+      const bytes = Buffer.from(block.source?.data ?? "", "base64");
+      const png = bytes.length > 24 && bytes.toString("latin1", 12, 16) === "IHDR";
+      return [`${block.source?.media_type} ${png ? bytes.readUInt32BE(16) : 0}x${png ? bytes.readUInt32BE(20) : 0}`];
+    }
+    if (block?.type === "tool_result") return imageBlocks(block.content);
+    return [];
+  });
+}
 
 function textBlocks(content) {
   if (typeof content === "string") return [content];
@@ -75,8 +92,7 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
       // Claude Code also streams side requests (a title, a topic); only a
       // request that carries tools is a turn of the conversation.
       const isTurn = Array.isArray(body.tools) && body.tools.length > 0;
-      if (isTurn) (globalThis.__raw ??= []).push(lastUser);
-      if (isTurn) turns.push({ at: Date.now(), blocks, toolResult: Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result") });
+      if (isTurn) turns.push({ at: Date.now(), blocks, images: imageBlocks(lastUser?.content), toolResult: Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result") });
       if (isTurn && blocks.some((text) => text.includes("fail"))) {
         res.writeHead(400, { ...cors, "content-type": "application/json" });
         res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "the fake API refuses prompts containing fail" } }));
