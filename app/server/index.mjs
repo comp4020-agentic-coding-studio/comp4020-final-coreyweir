@@ -20,6 +20,8 @@ const healthPort = Number(process.env.HEALTH_PORT ?? 8094);
 const riff = createRiff({
   dbPath: process.env.RIFF_DB ?? "riff.sqlite",
   origin: process.env.RIFF_ORIGIN,
+  // where each room's preview lives (docs/adr/0011, fly.toml)
+  previewOrigin: process.env.RIFF_PREVIEW_ORIGIN,
   githubClientId: process.env.GITHUB_CLIENT_ID,
   githubClientSecret: process.env.GITHUB_CLIENT_SECRET,
   sessionSecret: process.env.SESSION_SECRET,

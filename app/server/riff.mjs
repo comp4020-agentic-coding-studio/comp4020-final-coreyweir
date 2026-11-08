@@ -8,6 +8,7 @@ import { createAudit } from "./audit.mjs";
 import { createAuth } from "./auth.mjs";
 import { createRooms } from "./rooms.mjs";
 import { createTerminalRelay } from "./terminalRelay.mjs";
+import { createPreviewOrigins, devPreviewTemplate } from "./previewOrigin.mjs";
 import { createPreviewRelay } from "./previewRelay.mjs";
 import { createGithubLookup } from "./github.mjs";
 import { createColleagues } from "./colleagues.mjs";
@@ -41,6 +42,10 @@ function volumeUsage(db, dbPath) {
 export function createRiff({
   dbPath,
   origin,
+  // RIFF_PREVIEW_ORIGIN: where each room's preview lives (docs/adr/0011),
+  // `https://{room}.preview.example.com`; development defaults to
+  // `*.preview.localhost` on the dev server's port.
+  previewOrigin,
   githubClientId,
   githubClientSecret,
   sessionSecret,
@@ -63,6 +68,15 @@ export function createRiff({
   const audit = createAudit({ store });
   const auth = createAuth({ store, audit, origin, clientId: githubClientId, clientSecret: githubClientSecret, sessionSecret });
   const usage = diskUsage ?? (() => volumeUsage(db, dbPath));
+  // Production and CI always set SESSION_SECRET. Without it, preview keys
+  // and origins last as long as the process, which is as long as any
+  // preview does.
+  const previewSecret = sessionSecret || randomBytes(32).toString("hex");
+  const previews = createPreviewOrigins({
+    template: previewOrigin || devPreviewTemplate(origin),
+    secret: previewSecret,
+    riffOrigin: origin,
+  });
 
   // What a member may write in each document of a room. The host writes
   // both documents, participants only the shared one; once a room has
@@ -96,9 +110,8 @@ export function createRiff({
       collaboration.storeOpenCopy(roomId);
     },
     onFull: (roomId) => collaboration.setAccess(roomId, accessOf(roomId)),
-    // Production and CI always set SESSION_SECRET. Without it, preview keys
-    // last as long as the process, which is as long as any preview does.
-    previewSecret: sessionSecret || randomBytes(32).toString("hex"),
+    previewSecret,
+    previewOriginFor: previews.originFor,
     models: Boolean(openrouterKey),
     onRoomChanged: (roomId) => {
       publishRoom(roomId);
@@ -216,6 +229,8 @@ export function createRiff({
   const previewRelay = createPreviewRelay({
     authorize: relayAuthorize,
     onRefused: relayRefused,
+    labelOf: previews.labelOf,
+    labelFor: previews.labelFor,
     // A page load is dozens of requests, so refusals are tallied.
     authorizeView: (roomId, key) => {
       const who = rooms.resolvePreview(roomId, key);
@@ -267,6 +282,12 @@ export function createRiff({
   // Connect-style: answers what it owns, passes the rest to `next`.
   function middleware(request, response, next) {
     const url = new URL(request.url ?? "/", "http://localhost");
+    // A preview host reaches the preview relay and nothing else of Riff's:
+    // no app, no API, no sign-in (docs/adr/0011).
+    if (previews.labelOf(request) !== null) {
+      previewRelay.middleware(request, response, () => notOnPreviewHost(response));
+      return;
+    }
     const run = async () => {
       if (await auth.handle(request, response, url)) return;
       if (await rooms.handle(request, response, url)) return;
@@ -275,6 +296,15 @@ export function createRiff({
       previewRelay.middleware(request, response, next);
     };
     run().catch((error) => fail(response, error));
+  }
+
+  function notOnPreviewHost(response) {
+    response.writeHead(404, {
+      "cache-control": "no-store",
+      "content-type": "text/plain; charset=utf-8",
+      "cross-origin-resource-policy": "cross-origin",
+    });
+    response.end("Not found");
   }
 
   function refuseUpgrade(socket, status, text) {
@@ -294,6 +324,12 @@ export function createRiff({
   function handleUpgrade(request, socket, head) {
     const url = new URL(request.url ?? "/", "http://localhost");
     const path = url.pathname;
+    // Riff's sockets carry cookies and secrets; none of them opens on a
+    // preview host.
+    if (previews.labelOf(request) !== null) {
+      refuseUpgrade(socket, 404, "Not Found");
+      return true;
+    }
     const ours =
       path === "/collaboration" ||
       path.startsWith("/collaboration/") ||

@@ -15,6 +15,15 @@ export function previewRelayUrl(roomId: string, previewKey: string, generation: 
   return `/room-preview/${encodeURIComponent(roomId)}/${encodeURIComponent(previewKey)}/${generation}/`;
 }
 
+/** Where a member's preview frame loads, host and participant alike: the
+ * room's own preview origin, through the relay (docs/adr/0011). A page
+ * Claude wrote never runs on Riff's origin, where it could read the host's
+ * tokens or act as them. One place, so the host's frame can later load from
+ * its own pod on that origin instead of round-tripping. */
+export function previewFrameUrl(previewOrigin: string, roomId: string, previewKey: string, generation: number) {
+  return `${previewOrigin}${previewRelayUrl(roomId, previewKey, generation)}`;
+}
+
 function controlUrl(roomId: string) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${location.host}/preview-control/${encodeURIComponent(roomId)}`;

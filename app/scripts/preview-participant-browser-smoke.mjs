@@ -119,13 +119,22 @@ try {
   const participant = await participantContext.newPage();
   participant.on("pageerror", (error) => errors.push(String(error)));
   await participant.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
-  const relayUrl = `${baseUrl}/room-preview/${room}/${joined.member.previewKey}/1/`;
+  // The room's own preview origin (docs/adr/0011), never Riff's.
+  const previewOrigin = joined.member.previewOrigin;
+  assert.notEqual(new URL(previewOrigin).origin, new URL(baseUrl).origin);
+  const relayUrl = `${previewOrigin}/room-preview/${room}/${joined.member.previewKey}/1/`;
   // the room id alone, without a member's key, is refused
-  assert.equal(await participant.evaluate((url) => fetch(url).then((response) => response.status), `${baseUrl}/room-preview/${room}/1/`), 403);
+  assert.equal(await participant.evaluate((url) => fetch(url).then((response) => response.status), `${previewOrigin}/room-preview/${room}/1/`), 403);
+  // and Riff's origin doesn't serve the preview at all
+  assert.equal(await participant.evaluate((url) => fetch(url).then((response) => response.status), `${baseUrl}/room-preview/${room}/${joined.member.previewKey}/1/`), 404);
   await participant.evaluate((url) => {
     const iframe = document.createElement("iframe");
     iframe.className = "participant-preview";
-    iframe.sandbox.add("allow-scripts");
+    // as App.tsx's PreviewView frames it
+    iframe.sandbox.add("allow-forms", "allow-modals", "allow-scripts", "allow-same-origin");
+    // In view: a frame on another origin runs out of process, and a click
+    // in it doesn't scroll the page to it.
+    iframe.style.cssText = "position:fixed;top:0;left:0;width:600px;height:400px";
     iframe.src = url;
     document.body.append(iframe);
   }, relayUrl);

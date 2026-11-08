@@ -20,6 +20,8 @@ export function createRooms({
   audit,
   origin,
   previewSecret,
+  // (roomId) => the origin that room's preview is served on (docs/adr/0011)
+  previewOriginFor,
   // whether the server has Riff's own model key, so hosts get a key for it
   // (docs/adr/0009)
   models = false,
@@ -42,6 +44,7 @@ export function createRooms({
   log = () => {},
 }) {
   if (!previewSecret) throw new Error("createRooms needs a previewSecret");
+  if (typeof previewOriginFor !== "function") throw new Error("createRooms needs previewOriginFor");
   if (typeof githubLookup !== "function") throw new Error("createRooms needs githubLookup");
   const s = store.statements;
 
@@ -259,6 +262,7 @@ export function createRooms({
     name: member.name,
     host: Boolean(member.is_host),
     previewKey: previewKey(member),
+    previewOrigin: previewOriginFor(member.room_id),
     ...(models && member.is_host ? { modelKey: modelKey(member) } : {}),
     ...(secret ? { secret } : {}),
   });
