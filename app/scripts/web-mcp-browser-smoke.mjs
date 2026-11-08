@@ -11,8 +11,10 @@
 //   mcp__web__fetch and no WebSearch; a search returns real DuckDuckGo
 //   results and a fetch returns example.com's text, both through r.jina.ai.
 //
-// Needs the internet (r.jina.ai, DuckDuckGo through it). Can't tell apart:
-// a Jina outage from a broken server (both fail the search).
+// Needs the internet (r.jina.ai, DuckDuckGo through it). When Jina refuses
+// DuckDuckGo (it did for hours on 9 Nov), the search step only checks that
+// the tool says so plainly; it then can't tell whether parsing still works
+// (test:web-mcp covers that offline).
 //
 // RIFF_URL=http://127.0.0.1:8096 npm run test:web-mcp-browser
 import assert from "node:assert/strict";
@@ -131,10 +133,18 @@ try {
   assert(searched.tools.includes("mcp__web__search") && searched.tools.includes("mcp__web__fetch"), `web tools offered: ${searched.tools}`);
   assert(!searched.tools.includes("WebSearch"), "WebSearch isn't offered on the free models");
   assert(searched.tools.includes("WebFetch"), "WebFetch stays (CORS-open sites work)");
-  const text = JSON.parse(searched.result)[0]?.text ?? searched.result;
+  // A tool error reaches the model as plain text, a result as content blocks.
+  let text = searched.result;
+  try { text = JSON.parse(searched.result)[0]?.text ?? searched.result; } catch { /* plain text */ }
   const results = [...text.matchAll(/^\d+\. .+\n {3}(\S+)/gm)].map((match) => match[1]);
-  assert(results.length > 0 && results.every((link) => /^https?:\/\//.test(link)), `search results: ${text.slice(0, 300)}`);
-  assert(!results.some((link) => link.includes("duckduckgo.com/l/")), "redirect links resolved");
+  // Jina sometimes refuses DuckDuckGo for hours (9 Nov, others' abuse).
+  // Then the tool must say so plainly and point at fetch, not fail oddly.
+  const refused = /^Error: Web search is unavailable right now\. Don't retry the search: read a page you know with fetch instead/.test(text);
+  if (refused) console.log(`search refused upstream, and said so: ${text}`);
+  else {
+    assert(results.length > 0 && results.every((link) => /^https?:\/\//.test(link)), `search results: ${text.slice(0, 300)}`);
+    assert(!results.some((link) => link.includes("duckduckgo.com/l/")), "redirect links resolved");
+  }
 
   const fetched = await call("mcpfetch https://example.com/");
   assert.match(fetched.result, /Example Domain/, `fetch result: ${fetched.result.slice(0, 300)}`);
@@ -143,7 +153,7 @@ try {
   assert(requested.some((url) => url === "https://r.jina.ai/https://example.com/"), "the fetch left from the browser through Jina");
   assert.deepEqual([...new Set(seen)], ["mcpsearch claude+code+nodepod", "mcpfetch https://example.com/"], "the room sees each tool call");
   await page.evaluate(() => window.__controller.dispose());
-  console.log(`web MCP: ${results.length} search results, example.com fetched, both through Jina from the browser; WebSearch denied on the free models.`);
+  console.log(`web MCP: ${refused ? "search refused upstream (plain error)" : `${results.length} search results`}, example.com fetched, both through Jina from the browser; WebSearch denied on the free models.`);
 } finally {
   await browser.close();
   await fake.close();

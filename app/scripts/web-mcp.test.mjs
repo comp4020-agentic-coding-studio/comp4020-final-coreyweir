@@ -51,11 +51,17 @@ test("search and fetch go through Jina Reader", () => {
 
 test("a search says why it found nothing", async () => {
   assert.match((await search({ query: "" })).error, /required/);
-  assert.match((await search({ query: "x" }, reply(429, "slow down"))).error, /HTTP 429/);
-  assert.match((await search({ query: "x" }, reply(200, "<div class=anomaly-modal>"))).error, /blocked/);
-  assert.match((await search({ query: "x" }, reply(200, "nothing here"))).error, /No search results/);
+  const unavailable = /^Web search is unavailable right now\. Don't retry the search: read a page you know with fetch instead/;
+  assert.match((await search({ query: "x" }, reply(429, "slow down"))).error, /HTTP 429, too many requests/);
+  assert.match((await search({ query: "x" }, reply(429, "slow down"))).error, unavailable);
+  // What Jina answered on 9 Nov, for hours: someone else's abuse got DuckDuckGo blocked.
+  const refused = (await search({ query: "x" }, reply(403, "AbuseAlleviationError: Anonymous access to domain html.duckduckgo.com blocked until Sun Nov 08 2026 19:23:08 GMT+0000 (Coordinated Universal Time) due to previous abuse found on https://html.duckduckgo.com/html/?q=x: Suspicious action: Domain resolve"))).error;
+  assert.match(refused, unavailable);
+  assert.match(refused, /Jina Reader is refusing DuckDuckGo until Sun Nov 08 2026 19:23:08 UTC, because of others' abuse/);
+  assert.match((await search({ query: "x" }, reply(200, "<div class=anomaly-modal>"))).error, /bot check/);
+  assert.match((await search({ query: "x" }, reply(200, "nothing here"))).error, /^No results for that query/);
   assert.equal((await search({ query: "x" }, reply(200, PAGE))).results.length, 3);
-  assert.equal((await search({ query: "x" }, async () => { throw new TypeError("Failed to fetch"); })).error, "Failed to fetch");
+  assert.match((await search({ query: "x" }, async () => { throw new TypeError("Failed to fetch"); })).error, /Jina Reader didn't answer: Failed to fetch/);
 });
 
 test("a fetch returns the page's text, cut at the limit", async () => {
@@ -78,7 +84,7 @@ test("MCP: initialize, tools/list, tools/call, unknown method; notifications get
   const searched = await handle({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "search", arguments: { query: "x", max_results: 2 } } }, reply(200, PAGE));
   assert.equal(searched.result.content[0].text, "1. Claude Code overview\n   https://docs.claude.com/claude-code\n   Claude Code is an agentic coding tool that lives in your terminal and understands your codebase.\n\n2. Second result\n   https://example.org/second");
   const failed = await handle({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "search", arguments: { query: "x" } } }, reply(503, "down"));
-  assert.deepEqual([failed.result.isError, failed.result.content[0].text], [true, "Error: Jina returned HTTP 503: down"]);
+  assert.deepEqual([failed.result.isError, failed.result.content[0].text], [true, "Error: Web search is unavailable right now. Don't retry the search: read a page you know with fetch instead (the project's docs, its GitHub repository, its npm or PyPI page), or ask the user for a link. (Jina Reader answered HTTP 503.)"]);
   assert.equal((await handle({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "nope" } })).error.code, -32602);
   assert.equal((await handle({ jsonrpc: "2.0", id: 5, method: "resources/list" })).error.code, -32601);
   assert.equal(await handle({ jsonrpc: "2.0", method: "notifications/initialized" }), undefined);
