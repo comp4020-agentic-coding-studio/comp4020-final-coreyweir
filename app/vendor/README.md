@@ -22,11 +22,17 @@ wasmer, compare `dist/wasmer_js_bg.wasm` with `../dist/assets/wasmer_js_bg-*.was
 
 ## @scelar/nodepod
 
-`scelar-nodepod-1.9.20-riff.27.tgz` is the private Riff build of
+`scelar-nodepod-1.9.20-riff.N.tgz` is the private Riff build of
 `@scelar/nodepod`. It includes the source-level environment, shell, Git binary,
 Preview, external-command lifecycle, direct external-command routing,
 binary-safe external-command I/O, terminal streaming, and byte-safe live
 external-command stdin maintained in the fork.
+
+Its source is the `chore: release riff.N` commit on `nodepod_fork`'s `main`
+(`riff.46` is `741e004`). A release cut on a side branch is merged into
+`main` before its tarball lands here, so the source of what ships is never
+only on a branch someone may delete. The fork's `main` is local: nothing is
+pushed to its `origin`, which is upstream's.
 
 Riff installs this immutable archive through `package-lock.json`; it is not
 published to a public registry and must not be replaced by a mutable `npm link`.

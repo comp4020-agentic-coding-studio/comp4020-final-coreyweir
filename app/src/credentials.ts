@@ -24,6 +24,28 @@ export function credentialFor(kind: "model" | "github", value: string, origins: 
 }
 
 /**
+ * Give a served credential a new value (GitHub reconnected after a refusal).
+ * The guest keeps its placeholder; the service worker forgets the value it
+ * cached, so its next request asks the page and gets this one. Resolves once
+ * the worker says the old value is gone (or there is no worker to have it).
+ */
+export async function replaceCredential(credential: Credential, value: string): Promise<void> {
+  credential.value = value;
+  const worker = "serviceWorker" in navigator ? navigator.serviceWorker.controller : null;
+  if (!worker) return;
+  const channel = new MessageChannel();
+  const forgotten = new Promise<void>((resolve) => {
+    channel.port1.onmessage = () => resolve();
+    // A worker that was stopped has no cache left to clear, and a stopped
+    // worker wakes for this message anyway; the timer only bounds a hang.
+    setTimeout(resolve, 2000);
+  });
+  worker.postMessage({ type: "riff-credential-forget", placeholders: [credential.placeholder] }, [channel.port2]);
+  await forgotten;
+  channel.port1.close();
+}
+
+/**
  * Answer the service worker's requests for these credentials until the
  * returned function is called. Only the service worker can post to
  * `navigator.serviceWorker`'s message event, so guest code (workers, preview

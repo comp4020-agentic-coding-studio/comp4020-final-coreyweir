@@ -76,7 +76,10 @@
     "test:limits-browser": "node scripts/limits-browser-smoke.mjs",
     "test:boards-browser": "node scripts/boards-browser-smoke.mjs",
     "test:queue-release-browser": "node scripts/queue-release-browser-smoke.mjs",
-    "test:image-paste-browser": "node scripts/image-paste-browser-smoke.mjs"
+    "test:image-paste-browser": "node scripts/image-paste-browser-smoke.mjs",
+    "test:github-reconnect-browser": "node scripts/github-reconnect-browser-smoke.mjs",
+    "test:auth-callback": "node --test --test-force-exit scripts/auth-callback.test.mjs",
+    "test:github-check": "node --test src/githubCheck.test.ts"
   },
   "dependencies": {
     "@hocuspocus/provider": "^4.7.0",

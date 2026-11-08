@@ -548,9 +548,19 @@ auto-release at the latest.
     What failed at the crit wasn't recorded, so which of these it was is a
     hypothesis. Checked by `test:credentials-browser` (red without the
     service worker's notice) and nodepod's `git-shell.test.ts` (red before).
-    Left: reconnecting GitHub mid-session needs a page reload; Nodepod's git
-    ignores `.gitignore` and re-uploads every file on each push (secondary
-    rate limits on big trees).
+    Reconnecting no longer needs a reload (8 Nov): the refusal banner opens
+    "Connect GitHub again" in a new tab (`/?github=reconnect`, OAuth or a
+    pasted token); the room's tab hears the new sealed token (a storage
+    event), and the guest keeps its placeholder while `riff-sw.js` forgets
+    the old value and asks the page for the new one. Claude keeps running.
+    The refused token is forgotten on the spot, so the next boot doesn't
+    reuse it. Checked by `test:github-reconnect-browser` (dev: a revoked
+    token answers 401, a real one pasted in the other tab answers 200 from
+    the same pod and placeholder; red when the worker isn't told to
+    forget). A pod booted with no GitHub at all still needs Claude booted
+    again: its guest has no placeholder to swap.
+    Left: Nodepod's git ignores `.gitignore` and re-uploads every file on
+    each push (secondary rate limits on big trees).
   - ~~"Insecure sources" in Chrome's address bar.~~ Every Nodepod worker ran
     the sqlite and zlib polyfills' Node fallbacks, a dynamic
     `import("node:fs")` (and `node:module`, `node:process`). A browser has

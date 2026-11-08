@@ -24,7 +24,7 @@ import { RIFF_MODEL } from "./api";
 import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } from "./imagePaste";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
-import { credentialFor, GITHUB_ORIGINS, serveCredentials, type Credential } from "./credentials";
+import { credentialFor, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
 import bridgeStubUrl from "./assets/wasmer/bridge-stub.wasm?url";
@@ -1126,5 +1126,18 @@ export class ClaudePodController {
     this.stopServingCredentials = null;
     this.modelCredential = null;
     this.githubCredential = null;
+  }
+
+  /**
+   * GitHub was connected again (after a refused token) while this pod runs.
+   * The guest keeps the placeholder it booted with; requests from now on
+   * carry the new token. False when the pod booted without GitHub: then the
+   * guest has no placeholder to swap, and only a restart gives it one.
+   */
+  async replaceGitHubToken(token: string): Promise<boolean> {
+    if (!this.githubCredential) return false;
+    await replaceCredential(this.githubCredential, token);
+    this.config = { ...this.config, githubToken: token };
+    return true;
   }
 }
