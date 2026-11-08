@@ -454,7 +454,7 @@ export class ClaudePodController {
           hasCompletedOnboarding: true,
           projects: { "/work/repo": { hasTrustDialogAccepted: true } },
           // The host's MCP servers for this room, tokens as placeholders.
-          mcpServers: mcp.servers,
+          mcpServers: this.claudeMcpServers({}, mcp.servers),
         }),
         "/home/user/.claude/settings.json": JSON.stringify({
           showThinkingSummaries: true,
@@ -680,6 +680,21 @@ export class ClaudePodController {
     this.report("Claude running");
   }
 
+  private hostMcpNames = new Set<string>();
+
+  /**
+   * The one place Claude's whole `mcpServers` is put together: what's
+   * already there and the host didn't set (built-in servers such as `web`)
+   * stays and wins over a host server of the same name, the host's previous
+   * servers go, and the host's current ones (`mcpServers()` in mcp.ts) are
+   * added.
+   */
+  private claudeMcpServers(current: Record<string, unknown>, host: Record<string, unknown>) {
+    const builtIn = Object.fromEntries(Object.entries(current).filter(([name]) => !this.hostMcpNames.has(name)));
+    this.hostMcpNames = new Set(Object.keys(host).filter((name) => !(name in builtIn)));
+    return { ...host, ...builtIn };
+  }
+
   /** Claude's mcpServers and the credentials behind their placeholders. */
   private mcpConfig(settings: McpSettings) {
     const credentials = new Map<Credential, string>();
@@ -721,7 +736,7 @@ export class ClaudePodController {
     const path = "/home/user/.claude.json";
     const volume = this.pod.volume;
     const config = volume.existsSync(path) ? JSON.parse(String(volume.readFileSync(path, "utf8"))) as Record<string, unknown> : {};
-    config.mcpServers = servers;
+    config.mcpServers = this.claudeMcpServers((config.mcpServers ?? {}) as Record<string, unknown>, servers);
     volume.writeFileSync(path, JSON.stringify(config, null, 2));
     if (!this.isRunning() || !this.process) return false;
     await this.restartClaude("Restarting Claude to load the MCP servers. The conversation carries on.");

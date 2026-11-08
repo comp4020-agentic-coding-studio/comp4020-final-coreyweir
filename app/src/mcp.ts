@@ -89,6 +89,13 @@ export function forgetMcp(roomId: string) {
   }
 }
 
+/**
+ * Names the host's custom servers can't take: GitHub's MCP above, and
+ * Riff's built-in `web` server (search and fetch), which is in every
+ * Claude's config whatever the host adds.
+ */
+export const RESERVED_NAMES = ["github", "web"];
+
 /** A name Claude accepts for a server: letters, digits, - and _. */
 export function serverName(name: string) {
   return name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
@@ -115,7 +122,7 @@ export function mcpServers(settings: McpSettings, github: { placeholder: string 
   }
   for (const entry of settings.custom) {
     const name = serverName(entry.name);
-    if (!name || servers[name]) continue;
+    if (!name || servers[name] || RESERVED_NAMES.includes(name)) continue;
     const placeholder = entry.header && entry.value ? placeholderFor(entry) : null;
     servers[name] = { type: "http", url: entry.url, ...(placeholder ? { headers: { [entry.header]: placeholder } } : {}) };
   }
@@ -132,6 +139,7 @@ export function customProblem(entry: CustomMcp, others: CustomMcp[], allowHttp =
   const name = serverName(entry.name);
   if (!name) return "Give it a name: letters, digits, - or _.";
   if (name === "github") return "\"github\" is GitHub's own server, above. Pick another name.";
+  if (RESERVED_NAMES.includes(name)) return `"${name}" is Riff's own server, always there. Pick another name.`;
   if (others.some((other) => serverName(other.name) === name)) return `There's already a server called "${name}".`;
   let url: URL;
   try {

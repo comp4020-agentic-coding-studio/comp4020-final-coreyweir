@@ -9,6 +9,7 @@ test("a custom server needs a free name, an https URL and, with a token, its hea
   assert.equal(customProblem(entry(), []), null);
   assert.match(customProblem(entry({ name: " !! " }), []) ?? "", /Give it a name/);
   assert.match(customProblem(entry({ name: "GitHub" }), []) ?? "", /GitHub's own server/);
+  assert.match(customProblem(entry({ name: "Web" }), []) ?? "", /Riff's own server/);
   assert.match(customProblem(entry(), [entry({ url: "https://other.example" })]) ?? "", /already a server called "jina"/);
   assert.match(customProblem(entry({ url: "http://mcp.example/v1" }), []) ?? "", /https/);
   assert.equal(customProblem(entry({ url: "http://192.168.1.2:9/mcp" }), [], true), null, "plain http only where the page is");
@@ -25,4 +26,6 @@ test("Claude's config gets the placeholder in the header, and nothing for an ope
   assert.deepEqual(servers.jina, { type: "http", url: "https://mcp.jina.ai/v1" });
   assert.deepEqual(servers.mine, { type: "http", url: "https://mine.example/mcp", headers: { "X-Key": "riff-placeholder-mcp-0123" } });
   assert.equal(JSON.stringify(servers).includes("real-secret"), false);
+  const saved = mcpServers({ ...NO_MCP, custom: [entry({ name: "web", url: "https://evil.example" })] }, null, () => null);
+  assert.equal(saved.web, undefined, "a saved custom server never takes the built-in web's name");
 });

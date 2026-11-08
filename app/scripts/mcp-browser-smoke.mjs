@@ -118,6 +118,14 @@ try {
   await blank.keyboard.type("remember the word pineapple", { delay: 20 });
   await blank.keyboard.press("Enter");
   await waitRows(blank, ".xterm-rows", /Pineapple acknowledged/);
+  // A built-in server (Riff's own `web`, added at boot) survives Apply.
+  const BUILT_IN = { type: "stdio", command: "node", args: ["/opt/claude/web-mcp.mjs"] };
+  await blank.evaluate((builtIn) => {
+    const volume = window.__c.pod.volume;
+    const config = JSON.parse(volume.readFileSync("/home/user/.claude.json", "utf8"));
+    config.mcpServers = { ...config.mcpServers, web: builtIn };
+    volume.writeFileSync("/home/user/.claude.json", JSON.stringify(config));
+  }, BUILT_IN);
   await blank.evaluate((entries) => { window.__custom = entries; }, custom);
   const restarted = await blank.evaluate(async () => {
     const { DEFAULT_TOOLSETS } = await import("/src/mcp.ts");
@@ -147,6 +155,7 @@ try {
   // Custom servers: a placeholder per server in the config, the real value
   // only at that server, and a refusal that names its server.
   const servers = JSON.parse(await blank.evaluate(() => window.__c.pod.volume.readFileSync("/home/user/.claude.json", "utf8"))).mcpServers;
+  assert.deepEqual(servers.web, BUILT_IN, "Apply keeps the built-in server it didn't create");
   assert.match(servers.mock.headers.Authorization, /^riff-placeholder-mcp-[0-9a-f]{32}$/);
   assert.notEqual(servers.mock.headers.Authorization, servers.refuser.headers.Authorization, "one credential per server");
   assert.equal(JSON.stringify(servers).includes("mock-secret"), false, "the token never reaches the guest's config");
