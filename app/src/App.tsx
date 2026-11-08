@@ -971,8 +971,8 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, h
   return (
     <section className="crit-room" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
       {/* A participant's terminal stops asking once the room ends; a new one starts if the host revives it. Never remount the host's: it runs Claude. */}
-      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} />
-      <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
+      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} />
+      <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} ended={ended} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
     </section>
   );
 }
@@ -1373,7 +1373,8 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
           <button className={view === "preview" ? "active" : ""} onClick={() => setView("preview")}>Preview</button>
         </nav>
         <button className="participants" aria-expanded={panel === "people"} onClick={() => setPanel((open) => open === "people" ? null : "people")} title="People in this room">{room.participants.slice(0, 4).map((participant) => <span key={participant.clientId} style={{ background: participant.colour }} title={`${participant.name}${participant.role === "facilitator" ? " (host)" : ""}`}>{participant.name.slice(0, 1).toUpperCase()}</span>)}</button>
-        <button className="share" aria-expanded={panel === "share"} onClick={() => setPanel((open) => open === "share" ? null : "share")}>Share room</button>
+        {/* an ended room has nothing to share: nobody new can join it */}
+        {room.state !== "ended" && <button className="share" aria-expanded={panel === "share"} onClick={() => setPanel((open) => open === "share" ? null : "share")}>Share room</button>}
       </header>
 
       {room.full ? <FullBanner limitBytes={room.limitBytes} onExport={exportRoom} /> : <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} onExport={exportRoom} />}
@@ -1383,7 +1384,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}
-        {panel === "share" && <SharePanel access={access} room={room} onClose={() => setPanel(null)} />}
+        {panel === "share" && room.state !== "ended" && <SharePanel access={access} room={room} onClose={() => setPanel(null)} />}
       </main>
     </div>
   );

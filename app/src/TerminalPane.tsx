@@ -128,7 +128,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   onPreviewUrlChange: (url: string | null, generation: number) => void;
   /** What Claude is doing, from its hooks (docs/adr/0004). Host only. */
   onClaudeEvent?: (event: ClaudeEvent) => void;
-}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent }, ref) {
+  /** The room has ended: nothing will appear, so don't say "waiting". */
+  ended?: boolean;
+}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent, ended = false }, ref) {
   const targetRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ClaudePodController | null>(null);
   const previewChangeRef = useRef(onPreviewUrlChange);
@@ -313,7 +315,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   }
 
   const participantLive = channel.snapshot !== null || channel.hasData;
-  const participantStatus = participantLive ? "Host terminal live" : channel.hostConnected ? "Host connected" : "Waiting for host";
+  const participantStatus = participantLive ? "Host terminal live" : ended ? "Room ended" : channel.hostConnected ? "Host connected" : "Waiting for host";
+  // The relay's refusal of an ended room is the banner's news, not an error.
+  const channelError = channel.error === "room-ended" ? null : channel.error;
   return (
     <article className="terminal-pane">
       <header className="section-title terminal-heading" data-report={report ?? undefined}>
@@ -336,7 +340,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
           <p className="terminal-empty" role="status">
             {facilitator
               ? starting ? status : "Boot Claude to start Claude Code in this tab. Everyone in the room sees this terminal."
-              : channel.hostConnected ? "Nothing on the host's terminal yet. It appears here when they start Claude." : "Waiting for the host. Their terminal appears here."}
+              : ended ? "This room has ended, so there's no terminal to watch." : channel.hostConnected ? "Nothing on the host's terminal yet. It appears here when they start Claude." : "Waiting for the host. Their terminal appears here."}
           </p>
         )}
       </div>
@@ -348,7 +352,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
             <a href="/?github=reconnect" target="_blank" rel="noopener">Connect GitHub again</a> in a new tab: Claude keeps running here and git picks the new token up.
           </strong>
         )}
-        {(error || channel.error) && <strong>{error ?? channel.error}</strong>}
+        {(error || channelError) && <strong>{error ?? channelError}</strong>}
       </footer>
     </article>
   );
