@@ -1097,7 +1097,8 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   notice: string | null;
   selected: string[];
   onSelection: (ids: string[]) => void;
-  onStageSelection: () => void;
+  /** True if it staged something. */
+  onStageSelection: () => boolean;
   /** Why "Stage selected text" can't stage the selection, or null if it can. */
   stageWhy: string | null;
   /** The host's "Send board to Claude" (SendBoard.tsx). */
@@ -1106,9 +1107,18 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   const board = useRef<QuickdrawRef>(null);
   // read-only still pans and zooms; nothing else reaches the board
   useLookOnly(board, readOnly !== null);
+  // "Staged" on the button for a moment after it stages, in the button's
+  // own width (CSS), and said to screen readers; staging is below the
+  // board on a phone and beside it otherwise, so this is where people look.
+  const [staged, setStaged] = useState(0);
+  useEffect(() => {
+    if (!staged) return;
+    const timer = setTimeout(() => setStaged(0), 1600);
+    return () => clearTimeout(timer);
+  }, [staged]);
   return (
     <section className="board-wrap">
-      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span className="board-hint">Draw, write, paste images, or move things around.</span><div className="board-buttons"><button className="stage-selected" disabled={stageWhy !== null} title={stageWhy ?? "Stage this shape's text as a prompt"} onClick={onStageSelection}>Stage selected text</button>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} aria-label={sendBoard.button.label} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}><span className="label-wide">{sendBoard.button.label}</span><span className="label-narrow">{sendBoard.button.short}</span></button>}</div></>}{prompts !== undefined && <button className="to-staging" onClick={jumpToStaging}>{readOnly ? "Prompts" : "Add prompt"}{prompts > 0 && <span>{prompts}</span>} ↓</button>}</div>
+      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span className="board-hint">Draw, write, paste images, or move things around.</span><div className="board-buttons"><button className="stage-selected" disabled={stageWhy !== null} title={stageWhy ?? "Stage this shape's text as a prompt"} data-staged={staged ? "" : undefined} onClick={() => { if (onStageSelection()) setStaged(Date.now()); }}>Stage selected text</button><span className="stage-status" role="status">{staged ? "Staged as a prompt." : ""}</span>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} aria-label={sendBoard.button.label} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}><span className="label-wide">{sendBoard.button.label}</span><span className="label-narrow">{sendBoard.button.short}</span></button>}</div></>}{prompts !== undefined && <button className="to-staging" onClick={jumpToStaging}>{readOnly ? "Prompts" : "Add prompt"}{prompts > 0 && <span>{prompts}</span>} ↓</button>}</div>
       {notice && <p className="board-notice" role="alert">{notice}</p>}
       {sendBoard?.error && <p className="board-notice" role="alert">{sendBoard.error}</p>}
       <Quickdraw
@@ -1573,7 +1583,9 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
   const stageable = useSelectedText(store, selected);
   function stageSelected() {
     const chosen = selectedText(store, selected);
-    if ("text" in chosen) addPrompt(room.doc, room.identity.name, chosen.text, chosen.id);
+    if (!("text" in chosen)) return false;
+    addPrompt(room.doc, room.identity.name, chosen.text, chosen.id);
+    return true;
   }
 
   const terminalRef = useRef<TerminalPaneHandle>(null);
