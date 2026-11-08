@@ -17,6 +17,8 @@ import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
 import { createRiffHook, promptKeystrokes, riffHookSettings, RIFF_HOOK_COMMAND } from "./claudeHooks";
 import { isInterruptKey, type ClaudeEvent } from "./queueRelease";
+import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
+import { cloneRepository, githubRepoUrl } from "./repoClone";
 import { credentialFor, GITHUB_ORIGINS, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
@@ -84,7 +86,8 @@ const WASINIX_COREUTILS_NAMES = ["env", "stat", "du", "id", "timeout", "chmod"] 
 // env: extra variables for Claude Code (model choice for Riff's own
 // models, docs/adr/0009). Never a credential: those go through
 // credentialFor() so only a placeholder reaches the guest.
-export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string; env?: Record<string, string> };
+// workspaceRoom: the room whose saved workspace this pod opens (docs/adr/0010).
+export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string; env?: Record<string, string>; workspaceRoom?: string };
 export type PreviewRequest = { method?: string; path?: string; headers?: Record<string, string>; body?: Uint8Array | null };
 export type PreviewResponse = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
 const NODEPOD_WORKER_URL = import.meta.env.DEV
@@ -201,6 +204,12 @@ export class ClaudePodController {
   private modelCredential: Credential | null = null;
   private githubCredential: Credential | null = null;
   private stopServingCredentials: (() => void) | null = null;
+  // This room's workspace, saved in the browser (docs/adr/0010); null when
+  // it can't be (no OPFS) and the reason why.
+  private workspace: Workspace | null = null;
+  private workspaceUnsaved: string | null = null;
+  private workspacePrepared = false;
+  private guestEnv: Record<string, string> = {};
   private wasixShell: Promise<unknown> | null = null;
   /** Exec id of the interactive shell, so Ctrl-C can target it alone. */
   private wasixShellExecId: number | null = null;
@@ -401,7 +410,6 @@ export class ClaudePodController {
         "/opt/claude/shim.cjs": shim,
         "/opt/claude/run.cjs": run,
         "/opt/claude/claude-booted.patched.js": claude,
-        "/work/repo/.keep": "",
         "/home/user/.claude.json": JSON.stringify({
           firstStartTime: new Date().toISOString(),
           hasCompletedOnboarding: true,
@@ -440,7 +448,69 @@ export class ClaudePodController {
         transformCacheMaxBytes: 64 * 1024 * 1024,
       },
     });
+    this.guestEnv = env;
+    await this.openWorkspace();
     this.report("Workspace ready");
+  }
+
+  /** Restore this room's saved workspace into the fresh pod, then follow it. */
+  private async openWorkspace() {
+    const room = this.config.workspaceRoom;
+    if (!room || !this.pod) return;
+    this.report("Opening this room's saved workspace");
+    try {
+      this.workspace = await Workspace.open(this.pod.volume, room, {
+        onLost: () => {
+          this.workspaceUnsaved = "another tab of this browser took it over";
+          this.terminalNote(`\x1b[33mThis workspace is now open in another tab. Changes here are no longer saved.\x1b[0m`);
+          this.report("Workspace taken over by another tab");
+        },
+        onError: (error) => this.report(`Workspace save failed: ${error.message}`),
+      });
+      this.workspace.track();
+    } catch (error) {
+      if (error instanceof WorkspaceBusyError) throw error;
+      // No OPFS (or it failed): Claude still runs, and says it isn't saved.
+      this.workspaceUnsaved = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /**
+   * Before the first program starts: say what the workspace is, and clone
+   * the room's repository if /work/repo doesn't have one yet. An existing
+   * workspace is never re-cloned or pulled, which would overwrite unpushed
+   * work.
+   */
+  private async prepareWorkspace() {
+    if (this.workspacePrepared || !this.pod) return;
+    this.workspacePrepared = true;
+    const restored = this.workspace?.restored;
+    if (restored) {
+      this.terminalNote(`\x1b[38;5;244mRestored this room's workspace from this browser: ${restored.files} files, ${formatBytes(restored.bytes)}, saved ${new Date(restored.savedAt).toLocaleString()}.\x1b[0m`);
+    }
+    const url = githubRepoUrl(this.config.repo);
+    if (this.config.repo.trim() && !this.pod.volume.existsSync("/work/repo/.git")) {
+      if (!url) {
+        this.terminalNote(`\x1b[33mNot cloned: ${this.config.repo.trim()} isn't a GitHub repository. Ask Claude to fetch it.\x1b[0m`);
+      } else if (!this.githubCredential) {
+        this.terminalNote(`\x1b[33mNot cloned: cloning ${url} needs GitHub connected for pushing.\x1b[0m`);
+      } else {
+        this.report(`Cloning ${url}`);
+        this.terminalNote(`\x1b[38;5;244mCloning ${url} into /work/repo...\x1b[0m`);
+        const code = await cloneRepository(this.pod, url, "/work/repo", this.guestEnv, (text) => this.terminalNote(text, false));
+        if (code !== 0) this.terminalNote(`\x1b[33mThe clone failed (exit ${code}). Claude can try again with git.\x1b[0m`);
+      }
+    }
+    this.terminalNote(this.workspace && !this.workspaceUnsaved
+      ? `\x1b[38;5;244m${SAVED_SUMMARY}\x1b[0m`
+      : `\x1b[33mThis workspace isn't saved in this browser (${this.workspaceUnsaved ?? "no room"}). A reload loses it.\x1b[0m`);
+  }
+
+  /** A line in the host's terminal and everyone's mirror of it. */
+  private terminalNote(text: string, line = true) {
+    const data = `${text.replace(/(^|[^\r])\n/g, "$1\r\n")}${line ? "\r\n" : ""}`;
+    this.terminal?.xterm.write(data);
+    this.emitOutput(data);
   }
 
   attach(target: HTMLElement) {
@@ -484,6 +554,7 @@ export class ClaudePodController {
     if (!this.pod || !this.terminal) throw new Error("Terminal has not been attached");
     if (this.isRunning()) return;
     await this.waitForTerminalIdle();
+    await this.prepareWorkspace();
 
     const terminal = this.terminal;
     const xterm = terminal.xterm;
@@ -555,6 +626,8 @@ export class ClaudePodController {
         networkGatewayPort: channel.port2,
       });
       this.wasixSession = session;
+      // The store dropped file modes on its way in (workspace.ts).
+      this.workspace?.reapplyModes();
       await session.installSessionFile("ca.pem", new TextEncoder().encode(certificateAuthority.pem));
       const bridgeStubBytes = await fetchBytes(bridgeStubUrl);
       // Every name here must resolve host-side via createBridgeHostHandler →
@@ -705,6 +778,7 @@ export class ClaudePodController {
     if (this.isRunning()) return;
     this.report("Starting WASIX Bash");
     await this.waitForTerminalIdle();
+    await this.prepareWorkspace();
 
     const { session, bridge } = await this.ensureWasixSession(
       this.terminal.xterm.cols || 80,
@@ -895,6 +969,14 @@ export class ClaudePodController {
     };
   }
 
+  /** The workspace as a zip (workspaceExport.ts). The real tokens are passed
+   * only so the export can check none of them travelled. */
+  async exportWorkspace(options: Omit<import("./workspaceExport").ExportOptions, "secrets"> = {}) {
+    if (!this.pod) throw new Error("Workspace has not booted");
+    const { exportWorkspace, podSource } = await import("./workspaceExport");
+    return exportWorkspace(podSource(this.pod), { ...options, secrets: [this.config.token, this.config.githubToken ?? ""] });
+  }
+
   private notifyResize() {
     if (!this.terminal) return;
     const cols = this.terminal.xterm.cols || 80;
@@ -948,6 +1030,10 @@ export class ClaudePodController {
   }
 
   async dispose() {
+    // Save what's left before the pod goes, and let another tab have it.
+    const workspace = this.workspace;
+    this.workspace = null;
+    await workspace?.close().catch(() => {});
     this.previewServers.clear();
     this.activePreview = null;
     this.reportPreview(null);

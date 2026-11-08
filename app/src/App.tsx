@@ -20,6 +20,7 @@ import {
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
 } from "./boardFile";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
+import { SAVED_SUMMARY, type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
 
 type View = "board" | "room" | "preview";
 // models: "riff" is Riff's own free models through the server
@@ -125,12 +126,26 @@ function useUser() {
   return user;
 }
 
+// What signing out would leave on this machine: board copies, and the
+// files of rooms hosted here (docs/adr/0010).
+function leavingWhat({ boards, workspaces }: { boards: number; workspaces: number }) {
+  const parts = [
+    boards ? (boards === 1 ? "a copy of 1 board you've been in" : `copies of ${boards} boards you've been in`) : null,
+    workspaces ? (workspaces === 1 ? "the files of 1 room you hosted" : `the files of ${workspaces} rooms you hosted`) : null,
+  ];
+  return parts.filter(Boolean).join(", and ");
+}
+
+function leavingCount({ boards, workspaces }: { boards: number; workspaces: number }) {
+  return boards + workspaces;
+}
+
 function Account({ user, onColleagues }: { user: User | null | undefined; onColleagues?: () => void }) {
   // Signing out on a shared machine is when the boards it kept matter.
-  const [leaving, setLeaving] = useState<number | null>(null);
+  const [leaving, setLeaving] = useState<{ boards: number; workspaces: number } | null>(null);
   async function startSignOut() {
-    const copies = await listCopies().catch(() => []);
-    if (copies.length) setLeaving(copies.length);
+    const [copies, workspaces] = await Promise.all([listCopies().catch(() => []), listWorkspaces().catch(() => [])]);
+    if (copies.length || workspaces.length) setLeaving({ boards: copies.length, workspaces: workspaces.length });
     else await finishSignOut(false);
   }
   async function finishSignOut(deleteBoards: boolean) {
@@ -155,9 +170,9 @@ function Account({ user, onColleagues }: { user: User | null | undefined; onColl
       <button className="link" onClick={() => void startSignOut()}>Sign out</button>
       {leaving !== null && (
         <span className="signing-out" role="group" aria-label="Signing out">
-          <span>This browser has {leaving === 1 ? "a copy of 1 board" : `copies of ${leaving} boards`} you've been in. Delete {leaving === 1 ? "it" : "them"} too?</span>
+          <span>This browser has {leavingWhat(leaving)}. Delete {leavingCount(leaving) === 1 ? "it" : "them"} too?</span>
           <button onClick={() => void finishSignOut(true)}>Sign out and delete</button>
-          <button onClick={() => void finishSignOut(false)}>Sign out, keep {leaving === 1 ? "it" : "them"}</button>
+          <button onClick={() => void finishSignOut(false)}>Sign out, keep {leavingCount(leaving) === 1 ? "it" : "them"}</button>
           <button className="link" onClick={() => setLeaving(null)}>Cancel</button>
         </span>
       )}
@@ -369,16 +384,26 @@ function ColleaguesPanel({ onClose }: { onClose: () => void }) {
 // Every board this browser keeps a copy of (docs/adr/0003, second
 // amendment). Open goes to the room while you're in it, and otherwise to
 // the copy alone, read-only. Delete takes the copy and this browser's
-// place in the room with it.
+// place in the room with it, and the host's workspace for it if this
+// browser hosted it (docs/adr/0010), which can also be deleted alone.
 function LocalBoards({ list }: { list: RoomList | null }) {
   const [copies, setCopies] = useState<LocalCopy[] | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [asking, setAsking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const refresh = () => listCopies().then(setCopies, () => setCopies([]));
+  const refresh = () => Promise.all([
+    listCopies().then(setCopies, () => setCopies([])),
+    listWorkspaces().then(setWorkspaces, () => setWorkspaces([])),
+  ]);
   useEffect(() => {
     void refresh();
   }, []);
-  if (!copies?.length) return null;
+  const workspaceOf = new Map(workspaces.map((workspace) => [workspace.room, workspace]));
+  // a workspace whose board copy has gone (the browser cleared IndexedDB but
+  // not OPFS) is still listed, so none is kept silently
+  const withCopy = new Set(copies?.map((copy) => copy.roomId));
+  const alone = workspaces.filter((workspace) => !withCopy.has(workspace.room));
+  if (!copies?.length && !alone.length) return null;
   const inRooms = new Set(list?.rooms.map((room) => room.id));
 
   function open(copy: LocalCopy) {
@@ -411,13 +436,20 @@ function LocalBoards({ list }: { list: RoomList | null }) {
       <h2>Boards on this browser</h2>
       {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
-        {copies.map((copy) => (
+        {(copies ?? []).map((copy) => (
           <li key={copy.database}>
             <span className="copy-name">{copy.code ? <>Room <code>{copy.code}</code></> : "A room"}</span>
             <small>{[copy.host === null ? null : copy.host ? "hosted" : "joined", copy.lastOpened ? shortDate(copy.lastOpened) : null].filter(Boolean).join(" · ")}</small>
-            {asking === copy.database ? (
+            {copy.roomId && workspaceOf.has(copy.roomId) && <WorkspaceMarker workspace={workspaceOf.get(copy.roomId)!} />}
+            {asking === `workspace:${copy.roomId}` ? (
               <span className="actions asking">
-                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}?</span>
+                <span>Delete the host's files for this room from this browser? Anything not pushed is lost.</span>
+                <button className="danger" onClick={() => void act(() => deleteWorkspace(copy.roomId!))}>Delete files</button>
+                <button className="link" onClick={() => setAsking(null)}>Cancel</button>
+              </span>
+            ) : asking === copy.database ? (
+              <span className="actions asking">
+                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}{copy.roomId && workspaceOf.has(copy.roomId) ? ", and the host's files (anything not pushed is lost)" : ""}?</span>
                 <button className="danger" onClick={() => void act(() => deleteCopy(copy))}>Delete</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
@@ -425,20 +457,50 @@ function LocalBoards({ list }: { list: RoomList | null }) {
               <span className="actions">
                 <button className="link" onClick={() => open(copy)}>Open</button>
                 <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export</button>
+                {copy.roomId && workspaceOf.has(copy.roomId) && <button className="link" onClick={() => setAsking(`workspace:${copy.roomId}`)}>Delete files</button>}
                 <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>
               </span>
             )}
           </li>
         ))}
+        {alone.map((workspace) => (
+          <li key={`workspace:${workspace.room}`}>
+            <span className="copy-name">A room you hosted</span>
+            <small>no board copy</small>
+            <WorkspaceMarker workspace={workspace} />
+            {asking === `workspace:${workspace.room}` ? (
+              <span className="actions asking">
+                <span>Delete the host's files for this room from this browser? Anything not pushed is lost.</span>
+                <button className="danger" onClick={() => void act(() => deleteWorkspace(workspace.room))}>Delete files</button>
+                <button className="link" onClick={() => setAsking(null)}>Cancel</button>
+              </span>
+            ) : (
+              <span className="actions">
+                <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>
+              </span>
+            )}
+          </li>
+        ))}
       </ul>
-      {copies.length > 1 && (asking === "all" ? (
+      {workspaces.length > 0 && <p className="workspace-note"><small>Files: what the host's terminal had, kept so a reload or crash loses nothing. {SAVED_SUMMARY}</small></p>}
+      {(copies?.length ?? 0) + alone.length > 1 && (asking === "all" ? (
         <p className="delete-all asking">
-          <span>Delete all {copies.length} copies, and this browser's place in every room?</span>
+          <span>Delete all {copies?.length ?? 0} copies{workspaces.length ? ` and ${workspaces.length === 1 ? "the host's files" : `${workspaces.length} rooms' host files`}` : ""}, and this browser's place in every room?</span>
           <button className="danger" onClick={() => void act(deleteAllCopies)}>Delete all</button>
           <button className="link" onClick={() => setAsking(null)}>Cancel</button>
         </p>
       ) : <p className="delete-all"><button className="link" onClick={() => setAsking("all")}>Delete all</button></p>)}
     </section>
+  );
+}
+
+// A room hosted in this browser has its files here too (docs/adr/0010).
+function WorkspaceMarker({ workspace }: { workspace: WorkspaceSummary }) {
+  const saved = workspace.savedAt ? `saved ${shortDate(workspace.savedAt)} ${new Date(workspace.savedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : "not saved yet";
+  return (
+    <small className="workspace-marker" title={SAVED_SUMMARY}>
+      Files: {workspace.files.toLocaleString()} ({formatBytes(workspace.bytes)}), {saved}
+    </small>
   );
 }
 
