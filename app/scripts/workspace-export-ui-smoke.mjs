@@ -204,9 +204,8 @@ try {
       const manifest = JSON.parse(dec.decode(files["riff-workspace.json"]));
       const commit = manifest.history?.commits.find((c) => c.message === "unpushed work");
       assert.ok(commit && commit.unpushed === true, m("the manifest lists the commit as unpushed"));
-      assert.ok(manifest.left.some((e) => e.reason === "session" && e.bytes > 1_000_000), m("the session folder is named and sized"));
+      assert.equal(manifest.left.some((e) => e.reason === "session"), false, m("the session folder is outside the workspace, so nothing to leave out"));
       assert.equal(manifest.left.some((e) => e.reason === "dependencies"), !dependencies);
-      assert.match(summary, /Riff's own session files .* are never included/);
       if (!dependencies) assert.match(summary, /Left out: node_modules \(\d+ files?/, m("the summary says node_modules was left out"));
       if (dependencies) assert.equal(dec.decode(files["repo/node_modules/x/index.js"]), "dep\n");
       return manifest;

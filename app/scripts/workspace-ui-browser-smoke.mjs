@@ -197,8 +197,8 @@ try {
   const bytesAfter = await run(tab, "od -An -tx1 bytes.bin");
   const notes = await run(tab, "cat notes.txt");
   const scratch = await run(tab, "ls /tmp/scratch 2>&1");
-  // (.wasix-session is the boot's, untracked in every repo: not this)
-  const status = await run(tab, "git status --short | grep -v '.wasix-session/'; echo clean");
+  // Riff's session files live in /opt/riff, so git sees only the host's work.
+  const status = await run(tab, "git status --short; echo clean");
   await shot(tab, "after-reload");
   console.log("after reload", JSON.stringify({ log, bytesAfter, notes, scratch, status }));
   assert.match(log, /unpushed work/, "the unpushed commit is back");

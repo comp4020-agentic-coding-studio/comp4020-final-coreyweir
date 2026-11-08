@@ -98,12 +98,16 @@ try {
     await pod.fs.mkdir("/home/user/.claude/projects/-work-repo", { recursive: true });
     await pod.fs.writeFile("/home/user/.claude/projects/-work-repo/0b1c2d3e.jsonl", `{"type":"user","message":{"content":"build a todo app"}}\n{"type":"assistant","message":{"content":"tool said ${GITHUB}"}}\n`);
     out.sessionDir = await pod.fs.readdir("/work/repo/.wasix-session").catch(() => null);
+    out.controlDir = await pod.fs.readdir("/opt/riff/.wasix-session").catch(() => null);
     out.bashBytes = Array.from(await pod.fs.readFile("/work/repo/from-bash.bin"));
     return out;
   }, { MODEL, GITHUB, allBytes: Array.from(allBytes), bigBinary: Array.from(bigBinary), room });
 
   for (const step of [made.node, ...made.git]) assert.equal(step.code, 0, JSON.stringify(step));
-  assert.ok(made.sessionDir?.length, `Riff's session folder exists, so its exclusion is really tested: ${JSON.stringify(made.sessionDir)}`);
+  // Riff's session folder lives outside the workspace (/opt/riff), so nothing
+  // that exports, persists or cleans the workspace can meet it.
+  assert.ok(made.controlDir?.length, `Riff's session folder exists, so its absence is really tested: ${JSON.stringify(made.controlDir)}`);
+  assert.equal(made.sessionDir, null, `Riff's session folder is not in the workspace: ${JSON.stringify(made.sessionDir)}`);
   assert.equal(made.bashBytes.length, 4096, `bash wrote 4096 bytes: ${made.bash.out}`);
   const bashSha = made.bash.out.match(/^([0-9a-f]{64})\s+from-bash\.bin/m)?.[1] ?? null;
 
@@ -142,7 +146,7 @@ try {
   };
 
   // Everything the zip must and mustn't hold, for one phase. `session`: whether
-  // WASIX has started in this pod, so Riff's session folder exists to be left out.
+  // WASIX has started in this pod (its folder is in /opt/riff, never the zip).
   async function verify(label, { session }) {
     const say = (m) => `${label}: ${m}`;
     const plain = await exportZip({ room: "SMOKE1", transcripts: false });
@@ -177,8 +181,8 @@ try {
     const manifest = JSON.parse(dec.decode(f["riff-workspace.json"]));
     assert.deepEqual(manifest, plain.manifest);
     assert.ok(manifest.left.some((e) => e.reason === "dependencies" && e.path === "repo/node_modules"));
-    if (session) assert.ok(manifest.left.some((e) => e.reason === "session" && e.path === "repo/.wasix-session" && e.bytes > 1_000_000), say("the session folder is named and sized"));
-    else assert.equal(manifest.left.some((e) => e.reason === "session"), false, say("no session folder yet, so nothing to leave out"));
+    assert.equal(manifest.left.some((e) => e.reason === "session"), false, say("the session folder is outside the workspace, so nothing to leave out"));
+    assert.equal(Object.keys(f).some((n) => n.includes("riff/") && !n.startsWith("repo/")), false, say("nothing from /opt/riff travels"));
     assert.ok(manifest.left.some((e) => e.reason === "transcripts" && e.files === 1));
     assert.ok(manifest.changed.some((e) => e.path === "repo/.git/config" && e.what === "url-credentials-removed"));
     assert.ok(manifest.changed.some((e) => e.path === "repo/notes.txt"));
