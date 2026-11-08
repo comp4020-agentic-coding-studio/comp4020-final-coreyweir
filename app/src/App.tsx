@@ -1136,20 +1136,6 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
   return (
     <aside className="people-panel" aria-label="People in this room">
       <header className="section-title"><h2>People</h2><button onClick={onClose} aria-label="Close">&times;</button></header>
-      <p className="room-code">Code <strong>{room.code}</strong>{room.locked && <small> · locked</small>}</p>
-      {host && (
-        <div className="room-controls">
-          <button onClick={() => act(() => rotateCode(access))} title="The old code stops working; everyone already here stays">New code</button>
-          <button onClick={() => act(() => setLocked(access, !room.locked))} title="A locked room takes no new joins by code">{room.locked ? "Unlock" : "Lock"}</button>
-        </div>
-      )}
-      <div className="board-fate">
-        <p>{boardFate(room.keep)}</p>
-        {host && <button onClick={() => changeKeep(!room.keep)}>{room.keep ? "Stop keeping it" : "Keep it"}</button>}
-      </div>
-      {room.limitBytes && <p className="board-size">{room.full ? "Full: it holds" : "It holds"} {megabytes(bytes)} of the {megabytes(room.limitBytes)} a room can.</p>}
-      <p className="export-board"><button onClick={onExport}>Export the board</button><small>A file with the board, its images and the prompts. Anyone can start a new room from it.</small></p>
-      {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
         {present.map((member) => (
           <li key={member.id}>
@@ -1162,9 +1148,61 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
           </li>
         ))}
       </ul>
+      <div className="board-fate">
+        <p>{boardFate(room.keep)}</p>
+        {host && <button onClick={() => changeKeep(!room.keep)}>{room.keep ? "Stop keeping it" : "Keep it"}</button>}
+      </div>
+      {room.limitBytes && <p className="board-size">{room.full ? "Full: it holds" : "It holds"} {megabytes(bytes)} of the {megabytes(room.limitBytes)} a room can.</p>}
+      <p className="export-board"><button onClick={onExport}>Export the board</button><small>A file with the board, its images and the prompts. Anyone can start a new room from it.</small></p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {host && <EndRoom access={access} code={room.code} keep={room.keep} />}
+    </aside>
+  );
+}
+
+// Bringing people in, in one place: the link and the code for anyone in
+// the room; for the host, a new code, the lock, and invites by GitHub
+// username.
+function SharePanel({ access, room, onClose }: { access: Access; room: ReturnType<typeof useRoom>; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const host = access.member.host;
+  // The link carries the join code, never the room's id or anyone's secret.
+  const link = new URL(`${location.pathname}?${new URLSearchParams({ room: room.code })}`, location.origin).toString();
+
+  function copy() {
+    navigator.clipboard.writeText(link).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    }, () => setError("Couldn't copy. Select the link and copy it."));
+  }
+
+  async function act(action: () => Promise<unknown>) {
+    setError(null);
+    try {
+      await action();
+    } catch (failure) {
+      setError(problem(failure));
+    }
+  }
+
+  return (
+    <aside className="people-panel share-panel" aria-label="Share this room">
+      <header className="section-title"><h2>Share</h2><button onClick={onClose} aria-label="Close">&times;</button></header>
+      <div className="share-link">
+        <input readOnly aria-label="Room link" value={link} onFocus={(event) => event.target.select()} />
+        <button onClick={copy}>{copied ? "Copied" : "Copy link"}</button>
+      </div>
+      <p className="room-code">Code <strong>{room.code}</strong>{room.locked && <small> · locked</small>}</p>
+      {host && (
+        <div className="room-controls">
+          <button onClick={() => act(() => rotateCode(access))} title="The old code stops working; everyone already here stays">New code</button>
+          <button onClick={() => act(() => setLocked(access, !room.locked))} title="A locked room takes no new joins by code">{room.locked ? "Unlock" : "Lock"}</button>
+        </div>
+      )}
+      {error && <p className="form-error" role="alert">{error}</p>}
       {host && <InviteBox access={access} members={room.members} />}
       {host && <p className="local-note">If a code leaks: give the room a new code, remove anyone who shouldn't be here, then lock it.</p>}
-      {host && <EndRoom access={access} code={room.code} keep={room.keep} />}
     </aside>
   );
 }
@@ -1212,8 +1250,8 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     scrollTo(0, 0);
   }, [view]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [copied, setCopied] = useState(false);
-  const [people, setPeople] = useState(false);
+  // one panel at a time: who's here, or how to bring more people in
+  const [panel, setPanel] = useState<"people" | "share" | null>(null);
   const [preview, setPreview] = useState<{ url: string; revision: number } | null>(null);
   const store = useQuickdrawStore();
   const room = useRoom(access);
@@ -1261,16 +1299,6 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     addPrompt(room.doc, room.identity.name, text, records[0].id);
   }
 
-  // The link carries the join code, never the room's id or anyone's secret.
-  function copyRoomLink() {
-    const url = new URL(location.pathname, location.origin);
-    url.searchParams.set("room", room.code);
-    navigator.clipboard.writeText(url.toString()).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    });
-  }
-
   function handlePreviewUrlChange(url: string | null, generation: number) {
     setPreview((current) => url ? { url, revision: (current?.revision ?? 0) + 1 } : null);
     room.control.transact(() => {
@@ -1292,8 +1320,8 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
           <button className={view === "room" ? "active" : ""} onClick={() => setView("room")}>Room</button>
           <button className={view === "preview" ? "active" : ""} onClick={() => setView("preview")}>Preview</button>
         </nav>
-        <button className="participants" onClick={() => setPeople((open) => !open)} title="People in this room">{room.participants.slice(0, 4).map((participant) => <span key={participant.clientId} style={{ background: participant.colour }} title={`${participant.name}${participant.role === "facilitator" ? " (host)" : ""}`}>{participant.name.slice(0, 1).toUpperCase()}</span>)}</button>
-        <button className="share" onClick={copyRoomLink}>{copied ? "Copied" : "Share room"}</button>
+        <button className="participants" aria-expanded={panel === "people"} onClick={() => setPanel((open) => open === "people" ? null : "people")} title="People in this room">{room.participants.slice(0, 4).map((participant) => <span key={participant.clientId} style={{ background: participant.colour }} title={`${participant.name}${participant.role === "facilitator" ? " (host)" : ""}`}>{participant.name.slice(0, 1).toUpperCase()}</span>)}</button>
+        <button className="share" aria-expanded={panel === "share"} onClick={() => setPanel((open) => open === "share" ? null : "share")}>Share room</button>
       </header>
 
       {room.full ? <FullBanner limitBytes={room.limitBytes} onExport={exportRoom} /> : <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} onExport={exportRoom} />}
@@ -1302,7 +1330,8 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
-        {people && <PeoplePanel access={access} room={room} onClose={() => setPeople(false)} onExport={exportRoom} />}
+        {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}
+        {panel === "share" && <SharePanel access={access} room={room} onClose={() => setPanel(null)} />}
       </main>
     </div>
   );

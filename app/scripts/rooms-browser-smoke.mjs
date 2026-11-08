@@ -93,7 +93,13 @@ try {
   await octocat.goto(baseUrl, { waitUntil: "networkidle0" });
   await waitText(octocat, ".account", /Signed in as @octocat/);
 
-  await host.click("button.participants");
+  // Invites are in Share room, with the link and the code.
+  await host.click("button.share");
+  await host.waitForSelector(".share-panel .share-link input");
+  assert.match(await host.$eval(".share-panel .share-link input", (input) => input.value), new RegExp(`\\?room=${code}$`));
+  assert.equal(await host.$(".people-panel:not(.share-panel)"), null, "one panel at a time");
+  await shot(host, "share-panel");
+
   await host.waitForSelector(".invite-box input");
   await host.type(".invite-box input", "riff-no-such-user-zz9-plural-z-alpha");
   await host.click(".invite-box form button");
@@ -135,8 +141,11 @@ try {
   await octocat.type(".invites .invite form input", "Octo");
   await octocat.click(".invites .invite form button");
   await octocat.waitForFunction((id) => new URL(location.href).searchParams.get("id") === id, { timeout: 10_000 }, roomId);
-  await waitText(host, ".people-panel li", /Octo\s*@octocat/);
   await host.waitForFunction(() => !document.querySelector(".pending-invites"), { timeout: 5000, polling: 100 });
+  await host.click("button.participants");
+  await waitText(host, ".people-panel li", /Octo\s*@octocat/);
+  assert.equal(await host.$(".share-panel"), null, "People replaces Share");
+  assert.equal(await host.$(".people-panel .invite-box"), null, "invites live in Share, not People");
   console.log("accepted: name taken, asked for another, in the room as Octo (@octocat), invite gone from the host's panel");
 
   // Colleagues: private, added by username, removed again.
