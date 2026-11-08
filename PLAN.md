@@ -42,7 +42,7 @@ README, PROCESS.md and the reflections are mine to write.
 | [0008](docs/adr/0008-your-rooms-invites-and-colleagues.md) | Your rooms (members' and invited rooms only, live over a websocket), host-only invites by GitHub id, colleagues you keep; the room state half of 0003 | Yes (`a0bee0f`, `ef1401f`, `7e6023e`, `79a008f`, 18 Oct) |
 | [0009](docs/adr/0009-riffs-own-free-models-for-hosts.md) | Hosts can use Riff's own free models (OpenRouter), through a host-only proxy on our server; the key never leaves the server | Yes (`e2ad15b`, `dc88e22`) |
 | [0010](docs/adr/0010-the-hosts-workspace-persists-in-opfs.md) | The host's workspace persists in this browser (OPFS), one per room; the room's repository is cloned at boot | Yes (`16ee967`, `50bec09`, `b77233a`), 8 Nov |
-| [0011](docs/adr/0011-the-preview-gets-its-own-origin.md) | Every member's preview loads from its room's own origin (`<label>.preview.airiff.tech`), never Riff's (2a); 2b, the host's preview served from its own pod again, designed | Partly: 2a (`72e9e84`, `a5a63f6`, `a748ad7`), 8 Nov; 2b not built |
+| [0011](docs/adr/0011-the-preview-gets-its-own-origin.md) | Every member's preview loads from its room's own origin (`<label>.preview.airiff.tech`), never Riff's (2a); 2b, the host's preview served from its own pod again, designed | Partly: 2a (`72e9e84`, `a5a63f6`, `a748ad7`), 8 Nov; 2b built behind a switch, off, 9 Nov |
 | [0012](docs/adr/0012-mcp-servers-for-the-hosts-claude.md) | The host can give Claude GitHub's MCP server and custom MCP servers, per room; tokens as placeholders, each sent only to its own server; Apply restarts Claude with `--continue` | Yes (`25f7cbf`, `395e666`, `6c3fafb`, `f4df1d7`), 9 Nov |
 
 ## Work, in order
@@ -899,9 +899,13 @@ auto-release at the latest.
   host loses hot reload and its app's sockets, and round-trips. **Next
   (2b):** a service worker on the preview origin that forwards the host's
   frame's requests to its own Nodepod by `postMessage`, so the host's
-  preview is local again. Designed, not built (ADR 0011, "2b"): about
-  4–6 h, after measuring that Chrome lets the sandboxed cross-site frame's
-  worker control its navigations.
+  preview is local again. Built 9 Nov behind a switch, **off by default**
+  (`localStorage["riff-preview-bridge"] = "on"` tries it in one browser;
+  `PREVIEW_BRIDGE_DEFAULT` in `app/src/previewBridge.ts` turns it on for
+  everyone). Measured on dev in Chromium (`npm run
+  test:preview-bridge-browser`): served from the pod, a dev server's socket
+  live, fallback to the relay. Not measured: real Vite (it won't start from
+  Bash in the pod today), Firefox/Safari, live. ADR 0011, "2b: built".
 - **`npx http-server` can't serve in Nodepod** (9 Nov, measured on dev).
   `npx http-server -p 3001` used to install a package named "3001": npx
   read `-p` after the command as its own `--package` (fixed, Nodepod

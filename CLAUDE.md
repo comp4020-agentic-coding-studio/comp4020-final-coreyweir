@@ -219,6 +219,11 @@ same commit. Each README quality turns into what it means for a change:
   `allow-same-origin` from the preview frame "to be safe": storage needs it,
   and the foreign origin is what keeps it safe. The relay itself still
   routes on path prefixes (`/room-preview/`, `/preview-control/`).
+  The host's frame can instead come from its own pod through a worker on
+  the preview origin (`/__riff_preview__/`, ADR 0011 2b, behind
+  `riff-preview-bridge`); the host page answers only its own preview
+  frame (`event.origin` and `event.source`) and only the active preview.
+  Never serve `/__riff_preview__/` on Riff's origin.
 
 ## Working rules
 
