@@ -46,3 +46,8 @@ and the corresponding source will be provided.
 
 Claude Code is not in this repo or in the deployed image. Each host's browser
 fetches it from the public npm registry at run time.
+
+CPython 3.12 for WASIX (`wasmer/python@3.12.10-beta.2`, Python Software
+Foundation License) is not in this repo or the image either. The first
+`python` a host runs makes their browser fetch it from Wasmer's CDN, pinned by
+SHA-256 (`app/src/wasmerCommandProvider.ts`, `PYTHON_PACKAGE`).

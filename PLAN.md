@@ -637,6 +637,37 @@ auto-release at the latest.
     stops answering: 4 stalls in a 5-round run), and 1 of 66 red with the `exec 2>&1`
     removed. `alias true=:` in the rc blames a hang on `$(true)` that was
     probably this deadlock; left alone, unmeasured.
+- ~~**`python` in the host's Bash**~~ (versatility: not only JS). Done 8 Nov.
+  Nodepod's own `python` runs in a separate worker on a copy of `/work/repo`,
+  with no terminal, so it was no use from Bash or Claude's Bash tool. Now
+  `python`/`python3` in the WASIX session are launchers
+  (`app/src/pythonCommand.ts`) for the same pinned CPython 3.12 package, run
+  as a session process: same terminal, cwd, files and pipes as Bash. The
+  115 MB package isn't part of the session boot: the first `python` in a
+  session asks the page over the bridge (`riff-python-fetch`) to install it in
+  `/opt/riff`, from Cache Storage under the key Nodepod's `python` already
+  uses, so a browser downloads it once (measured on dev: ~11 s download, ~5 s
+  first start, ~0.4 s after). A `sitecustomize.py` fixes three things the
+  package gets wrong under WASIX: relative paths resolved against `/`,
+  `sys.executable` named a `/bin/python` that doesn't exist, and `subprocess`
+  by bare name exited 45 for any program outside the first PATH directory
+  (WASIX ends a child whose exec misses instead of failing the exec, so the
+  child's PATH walk dies; names are now resolved in the parent). HTTPS works
+  through the gateway's CA (`SSL_CERT_FILE`). Checked by
+  `test:wasix-claude-bash-browser` (through Claude's real Bash provider:
+  `-c`, stdin pipe, exit codes, a script in a subdirectory reading and writing
+  relative paths, subprocess; red without the cwd fix and without the
+  subprocess fix) and `test:wasix-terminal-browser` (the REPL in the host's
+  terminal, Ctrl-C interrupting a running loop back to `>>>`, `exit()`).
+  Doesn't work: **pip** (not in the package; the pip wheel ensurepip carries
+  fails to import because this build has no `mmap`), packages with C
+  extensions, Ctrl-C on a pure CPU loop that makes no syscalls (WASIX only
+  delivers signals at syscalls; a loop that sleeps or does I/O stops at
+  once), and `python -I`/`-E` (they skip the cwd fix, so relative paths land
+  in `/`). The terminal smoke passed 6 of 8 runs with this change against 6
+  of 6 without; both failures were in its older steps (a bridged
+  `git --version` that never answered, before any Python ran; a third
+  "Start Bash" not ready in 120 s), so whether they're related is open.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own
