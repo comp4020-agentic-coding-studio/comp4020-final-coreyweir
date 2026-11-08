@@ -162,6 +162,14 @@ try {
   assert.equal(await host.$eval(".terminal-controls button", (element) => [element.textContent, element.disabled].join()), "Start Claude,false");
   assert.match(await host.$eval(".terminal-empty", (element) => element.textContent), /Start Claude to run Claude Code/);
   assert.equal(await host.$(".room-banner.booting"), null);
+  // The Board says so too, and starts it from there.
+  await openTab("Board");
+  await host.waitForSelector(".room-banner.claude-off", { timeout: 10_000 });
+  assert.match(await host.$eval(".room-banner.claude-off", (element) => element.textContent), /Claude isn't running.*Start Claude/);
+  await host.evaluate(() => document.querySelector(".room-banner.claude-off button").click());
+  await host.waitForFunction(() => !document.querySelector(".room-banner.claude-off") && document.querySelector(".room-banner.booting"), { timeout: 10_000, polling: 100 });
+  await host.waitForFunction(() => document.querySelector(".terminal-heading > div > span")?.textContent === "Claude running", { timeout: 240_000, polling: 200 });
+  assert.equal(await host.$(".room-banner.claude-off"), null, "gone once Claude runs");
   assert.deepEqual(pageErrors, []);
   console.log("Tab layouts, one-click Claude rendering, live participant data, and a prompt from staging to the queue passed.");
 } finally {

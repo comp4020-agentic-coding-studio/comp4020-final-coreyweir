@@ -17,6 +17,8 @@ export type TerminalPaneHandle = {
   sendPrompt: (prompt: string) => boolean;
   /** The host's pod's files, null until it boots (SendBoard.tsx). */
   podFiles: () => PodFiles | null;
+  /** Boot the pod if needed and start Claude, as the button does. */
+  startClaude: () => void;
 };
 
 const MIRROR_MODE_KEY = "riff-mirror-mode";
@@ -188,6 +190,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       return sent;
     },
     podFiles: () => controllerRef.current?.podFiles() ?? null,
+    startClaude: () => {
+      if (!controllerRef.current?.isRunning()) void startRef.current("claude");
+    },
   }), []);
 
   const podReadyRef = useRef(onPodReady);
@@ -294,6 +299,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
     return () => clearInterval(timer);
   }, [channel.publish, facilitator, status]);
 
+  const startRef = useRef(start);
+  startRef.current = start;
   async function start(mode: "claude" | "bash") {
     if (!config || !targetRef.current) return;
     setStarting(true);
