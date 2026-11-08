@@ -393,6 +393,12 @@ auto-release at the latest.
   fields only, images byte for byte and checked (type, magic bytes,
   2048px, decodes). Checked by `npm run test:board-file` and
   `npm run test:boards-browser` (dev and live, both sizes).
+  - ~~The board as a picture~~ (Corey, 9 Nov; ADR 0003's "The board as a
+    picture"): every "Export board" is now "Export board (JSON)" with
+    "Export board (PNG)" after it, `riff-<code>-board.png`, drawn from the
+    room's document by quickdraw's own export, so a row renders from the
+    stored copy. Checked by `test:boards-browser` (dev, both sizes). Needs
+    live.
   - ~~Workspace export, a zip including Claude transcripts, never
     credentials.~~ Built 8 Nov (ADR 0003's third amendment): a host-only
     "Export" in the workspace controls, `app/src/workspaceExport.ts`
@@ -705,7 +711,12 @@ auto-release at the latest.
   - ~~Long commands scrolled sideways~~ (a row starting `<`, the rest cut
     off): the session has no terminal description, so readline treated
     xterm as dumb. Bash's GNU termcap now gets an `xterm-256color` entry
-    inline in `TERMCAP` (from ncurses, in THIRD_PARTY_NOTICES).
+    inline in `TERMCAP` (from ncurses, in THIRD_PARTY_NOTICES). Knowing
+    the terminal, readline also turned on bracketed paste, so a pasted
+    command waited for an Enter the paste already held: 6 of 33 inputs
+    "stalled" in `test:terminal-input-browser` (measured: the same pastes
+    pass with one more Enter). The rc turns bracketed paste off, so a paste
+    runs, as before. The terminal smoke now checks Up recalls a command.
   - ~~`clear`, `which`, `man`~~ were "command not found"; `clear` and
     `which` are small scripts, `man` says there are no manual pages and to
     try `--help`.
@@ -718,7 +729,10 @@ auto-release at the latest.
   `diff`, `patch`, `file`, `tput`, `ps`, `top`, `free`, `df`, `vi`/`vim`,
   `zip`/`unzip`; no /etc/os-release, and `uname` says
   `wasi riff 0.0.0 wasm32`. Any other program that reads keys from
-  /dev/tty would hang the way less did. A `sudo` that runs its command
+  /dev/tty would hang the way less did. Typing ahead while a command runs
+  keeps a whole line (typed with its Enter) but loses a part line: measured
+  with and without the termcap entry, so it predates it (the runtime's tty,
+  hypothesis: its line buffer is dropped when readline takes the terminal). A `sudo` that runs its command
   (the guest is uid 0 already) would be cheap, but it pretends, so it's a
   call for Corey.
 
@@ -752,9 +766,12 @@ auto-release at the latest.
   (Nemotron 3 Ultra), unprompted: "search the web for…" called `search`
   and answered with the right GitHub URL; "read <Wikipedia page>" called
   `fetch` (a site WebFetch can't read from the browser) and quoted its
-  first sentence. Left: live.
+  first sentence. It sits beside the host's own MCP servers (ADR 0012) as
+  a built-in: `web` is written at boot, a host's Apply keeps it, and a host
+  server named `web` doesn't replace it (`test:mcp-browser` checks it's in
+  the config at boot and connected in `/mcp` after Apply). Left: live.
 
-- **MCP servers for the host's Claude** (ADR 0012; Corey, 9 Nov). An
+- ~~**MCP servers for the host's Claude**~~ (ADR 0012; Corey, 9 Nov). An
   "MCPs" button in the host's terminal controls: GitHub's MCP server (read
   only or read and write, toolsets), then custom servers (name, https URL,
   one header). Tokens as `mcp` placeholders, each sent only to its server's
@@ -766,7 +783,14 @@ auto-release at the latest.
   the placeholder in Claude's config, the refusal path, Apply on a running
   Claude carrying the conversation, and the dialog at W x H; with
   `GITHUB_TOKEN` set, GitHub's tools listed (27 read only, 44 read and
-  write with the default toolsets). Next: custom servers.
+  write with the default toolsets). Custom servers done 9 Nov: the same
+  smoke runs a local mock MCP server (its token swapped in only for it, no
+  placeholder ever leaving the browser, one credential per server), one
+  that refuses its token (an MCP notice naming it), Jina's open server
+  when reachable (12 tools), the form's checks, and Apply straight after
+  Claude starts (which hung once: Claude drops an /exit typed while it is
+  still drawing; Apply now asks again, then stops it). `npm run test:mcp`
+  checks the form's rules and the config.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own

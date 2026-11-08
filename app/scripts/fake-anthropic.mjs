@@ -17,7 +17,7 @@ import os from "node:os";
 
 export const SLOW_MS = 4_000;
 
-function lanAddress() {
+export function lanAddress() {
   for (const entries of Object.values(os.networkInterfaces())) {
     for (const entry of entries ?? []) if (entry.family === "IPv4" && !entry.internal) return entry.address;
   }

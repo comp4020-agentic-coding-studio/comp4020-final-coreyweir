@@ -21,7 +21,7 @@ import { Osc133Parser } from "./osc133";
 import { createRiffHook, promptKeystrokes, riffHookSettings, RIFF_HOOK_COMMAND } from "./claudeHooks";
 import { isInterruptKey, type ClaudeEvent } from "./queueRelease";
 import { RIFF_MODEL, riffModelsUrl } from "./api";
-import { deniedWebTools, WEB_MCP_PATH, WEB_MCP_SOURCE, withWebMcp } from "./webTools";
+import { deniedWebTools, WEB_MCP_PATH, WEB_MCP_SOURCE, webMcpServers } from "./webTools";
 import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } from "./imagePaste";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
@@ -457,9 +457,10 @@ export class ClaudePodController {
           firstStartTime: new Date().toISOString(),
           hasCompletedOnboarding: true,
           projects: { "/work/repo": { hasTrustDialogAccepted: true } },
-          // Riff's built-in web server and the host's MCP servers for this
-          // room, tokens as placeholders.
-          mcpServers: mcp.servers,
+          // Riff's built-in web server (webTools.ts), then the host's MCP
+          // servers for this room, tokens as placeholders. Built-in names
+          // win, and stay through every Apply.
+          mcpServers: this.claudeMcpServers(webMcpServers(), mcp.servers),
         }),
         "/home/user/.claude/settings.json": JSON.stringify({
           showThinkingSummaries: true,
@@ -685,6 +686,21 @@ export class ClaudePodController {
     this.report("Claude running");
   }
 
+  private hostMcpNames = new Set<string>();
+
+  /**
+   * The one place Claude's whole `mcpServers` is put together: what's
+   * already there and the host didn't set (built-in servers such as `web`)
+   * stays and wins over a host server of the same name, the host's previous
+   * servers go, and the host's current ones (`mcpServers()` in mcp.ts) are
+   * added.
+   */
+  private claudeMcpServers(current: Record<string, unknown>, host: Record<string, unknown>) {
+    const builtIn = Object.fromEntries(Object.entries(current).filter(([name]) => !this.hostMcpNames.has(name)));
+    this.hostMcpNames = new Set(Object.keys(host).filter((name) => !(name in builtIn)));
+    return { ...host, ...builtIn };
+  }
+
   /** Claude's mcpServers and the credentials behind their placeholders. */
   private mcpConfig(settings: McpSettings) {
     const credentials = new Map<Credential, string>();
@@ -704,9 +720,7 @@ export class ClaudePodController {
       credentials.set(credential, serverName(entry.name));
       return credential.placeholder;
     });
-    // The one place Claude's mcpServers are made, at boot and on Apply:
-    // Riff's web server is always there, whatever the host adds.
-    return { servers: withWebMcp(servers), credentials };
+    return { servers, credentials };
   }
 
   /**
@@ -728,7 +742,7 @@ export class ClaudePodController {
     const path = "/home/user/.claude.json";
     const volume = this.pod.volume;
     const config = volume.existsSync(path) ? JSON.parse(String(volume.readFileSync(path, "utf8"))) as Record<string, unknown> : {};
-    config.mcpServers = servers;
+    config.mcpServers = this.claudeMcpServers((config.mcpServers ?? {}) as Record<string, unknown>, servers);
     volume.writeFileSync(path, JSON.stringify(config, null, 2));
     if (!this.isRunning() || !this.process) return false;
     await this.restartClaude("Restarting Claude to load the MCP servers. The conversation carries on.");
@@ -740,13 +754,25 @@ export class ClaudePodController {
     const process = this.process;
     if (!process) return;
     const exited = this.claudeExited;
-    // Ctrl-U clears whatever is typed at Claude's prompt first.
-    process.write("\x15/exit\r");
-    const gone = await Promise.race([exited?.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10_000))]);
-    if (!gone) {
-      process.kill?.();
-      await exited;
+    let gone = false;
+    void exited?.then(() => { gone = true; });
+    const until = (ms: number) => Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, ms))]);
+    // Ctrl-U clears whatever is typed at Claude's prompt first. A Claude
+    // that is still drawing itself (its hooks can say idle first) drops
+    // what's typed, so ask again every few seconds, then stop it outright.
+    for (let attempt = 0; attempt < 3 && !gone; attempt++) {
+      process.write("\x15/exit\r");
+      await until(4_000);
     }
+    if (!gone) {
+      process.kill("SIGTERM");
+      await until(4_000);
+    }
+    if (!gone) {
+      process.kill("SIGKILL");
+      await until(4_000);
+    }
+    if (!gone) throw new Error("Claude didn't stop, so the MCP servers aren't applied yet. Interrupt it, then apply again.");
     this.terminalNote(`\x1b[38;5;244m${note}\x1b[0m`);
     const transcripts = "/home/user/.claude/projects/-work-repo";
     const volume = this.pod?.volume;

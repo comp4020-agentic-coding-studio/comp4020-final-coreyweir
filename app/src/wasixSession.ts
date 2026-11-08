@@ -175,6 +175,10 @@ function osc133BashRc(root: string): string {
     // Interactive bash doesn't read BASH_ENV; read it here so the terminal
     // starts like every `bash -c` (Riff's writes /etc, sessionSystem.ts).
     "[ -n \"$BASH_ENV\" ] && [ -r \"$BASH_ENV\" ] && . \"$BASH_ENV\"",
+    // A paste runs, as it always has here. Readline turns bracketed paste on
+    // once it knows the terminal (TERMCAP, sessionSystem.ts); then a pasted
+    // command waits on the line for an Enter the paste already contained.
+    "bind 'set enable-bracketed-paste off'",
     // \u and \h come from libc, and bash looks the user up before this rc
     // has written /etc/passwd; the session env names both (sessionSystem.ts).
     // Not `read < /etc/hostname`: a stdin redirect in this rc broke the

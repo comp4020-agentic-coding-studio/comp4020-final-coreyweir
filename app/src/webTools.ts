@@ -8,20 +8,15 @@
 export const WEB_MCP_SOURCE = "/claude/web-mcp.mjs";
 export const WEB_MCP_PATH = "/opt/claude/web-mcp.mjs";
 
-/** The built-in server's name; a host's own server can't take it. */
+/**
+ * The built-in server's name. ClaudePodController.claudeMcpServers keeps it
+ * through every Apply, and a host server of the same name doesn't replace it.
+ */
 export const WEB_MCP_NAME = "web";
 
 /** ~/.claude.json's user-scoped MCP servers (no approval prompt). */
 export function webMcpServers() {
   return { [WEB_MCP_NAME]: { type: "stdio", command: "node", args: [WEB_MCP_PATH, "--stdio"], env: {} } };
-}
-
-/**
- * Claude's mcpServers: the host's (docs/adr/0012) plus the built-in web
- * server, which a host server named "web" can't shadow or remove.
- */
-export function withWebMcp<T>(hostServers: Record<string, T>) {
-  return { ...hostServers, ...webMcpServers() };
 }
 
 /**

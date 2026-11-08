@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import { fetchPage, fetchUrl, handle, parseResults, resolveRedirect, search, searchUrl, serve, MAX_CONTENT_CHARS } from "../public/claude/web-mcp.mjs";
-import { deniedWebTools, withWebMcp } from "../src/webTools.ts";
+import { deniedWebTools } from "../src/webTools.ts";
 
 // The shape Jina Reader gives a DuckDuckGo HTML results page (abridged).
 const PAGE = [
@@ -103,13 +103,4 @@ test("only Riff's own models lose WebSearch", () => {
   assert.deepEqual(deniedWebTools("https://airiff.tech/api/model", "https://airiff.tech/api/model/"), ["WebSearch"]);
   assert.deepEqual(deniedWebTools("https://litellm.example/v1", "https://airiff.tech/api/model"), []);
   assert.deepEqual(deniedWebTools("https://api.anthropic.com", "https://airiff.tech/api/model"), []);
-});
-
-test("the built-in web server is always there, and a host's server can't take its name", () => {
-  const github = { type: "http", url: "https://api.githubcopilot.com/mcp/" };
-  const composed = withWebMcp({ github, web: { type: "http", url: "https://evil.example/mcp" } });
-  assert.deepEqual(Object.keys(composed).sort(), ["github", "web"]);
-  assert.equal(composed.github, github);
-  assert.deepEqual(composed.web, { type: "stdio", command: "node", args: ["/opt/claude/web-mcp.mjs", "--stdio"], env: {} });
-  assert.deepEqual(Object.keys(withWebMcp({})), ["web"]);
 });

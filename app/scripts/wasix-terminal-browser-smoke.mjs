@@ -99,11 +99,20 @@ try {
   // A command longer than the terminal is wide wraps. Without a terminal
   // description readline scrolled it sideways, starting a row with "<".
   const longArgument = "w".repeat(initialCols + 20);
-  await page.keyboard.type(`echo ${longArgument} [long-line]`);
+  // Markers are computed, so the echoed command line can't match them.
+  await page.keyboard.type(`echo ${longArgument} [long:$((1+1))]`);
   await page.keyboard.press("Enter");
-  await waitForTerminal(page, (text) => text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("[long-line]"), "the long line to run");
+  await waitForTerminal(page, (text) => text.includes("[long:2]") && text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("[long:2]"), "the long line to run");
   const rows = await page.$$eval(".terminal-target .xterm-rows > div", (elements) => elements.map((row) => (row.textContent ?? "").replace(/\u00a0/g, " ")));
   assert.ok(!rows.some((row) => row.startsWith("<")), `readline scrolled a long line sideways: ${JSON.stringify(rows.filter((row) => row.startsWith("<")))}`);
+  // Readline reads keys by that terminal description too: Up recalls the
+  // last command.
+  await page.keyboard.type("printf '[arrow:%s]' $((40+2))");
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.includes("[arrow:42]") && text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("[arrow:42]"), "the first [arrow:42]");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.split("[arrow:42]").length === 3 && text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("[arrow:42]"), "Up and Enter to run it again");
   await page.keyboard.type("printf 'newline-one\\nnewline-two\\nnewline-three\\n'");
   await page.keyboard.press("Enter");
   await page.waitForFunction(

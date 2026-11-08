@@ -1,6 +1,6 @@
 # 12. MCP servers for the host's Claude
 
-- Status: accepted (GitHub's MCP built; custom servers next)
+- Status: accepted (built 9 Nov: GitHub's MCP, then custom servers)
 - Date: 2026-11-09
 
 ## Context
@@ -48,6 +48,14 @@ Nodepod: a server in `mcpServers` of `~/.claude.json` connects
   the room. `~/.claude.json` holds only placeholders and is written fresh
   at every boot; it's outside the saved workspace (ADR 0010) and never in
   an export.
+
+- **Custom servers are checked before they're added.** A name Claude
+  accepts and that isn't taken ("github" is GitHub's own), an https URL
+  (plain http only when the page itself is, i.e. the dev server), no
+  credentials in the URL, and a header name whenever there's a value. The
+  form says that Riff only swaps the token into that header for that
+  server, that the server must allow CORS, and that OAuth servers won't
+  connect.
 
 ## What leaves the room
 
