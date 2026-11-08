@@ -510,11 +510,26 @@ export class ClaudePodController {
     if (this.workspacePrepared || !this.pod) return;
     this.workspacePrepared = true;
     const restored = this.workspace?.restored;
-    if (restored) {
+    const imported = this.workspace?.imported;
+    if (imported) {
+      const from = [imported.room && `room ${imported.room}`, imported.exportedAt && new Date(imported.exportedAt).toLocaleString()].filter(Boolean).join(", ");
+      this.terminalNote(`\x1b[38;5;244mThis workspace was imported from an export${from ? ` (${from})` : ""}: ${imported.files} files${imported.transcripts ? ", Claude's transcripts included" : ""}.\x1b[0m`);
+      if (imported.leftOut.length) {
+        const what = imported.leftOut.map((left) => `${left.path} (${left.files} ${left.files === 1 ? "file" : "files"})`).join(", ");
+        this.terminalNote(`\x1b[33mThe export left out ${what}. Reinstall what you need (npm install, pip install, ...).\x1b[0m`);
+      }
+    } else if (restored) {
       this.terminalNote(`\x1b[38;5;244mRestored this room's workspace from this browser: ${restored.files} files, ${formatBytes(restored.bytes)}, saved ${new Date(restored.savedAt).toLocaleString()}.\x1b[0m`);
     }
     const url = githubRepoUrl(this.config.repo);
-    if (this.config.repo.trim() && !this.pod.volume.existsSync("/work/repo/.git")) {
+    // Only into an empty folder: a clone over files (an imported workspace,
+    // say) would commit them as if they were the clone's.
+    const repoFiles = this.pod.volume.existsSync("/work/repo") ? this.pod.volume.readdirSync("/work/repo").filter((name) => name !== ".keep") : [];
+    if (this.config.repo.trim() && repoFiles.length && !this.pod.volume.existsSync("/work/repo/.git")) {
+      this.terminalNote(`\x1b[33mNot cloned: /work/repo already has files${imported ? " (the import's)" : ""}, so ${this.config.repo.trim()} was left alone.\x1b[0m`);
+    } else if (this.config.repo.trim() && imported && repoFiles.length) {
+      this.terminalNote(`\x1b[38;5;244mNot cloned: the export brought its own repository, so ${this.config.repo.trim()} was left alone.\x1b[0m`);
+    } else if (this.config.repo.trim() && !repoFiles.length) {
       if (!url) {
         this.terminalNote(`\x1b[33mNot cloned: ${this.config.repo.trim()} isn't a GitHub repository. Ask Claude to fetch it.\x1b[0m`);
       } else if (!this.githubCredential) {

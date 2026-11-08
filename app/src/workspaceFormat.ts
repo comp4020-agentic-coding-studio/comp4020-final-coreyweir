@@ -21,6 +21,21 @@ export type WorkspaceManifest = {
   files: number;
   bytes: number;
   entries: Record<string, ManifestEntry>;
+  /** Set when the workspace was seeded from an export (workspaceImport.ts),
+   * for the first boot to say so; later saves leave it out. */
+  imported?: ImportedNote;
+};
+
+export type ImportedNote = {
+  exportedAt: string | null;
+  room: string | null;
+  files: number;
+  transcripts: boolean;
+  /** What the export left out, for the host to reinstall. */
+  leftOut: Array<{ path: string; reason: string; files: number; bytes: number }>;
+  /** Paths skipped or changed on the way in. */
+  skipped: number;
+  changed: number;
 };
 
 export type WorkspaceSummary = { room: string; savedAt: number; bytes: number; files: number };
@@ -28,6 +43,7 @@ export type WorkspaceSummary = { room: string; savedAt: number; bytes: number; f
 export type WorkerRequest =
   | { id: number; op: "load"; room: string }
   | { id: number; op: "save"; room: string; manifest: WorkspaceManifest; writes: Array<{ blob: string; data: ArrayBuffer }>; drop: string[] }
+  | { id: number; op: "blobs"; room: string; writes: Array<{ blob: string; data: ArrayBuffer }> }
   | { id: number; op: "list" }
   | { id: number; op: "delete"; room: string };
 

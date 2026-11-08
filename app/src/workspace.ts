@@ -13,10 +13,10 @@
 // One workspace per room, keyed by the room's permanent id, held by one tab
 // at a time (a Web Lock).
 import type { MemoryVolume } from "@scelar/nodepod";
-import type { ManifestEntry, WorkerRequest, WorkerResponse, WorkspaceManifest, WorkspaceSummary } from "./workspaceFormat";
+import type { ImportedNote, ManifestEntry, WorkerRequest, WorkerResponse, WorkspaceManifest, WorkspaceSummary } from "./workspaceFormat";
 import { MANIFEST_FORMAT } from "./workspaceFormat";
 
-export type { WorkspaceSummary } from "./workspaceFormat";
+export type { ImportedNote, WorkspaceSummary } from "./workspaceFormat";
 
 /** What a saved workspace covers, for the host to read. */
 export const SAVED_DIRS = ["/work", "/home/user"] as const;
@@ -128,6 +128,9 @@ export type OpenOptions = {
 export class Workspace {
   /** The restored manifest's summary, or null for a new workspace. */
   restored: WorkspaceSummary | null = null;
+  /** Set when the restored workspace was seeded from an export and hasn't
+   * been saved over since (seedWorkspace). */
+  imported: ImportedNote | null = null;
   /** Whether the browser agreed not to evict this origin's storage. */
   persisted = false;
   private entries = new Map<string, ManifestEntry>();
@@ -204,6 +207,7 @@ export class Workspace {
     this.seq = manifest.seq;
     this.next = manifest.next;
     this.restored = { room: this.room, savedAt: manifest.savedAt, bytes: manifest.bytes, files: manifest.files };
+    this.imported = manifest.imported ?? null;
   }
 
   /**
@@ -434,4 +438,92 @@ export async function deleteAllWorkspaces() {
   const all = await listWorkspaces();
   for (const workspace of all) await deleteWorkspace(workspace.room);
   return all.length;
+}
+
+// ---- seeding a new room's workspace from an export ----
+
+export class WorkspaceExistsError extends Error {}
+
+export type SeedEntry =
+  | { path: string; kind: "dir"; mode: number; mtimeMs: number }
+  | { path: string; kind: "file"; mode: number; mtimeMs: number; data: Uint8Array }
+  | { path: string; kind: "symlink"; mode: number; mtimeMs: number; target: string };
+
+/** Written to OPFS in batches of about this many bytes. */
+const SEED_BATCH_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Seed a room's workspace that doesn't exist yet: an import goes into a new
+ * workspace only, never over one (docs/adr/0003). Files go first, in
+ * batches, and the manifest last, so a crash part-way leaves nothing a boot
+ * would restore. The next boot restores it like any saved workspace.
+ */
+export async function seedWorkspace(
+  room: string,
+  entries: Iterable<SeedEntry>,
+  note: Omit<ImportedNote, "files">,
+  onProgress?: (files: number) => void,
+) {
+  if ((await listWorkspaces()).some((workspace) => workspace.room === room)) {
+    throw new WorkspaceExistsError("This room already has a workspace in this browser; an import goes into a new one.");
+  }
+  const held = navigator.locks ? await requestLock(room, { ifAvailable: true }) : null;
+  if (navigator.locks && !held) throw new WorkspaceExistsError("This room's workspace is open in another tab.");
+  const manifestEntries: Record<string, ManifestEntry> = {};
+  let next = 1;
+  let files = 0;
+  let bytes = 0;
+  let batch: Array<{ blob: string; data: ArrayBuffer }> = [];
+  let batchBytes = 0;
+  const flush = async () => {
+    if (!batch.length) return;
+    const writes = batch;
+    batch = [];
+    batchBytes = 0;
+    await call({ op: "blobs", room, writes }, writes.map((write) => write.data));
+  };
+  try {
+    for (const entry of entries) {
+      if (!isSaved(entry.path)) continue;
+      // parents the export didn't list, so the manifest is a whole tree
+      for (let at = entry.path.indexOf("/", 1); at > 0; at = entry.path.indexOf("/", at + 1)) {
+        const parent = entry.path.slice(0, at);
+        if (isSaved(parent) && !manifestEntries[parent]) manifestEntries[parent] = ["d", 0o755, entry.mtimeMs];
+      }
+      if (entry.kind === "dir") manifestEntries[entry.path] = ["d", entry.mode, entry.mtimeMs];
+      else if (entry.kind === "symlink") manifestEntries[entry.path] = ["l", entry.mode, entry.mtimeMs, 0, entry.target];
+      else {
+        const blob = (next++).toString(36);
+        const data = entry.data.byteOffset === 0 && entry.data.byteLength === entry.data.buffer.byteLength
+          ? entry.data.buffer as ArrayBuffer
+          : entry.data.slice().buffer;
+        batch.push({ blob, data });
+        batchBytes += data.byteLength;
+        manifestEntries[entry.path] = ["f", entry.mode, entry.mtimeMs, data.byteLength, blob];
+        files += 1;
+        bytes += data.byteLength;
+        onProgress?.(files);
+        if (batchBytes >= SEED_BATCH_BYTES) await flush();
+      }
+    }
+    await flush();
+    const manifest: WorkspaceManifest = {
+      format: MANIFEST_FORMAT,
+      room,
+      seq: 1,
+      savedAt: Date.now(),
+      next,
+      files,
+      bytes,
+      entries: manifestEntries,
+      imported: { ...note, files },
+    };
+    await call({ op: "save", room, manifest, writes: [], drop: [] });
+    return { files, bytes };
+  } catch (error) {
+    await call({ op: "delete", room }).catch(() => {});
+    throw error;
+  } finally {
+    held?.release();
+  }
 }
