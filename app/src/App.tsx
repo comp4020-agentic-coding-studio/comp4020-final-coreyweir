@@ -1032,7 +1032,7 @@ function Staging({ prompts, canQueue, readOnly, onAdd, onQueue, onDelete }: {
       </form>}
       <div className="prompt-list">
         {staged.map((prompt) => <PromptCard key={prompt.id} prompt={prompt} canQueue={canQueue} readOnly={readOnly} onQueue={() => onQueue(prompt)} onDelete={() => onDelete(prompt.id)} />)}
-        {!staged.length && <p className="empty">Ideas staged from the board will appear here.</p>}
+        {!staged.length && <p className="empty">{readOnly ? "Nothing staged." : "Nothing staged yet. Type a prompt above, or select something with text on the board and choose Stage selected text."}</p>}
       </div>
     </aside>
   );

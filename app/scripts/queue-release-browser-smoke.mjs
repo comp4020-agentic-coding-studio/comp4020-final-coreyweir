@@ -219,6 +219,17 @@ try {
   for (const [key, count] of Object.entries(counts)) assert.equal(count, 1, `${key} reached the model ${count} times`);
   assert.equal(fake.turns.length, Object.keys(PROMPTS).length, "one turn per prompt");
   assert.deepEqual(await queuedTexts(participant), []);
+  // Everything was sent: the empty queue says so to each in their role,
+  // not that nothing was ever queued.
+  const emptyText = (page, selector) => page.$eval(selector, (element) => element.textContent);
+  const auto = await autoOn(host);
+  assert.equal(await emptyText(host, ".queue-list .empty"), auto
+    ? "Nothing queued. Auto is on: the next prompt you queue from staging goes to Claude when it's free."
+    : "Nothing queued. Queue a prompt from staging.");
+  assert.equal(await emptyText(participant, ".queue-list .empty"), auto
+    ? "Nothing queued. Auto is on: the next prompt the host queues goes to Claude when it's free."
+    : "Nothing queued. The host queues prompts from staging.");
+  assert.match(await emptyText(participant, ".staging .empty"), /^Nothing staged yet\. Type a prompt above, or select something with text on the board/);
   await participantContext.close();
   assert.deepEqual(pageErrors, []);
   console.log("Queue release smoke passed: Send and auto each delivered every prompt once, newlines intact.");
