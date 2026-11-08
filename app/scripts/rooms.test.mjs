@@ -534,6 +534,75 @@ test("the signed-in list follows the account; a guest's follows the secrets it h
   }
 });
 
+// Reopening (ADR 0003): a signed-in host's ended rooms follow the account
+// to any browser, only the host can reopen one, and the log says it was on
+// purpose. spec/rooms.test.ts checks the same for guests on a deployed app.
+test("a signed-in host's ended rooms are listed for them alone, and only they can reopen one", async () => {
+  const app = await start();
+  try {
+    const ada = app.signIn("ada");
+    const bo = app.signIn("bo");
+    const created = await call(app, "/api/rooms", { body: { name: "Ada", keep: false }, cookie: ada });
+    const roomId = created.body.room.id;
+    await call(app, "/api/rooms/join", { body: { code: created.body.room.code, name: "Bo" }, cookie: bo });
+    assert.equal((await call(app, `/api/rooms/${roomId}/end`, { body: {}, cookie: ada })).status, 200);
+
+    const adaWatch = watch(app, { cookie: app.signIn("ada") });
+    const boWatch = watch(app, { cookie: bo });
+    try {
+      const listed = (await adaWatch.until((l) => l.rooms.length === 1)).rooms[0];
+      assert.equal(listed.id, roomId);
+      assert.equal(listed.state, "ended");
+      assert.equal(listed.role, "host");
+      assert.equal(listed.boardGone, true, "a board the server didn't keep is gone");
+      assert.deepEqual((await boWatch.until(() => true)).rooms, [], "a participant isn't offered it");
+
+      assert.equal((await call(app, `/api/rooms/${roomId}/reopen`, { body: {}, cookie: bo })).status, 403);
+      assert.equal((await get(app, `/api/rooms/${roomId}/me`, { cookie: bo })).body.room.state, "ended");
+      const reopened = await call(app, `/api/rooms/${roomId}/reopen`, { body: {}, cookie: ada });
+      assert.equal(reopened.status, 200);
+      assert.equal(reopened.body.room.state, "away");
+      await boWatch.until((l) => l.rooms[0]?.id === roomId && l.rooms[0].state === "away");
+      await adaWatch.until((l) => l.rooms[0]?.state === "away");
+    } finally {
+      adaWatch.close();
+      boWatch.close();
+    }
+
+    const events = app.events();
+    assert.deepEqual(events.filter(by("room.revive")).map((row) => row.detail), [{ via: "reopen" }]);
+    const denied = events.filter((row) => row.action === "denied" && row.detail.what === "room.reopen");
+    assert.deepEqual(denied.map((row) => row.detail.reason), ["host_only"]);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("a host's list offers the last 10 rooms that ended, within 30 days", async () => {
+  const app = await start();
+  try {
+    const ada = app.signIn("ada");
+    const ids = [];
+    for (let i = 0; i < 12; i++) {
+      const created = await call(app, "/api/rooms", { body: { name: "Ada" }, cookie: ada });
+      ids.push(created.body.room.id);
+      await call(app, `/api/rooms/${created.body.room.id}/end`, { body: {}, cookie: ada });
+    }
+    // ended one a minute apart, in order; the last one over 30 days ago
+    ids.forEach((id, i) => app.db.prepare("UPDATE rooms SET ended_at = ? WHERE id = ?").run(Date.now() - (12 - i) * 60_000, id));
+    app.db.prepare("UPDATE rooms SET ended_at = ? WHERE id = ?").run(Date.now() - 31 * 86_400_000, ids[11]);
+    const adaWatch = watch(app, { cookie: ada });
+    try {
+      const { rooms } = await adaWatch.until((l) => l.rooms.length > 0);
+      assert.deepEqual(rooms.map((room) => room.id), ids.slice(1, 11).reverse(), "most recently ended first; the oldest and the stale one left out");
+    } finally {
+      adaWatch.close();
+    }
+  } finally {
+    await app.stop();
+  }
+});
+
 test("colleagues: recently worked with, an explicit list that's private and one-way, and logged", async () => {
   const app = await start();
   try {

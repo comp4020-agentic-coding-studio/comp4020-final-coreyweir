@@ -170,6 +170,11 @@ export function createStore(db) {
     // The rooms a signed-in user is in, newest first.
     roomsOfUser: q(`SELECT r.*, m.id AS member_id, m.is_host FROM room_members m JOIN rooms r ON r.id = m.room_id
                     WHERE m.user_id = ? AND m.removed_at IS NULL AND r.state <> 'ended' ORDER BY r.created_at DESC`),
+    // The ended rooms a signed-in user hosted, most recently ended first:
+    // only their host can reopen them (docs/adr/0003, "Reopening").
+    endedRoomsHostedBy: q(`SELECT r.* FROM room_members m JOIN rooms r ON r.id = m.room_id
+                           WHERE m.user_id = ? AND m.is_host AND m.removed_at IS NULL AND r.state = 'ended'
+                           AND r.ended_at >= ? ORDER BY r.ended_at DESC LIMIT ?`),
     insertInvite: q(`INSERT INTO invites (room_id, github_id, login, invited_by, created_at) VALUES (?, ?, ?, ?, ?)
                      ON CONFLICT (room_id, github_id) DO UPDATE SET login = excluded.login`),
     invite: q("SELECT * FROM invites WHERE room_id = ? AND github_id = ?"),

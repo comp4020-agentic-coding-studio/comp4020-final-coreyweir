@@ -142,6 +142,66 @@ describe("a room that has ended", () => {
   }, 30_000);
 });
 
+// Reopening (ADR 0003): an ended room stays in its host's list, and only
+// its host can bring it back. Limit: as guests, so a signed-in host's list
+// (by account rather than by secret) is checked in-process by
+// `npm run test:rooms`.
+describe("reopening an ended room", () => {
+  const reopen = (roomId: string, secret?: string) => api(baseUrl, `/api/rooms/${roomId}/reopen`, { secret, body: {} });
+  const stateOf = async (roomId: string, secret: string) =>
+    (await (await api(baseUrl, `/api/rooms/${roomId}/me`, { secret })).json()).room.state;
+
+  it("lists it for its host alone, as ended, and lets only the host reopen it", async () => {
+    const host = await createRoom(baseUrl);
+    const guest = await joinRoom(baseUrl, host.code);
+    const other = await createRoom(baseUrl);
+    expect((await api(baseUrl, `/api/rooms/${host.roomId}/end`, { secret: host.secret, body: {} })).status).toBe(200);
+
+    const hostWatch = await watchRooms(baseUrl, [{ roomId: host.roomId, secret: host.secret }]);
+    const guestWatch = await watchRooms(baseUrl, [{ roomId: guest.roomId, secret: guest.secret }]);
+    try {
+      const { rooms } = await hostWatch.until((list) => list.rooms.length > 0);
+      expect(rooms).toEqual([expect.objectContaining({ id: host.roomId, code: host.code, role: "host", state: "ended", boardGone: false })]);
+      // a participant's list doesn't offer it
+      expect((await guestWatch.until(() => true)).rooms).toEqual([]);
+
+      // nobody else can reopen it, and trying leaves it ended
+      expect((await reopen(host.roomId, guest.secret)).status).toBe(403);
+      expect((await reopen(host.roomId, other.secret)).status).toBe(401);
+      expect((await reopen(host.roomId)).status).toBe(401);
+      expect(await stateOf(host.roomId, guest.secret)).toBe("ended");
+      expect((await api(baseUrl, `/api/rooms/by-code/${host.code}`)).status).toBe(404);
+
+      const res = await reopen(host.roomId, host.secret);
+      expect(res.status).toBe(200);
+      expect((await res.json()).room).toMatchObject({ id: host.roomId, code: host.code, state: "away" });
+      // back for its members, under the same code
+      await guestWatch.until((list) => list.rooms[0]?.id === host.roomId && list.rooms[0].state === "away", 3_000);
+      await hostWatch.until((list) => list.rooms[0]?.state === "away", 3_000);
+      expect((await api(baseUrl, `/api/rooms/by-code/${host.code}`)).status).toBe(200);
+      // reopening a room that hasn't ended changes nothing
+      expect((await reopen(host.roomId, host.secret)).status).toBe(200);
+      expect(await stateOf(host.roomId, guest.secret)).toBe("away");
+    } finally {
+      hostWatch.close();
+      guestWatch.close();
+    }
+  }, 30_000);
+
+  it("tells its host when the server no longer has the board", async () => {
+    const host = await createRoom(baseUrl, undefined, { keep: false });
+    await api(baseUrl, `/api/rooms/${host.roomId}/end`, { secret: host.secret, body: {} });
+    const watch = await watchRooms(baseUrl, [{ roomId: host.roomId, secret: host.secret }]);
+    try {
+      const { rooms } = await watch.until((list) => list.rooms.length > 0);
+      expect(rooms[0]).toMatchObject({ state: "ended", keep: false, boardGone: true });
+    } finally {
+      watch.close();
+    }
+    expect((await reopen(host.roomId, host.secret)).status).toBe(200);
+  }, 30_000);
+});
+
 // Whether the server keeps a room's board after it ends (ADR 0003): the
 // host's choice when creating it, keep by default, shown to everyone.
 describe("keeping the board", () => {

@@ -109,8 +109,12 @@ export type ListedRoom = {
   id: string;
   code: string;
   role: "host" | "participant";
-  state: "live" | "away";
-  hostName: string;
+  // "ended" only in its host's list (ADR 0003, "Reopening")
+  state: "live" | "away" | "ended";
+  hostName?: string;
+  keep?: boolean;
+  // an ended room whose board the server no longer has
+  boardGone?: boolean;
 };
 
 export type RoomList = { rooms: ListedRoom[]; invites: unknown[] };

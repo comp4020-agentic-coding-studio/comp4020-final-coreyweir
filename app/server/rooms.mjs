@@ -7,6 +7,11 @@ import { clientAddress, createRateLimit, HttpError, parseCookies, readJson, same
 
 const MINUTE = 60 * 1000;
 
+// The ended rooms a host's list offers to reopen: the last 10, ended in the
+// last 30 days. Older ones are still theirs (opening one by its link
+// revives it) but would only lengthen the list.
+const ENDED_LISTED = { count: 10, ms: 30 * 24 * 60 * MINUTE };
+
 const PREVIEW_KEY = /^(\d{1,15})\.([\w-]{22})$/;
 const MODEL_KEY = /^([\w-]{8,64})\.(\d{1,15})\.([\w-]{22})$/;
 
@@ -98,7 +103,7 @@ export function createRooms({
     }
     if (!member || member.removed_at !== null) return null;
     if (room.state === "ended" && member.is_host && revive) {
-      reviveRoom(room, member);
+      reviveRoom(room, member, "open");
       room = s.roomById.get(room.id);
     }
     return {
@@ -135,9 +140,11 @@ export function createRooms({
     return true;
   }
 
-  function reviveRoom(room, hostMember) {
+  // `via`: "reopen" from the host's Reopen in their rooms list, "open" when
+  // the host's page simply opened the ended room (an old link, a reload).
+  function reviveRoom(room, hostMember, via) {
     if (!s.reviveRoom.run(now(), room.id).changes) return;
-    audit.record(who(room, hostMember), "room.revive");
+    audit.record(who(room, hostMember), "room.revive", { via });
     onRevived(room.id);
     onRoomChanged(room.id);
   }
@@ -396,6 +403,25 @@ export function createRooms({
     sendJson(response, 200, { keep: body.keep });
   }
 
+  // The host's Reopen (docs/adr/0003, "Reopening"): the same revival as the
+  // host opening the room, asked for on purpose. Anyone else is refused and
+  // the room stays ended. A room that hasn't ended is left as it is.
+  function reopen(request, response, roomId) {
+    const credentials = { token: bearer(request), cookie: request.headers.cookie };
+    const actor = resolve(roomId, credentials, { revive: false });
+    if (!actor) {
+      audit.record(null, "denied", { what: "room.reopen", reason: hasCredential(request) ? "not_a_member" : "no_credential" });
+      throw new HttpError(401, "not_a_member");
+    }
+    if (actor.role !== "host") {
+      audit.record(actor, "denied", { what: "room.reopen", reason: "host_only" });
+      throw new HttpError(403, "host_only");
+    }
+    const room = s.roomById.get(roomId);
+    reviveRoom(room, s.memberById.get(actor.memberId), "reopen");
+    sendJson(response, 200, { room: roomJson(s.roomById.get(roomId)) });
+  }
+
   function end(request, response, roomId) {
     const actor = hostOf(request, roomId, "room.end");
     endRoom(roomId, "host", actor);
@@ -507,11 +533,30 @@ export function createRooms({
   }
 
   // What one person's list shows: the live rooms they're in (by GitHub user
-  // and by this browser's secrets) and the invites waiting for them.
-  // Recomputed from the tables every time, so it can't drift from them.
+  // and by this browser's secrets), the rooms they hosted that have ended
+  // and that only they can reopen (recent ones only, see ENDED_LISTED), and
+  // the invites waiting for them. A participant's ended rooms aren't
+  // listed. Recomputed from the tables every time, so it can't drift.
   function listFor({ userId, memberIds }) {
     const rooms = new Map();
+    const ended = new Map();
+    const since = now() - ENDED_LISTED.ms;
+    const addEnded = (room) => {
+      if (ended.has(room.id) || (room.ended_at ?? 0) < since) return;
+      ended.set(room.id, {
+        id: room.id,
+        code: room.code,
+        role: "host",
+        state: "ended",
+        endedAt: room.ended_at,
+        keep: Boolean(room.keep),
+        // the server no longer has the board: not kept, or pruned
+        boardGone: !room.keep || room.pruned_at !== null,
+        locked: Boolean(room.locked),
+      });
+    };
     const add = (room, isHost) => {
+      if (room.state === "ended" && isHost) return addEnded(room);
       if (rooms.has(room.id) || room.state === "ended") return;
       const host = s.hostOf.get(room.id);
       rooms.set(room.id, {
@@ -529,7 +574,10 @@ export function createRooms({
           : {}),
       });
     };
-    if (userId) for (const row of s.roomsOfUser.all(userId)) add(row, Boolean(row.is_host));
+    if (userId) {
+      for (const row of s.roomsOfUser.all(userId)) add(row, Boolean(row.is_host));
+      for (const row of s.endedRoomsHostedBy.all(userId, since, ENDED_LISTED.count)) addEnded(row);
+    }
     for (const id of memberIds ?? []) {
       const member = s.memberById.get(id);
       if (!member || member.removed_at !== null) continue;
@@ -545,7 +593,8 @@ export function createRooms({
           at: row.created_at,
         }))
       : [];
-    return { rooms: [...rooms.values()], invites };
+    const recent = [...ended.values()].sort((a, b) => b.endedAt - a.endedAt).slice(0, ENDED_LISTED.count);
+    return { rooms: [...rooms.values(), ...recent], invites };
   }
 
   // Answers /api/rooms… and /api/invites…; false for anything else.
@@ -565,6 +614,7 @@ export function createRooms({
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/lock$/.exec(path))) await lock(request, response, m[1]);
     else if (request.method === "DELETE" && (m = /^\/api\/rooms\/([\w-]+)\/members\/(\d+)$/.exec(path))) remove(request, response, m[1], Number(m[2]));
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/end$/.exec(path))) end(request, response, m[1]);
+    else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/reopen$/.exec(path))) reopen(request, response, m[1]);
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/keep$/.exec(path))) await setKeep(request, response, m[1]);
     else if (request.method === "POST" && (m = /^\/api\/rooms\/([\w-]+)\/invites$/.exec(path))) await invite(request, response, m[1]);
     else if (request.method === "DELETE" && (m = /^\/api\/rooms\/([\w-]+)\/invites\/(\d+)$/.exec(path))) cancelInvite(request, response, m[1], Number(m[2]));
