@@ -2,6 +2,19 @@
   padding-bottom: 10px;
 }
 
+/* The mirror is the host's columns and rows at whatever font size fits
+   (src/mirrorFit.ts): the xterm element wraps its screen instead of
+   stretching to the box, so its size is the size of the host's screen. */
 .readonly-terminal {
   overflow: hidden;
+}
+
+.readonly-terminal .xterm {
+  display: inline-block;
+  height: auto;
+  vertical-align: top;
+}
+
+.readonly-terminal.mirror-actual {
+  overflow: auto;
 }

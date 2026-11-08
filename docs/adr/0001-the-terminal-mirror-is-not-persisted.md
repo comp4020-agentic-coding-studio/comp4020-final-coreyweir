@@ -86,6 +86,11 @@ The durable record of what happened lives elsewhere, and is safer:
   it sent, so until the screen next changes, a latecomer sees nothing. The
   fix is to forget the last snapshot when the relay accepts the host again.
   It's small but needs a client rebuild, so it's queued behind the build fix.
+  **Done 2026-11-08:** the host forgets its last snapshot whenever the relay
+  accepts it, and a participant starts counting the relay's sequence afresh
+  on each connection (a restarted relay numbers from 1 again, and the
+  mirror used to ignore it until it passed the old count).
+  `npm run test:terminal-redeploy-browser` checks both on a dev server.
 - **This limits keeping, not seeing.** Today the host's model token and
   GitHub token are in the guest's environment (`claudePod.ts`: `ANTHROPIC_*`,
   `GITHUB_TOKEN`, `GH_TOKEN`). If Claude runs `env`, both go out live to

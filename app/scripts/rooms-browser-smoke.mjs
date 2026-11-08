@@ -108,7 +108,7 @@ try {
   console.log("host: invited, pending invite listed");
 
   const arrived = Date.now();
-  await waitText(octocat, ".your-rooms .invite", new RegExp(`Hana invited you to ${code}`));
+  await waitText(octocat, ".invites .invite", new RegExp(`Hana invited you to ${code}`));
   await shot(octocat, "invite-arrived");
   await shot(host, "host-invited");
   console.log(`invitee: invite arrived without a reload (${Date.now() - arrived}ms after the reply)`);
@@ -127,13 +127,13 @@ try {
 
   // Accepting joins under the name on the landing page (the GitHub login);
   // taken in that room, it asks for another. The invite is used up.
-  await clickText(octocat, ".your-rooms .invite button", "Join");
-  await waitText(octocat, ".your-rooms .form-error", /already goes by that name/);
-  await octocat.waitForSelector(".your-rooms .invite form input");
+  await clickText(octocat, ".invites .invite button", "Join");
+  await waitText(octocat, ".invites .form-error", /already goes by that name/);
+  await octocat.waitForSelector(".invites .invite form input");
   await shot(octocat, "invite-name-taken");
-  await octocat.click(".your-rooms .invite form input", { clickCount: 3 });
-  await octocat.type(".your-rooms .invite form input", "Octo");
-  await octocat.click(".your-rooms .invite form button");
+  await octocat.click(".invites .invite form input", { clickCount: 3 });
+  await octocat.type(".invites .invite form input", "Octo");
+  await octocat.click(".invites .invite form button");
   await octocat.waitForFunction((id) => new URL(location.href).searchParams.get("id") === id, { timeout: 10_000 }, roomId);
   await waitText(host, ".people-panel li", /Octo\s*@octocat/);
   await host.waitForFunction(() => !document.querySelector(".pending-invites"), { timeout: 5000, polling: 100 });
@@ -144,7 +144,8 @@ try {
   await octocatLanding.goto(baseUrl, { waitUntil: "networkidle0" });
   await waitText(octocatLanding, ".your-rooms li", new RegExp(`Room ${code}\\s*Hana is hosting`));
   await clickText(octocatLanding, ".account button", "Colleagues");
-  await octocatLanding.waitForSelector(".colleagues form input");
+  await octocatLanding.waitForSelector(".overlay [role=dialog] .colleagues form input");
+  assert.ok(await octocatLanding.$(".entry-card > nav"), "colleagues open over the page; the forms stay");
   await octocatLanding.type(".colleagues form input", "octocat");
   await octocatLanding.click(".colleagues form button");
   await waitText(octocatLanding, ".colleagues .form-error", /That's you/);
@@ -169,7 +170,9 @@ try {
   // Signing out offers to delete the boards this browser kept, and does it
   // with the room still open in another tab (which has to let go).
   await octocatLanding.reload({ waitUntil: "networkidle0" });
-  await waitText(octocatLanding, ".local-boards li", new RegExp(`Room ${code}`));
+  await waitText(octocatLanding, ".your-rooms li", new RegExp(`Room ${code}.*Host away.*copy on this browser`));
+  const rows = await octocatLanding.$$eval(".your-rooms li", (items, room) => items.filter((item) => item.textContent.includes(room)).length, code);
+  assert.equal(rows, 1, "the room and this browser's copy of it are one row");
   await clickText(octocatLanding, ".account button", "Sign out");
   await waitText(octocatLanding, ".signing-out", /This browser has a copy of 1 board you've been in\. Delete it too\?/);
   await shot(octocatLanding, "sign-out-copies");
@@ -178,7 +181,7 @@ try {
   await reloaded;
   await octocatLanding.waitForSelector(".account .github-sign-in");
   const kept = await octocatLanding.evaluate(async () => ({
-    boards: Boolean(document.querySelector(".local-boards")),
+    boards: Boolean(document.querySelector(".your-rooms")),
     databases: (await indexedDB.databases()).filter((database) => database.name.startsWith("room/")).length,
     secrets: Object.keys(localStorage).filter((key) => key.startsWith("riff-member:")).length,
   }));

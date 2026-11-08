@@ -1,4 +1,4 @@
-// Boards on this browser, export and import (docs/adr/0003, second
+// Your rooms and the boards this browser keeps, export and import (docs/adr/0003, second
 // amendment), in two browsers: a guest exports a room with an image, a
 // staged prompt and a queued one; after the room ends the guest's browser
 // still lists its copy, opens it read-only with no server and exports it
@@ -177,10 +177,10 @@ try {
 
   // The guest's start page lists the board, and Open goes to the live room.
   await bo.goto(baseUrl, { waitUntil: "networkidle0" });
-  await waitText(bo, ".local-boards li", new RegExp(`Room ${code}.*joined`));
+  await waitText(bo, ".your-rooms li", new RegExp(`Room ${code}.*Hana is hosting.*copy on this browser`));
   await shot(bo, "boards-list");
-  await Promise.all([bo.waitForNavigation(), clickText(bo, ".local-boards li .actions button", /^Open$/)]);
-  assert.match(bo.url(), /\?id=/, "a room you're still in opens as the room");
+  await Promise.all([bo.waitForNavigation(), clickText(bo, ".your-rooms li .actions button", /^Enter$/)]);
+  assert.match(bo.url(), /\?id=/, "a room you're still in enters the room");
   await bo.waitForSelector(".new-prompt textarea");
 
   // The host ends the room. The guest's copy stays, opens without a server,
@@ -191,8 +191,20 @@ try {
   await waitText(bo, ".room-banner.ended", /has ended/);
   await shot(bo, "ended-banner-export");
   await bo.goto(baseUrl, { waitUntil: "networkidle0" });
-  await waitText(bo, ".local-boards li", new RegExp(`Room ${code}`));
-  await Promise.all([bo.waitForNavigation(), clickText(bo, ".local-boards li .actions button", /^Open$/)]);
+  await waitText(bo, ".your-rooms li", new RegExp(`Room ${code}.*Not live`));
+  assert.equal(await bo.$$eval(".your-rooms li .actions button", (buttons) => buttons.some((button) => button.textContent === "Enter")), false, "an ended room can't be entered");
+  if (viewport.width > 780) {
+    // A wide screen opens the copy beside the forms, then as its own page.
+    await clickText(bo, ".your-rooms li .actions button", /^Open$/);
+    await waitText(bo, ".board-peek header", new RegExp(`Room ${code}.*from this browser's copy`));
+    await bo.waitForSelector(".board-peek .quickdraw-surface");
+    assert.ok(await bo.$(".entry-card > nav"), "the forms stay beside the board");
+    assert.equal(await bo.$(".board-peek .enter"), null, "no Enter for an ended room");
+    await shot(bo, "board-peek");
+    await Promise.all([bo.waitForNavigation(), bo.click(".board-peek .full-page")]);
+  } else {
+    await Promise.all([bo.waitForNavigation(), clickText(bo, ".your-rooms li .actions button", /^Open$/)]);
+  }
   assert.match(bo.url(), /\?copy=room%2F/, "an ended room opens as this browser's copy");
   await waitText(bo, ".room-banner", /copy this browser kept of room/);
   await bo.waitForFunction(() => document.querySelectorAll(".prompt-card").length === 1 && !document.querySelector(".new-prompt"), { timeout: 10_000, polling: 100 });
@@ -206,11 +218,11 @@ try {
 
   // Deleting the copy takes this browser's place in the room with it.
   await bo.goto(baseUrl, { waitUntil: "networkidle0" });
-  await clickText(bo, ".local-boards li .actions button", /^Delete$/);
-  await waitText(bo, ".local-boards .asking", /and its place in the room/);
+  await clickText(bo, ".your-rooms li .actions button", /^Delete$/);
+  await waitText(bo, ".your-rooms .asking", /and its place in the room/);
   await shot(bo, "delete-confirm");
-  await bo.click(".local-boards .asking button.danger");
-  await bo.waitForFunction(() => !document.querySelector(".local-boards"), { timeout: 10_000, polling: 100 });
+  await bo.click(".your-rooms .asking button.danger");
+  await bo.waitForFunction(() => !document.querySelector(".your-rooms"), { timeout: 10_000, polling: 100 });
   const left = await bo.evaluate(async () => ({
     secrets: Object.keys(localStorage).filter((key) => key.startsWith("riff-member:")).length,
     databases: (await indexedDB.databases()).filter((database) => database.name.startsWith("room/")).length,

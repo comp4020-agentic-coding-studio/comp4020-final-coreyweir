@@ -1,0 +1,96 @@
+/* The start page (PLAN P2, "Redesign the landing page"). Two zones: the
+   card holds what you do now (invites, Join | Host); beside it on a wide
+   screen, below it on a phone, the rooms you're in and the boards this
+   browser keeps, one row per room. The account sits in the header, and
+   colleagues open over the page. Scoped to .home: other pages still use
+   .landing and .entry-card for a single card. */
+
+.landing.home{height:100dvh;overflow:auto;grid-template-columns:minmax(0,1fr) minmax(360px,440px);grid-template-rows:64px auto 1fr;grid-template-areas:"bar bar" "hero card" "list card";column-gap:4vw;align-content:start;padding:0 5vw 40px}
+
+/* Header: brand, tagline, account on the right */
+.home>header{grid-area:bar;justify-content:flex-start;gap:16px;position:sticky;top:0;z-index:30;background:#f7f7f4}
+.home>header .account{position:relative;margin:0 0 0 auto;padding:0;border:0;flex-wrap:nowrap;gap:12px}
+.home>header .account small{flex-basis:auto;order:-1;max-width:330px;text-align:right}
+.home>header .account .link{margin-left:0}
+.home>header .account strong{font-weight:600}
+.home>header .account .signing-out{position:absolute;top:calc(100% + 12px);right:0;z-index:40;width:min(360px,88vw);padding:14px;border:1px solid #d3d3cd;border-radius:6px;background:white;box-shadow:0 12px 35px rgba(0,0,0,.1);line-height:1.45}
+
+/* Hero, shorter than it was, so the rooms show without scrolling */
+.home>.landing-copy{grid-area:hero;align-self:start;padding:56px 0 36px}
+.home>.landing-copy h1{margin:18px 0 20px;font-size:clamp(40px,4.6vw,70px)}
+
+/* The card: what you do now. It stays in view while the rooms scroll. */
+.home>.entry-card{grid-area:card;align-self:start;justify-self:stretch;max-width:none;margin-top:40px;position:sticky;top:104px;max-height:calc(100dvh - 128px)}
+.home>.entry-card>form{min-height:0}
+.home>.entry-card>.ended-note{margin:16px 26px 0}
+
+/* Invites on top of the card */
+.invites{padding:12px 26px;border-bottom:1px solid #e3e8f8;background:#f4f7ff;font-size:10px}
+.invites ul{margin:0;padding:0;list-style:none;display:grid;gap:2px}
+.invites li{min-height:34px;padding:6px 0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+.invites li+li{border-top:1px solid #e3e8f8}
+.invites code{font-family:"SFMono-Regular",Consolas,monospace;letter-spacing:.08em}
+.invites .actions,.invites form{margin-left:auto;display:flex;align-items:center;gap:10px}
+.entry-card .invites form{padding:0 0 4px;flex-basis:100%;display:flex;gap:8px}
+.invites form input{flex:1;height:30px;font-size:10px}
+.invites button:not(.link){padding:5px 9px;border:1px solid #d5d5cf;border-radius:3px;background:white;font-size:9px}
+.invites .link{padding:0;border:0;background:none;color:#315efb;font-size:10px;text-decoration:underline}
+.invites .form-error{margin-bottom:6px}
+
+/* Your rooms: one row per room */
+.home>.your-rooms{grid-area:list;align-self:start;padding:0;border:0;font-size:11px}
+.home>.your-rooms h2{padding-bottom:8px;border-bottom:1px solid #d9d9d3}
+.home>.your-rooms ul{max-height:none;margin:0;gap:0;overflow:visible}
+.home>.your-rooms li{min-height:52px;padding:9px 10px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"name state actions" "name detail actions";align-items:center;gap:2px 16px;border-bottom:1px solid #e6e6e1}
+.home>.your-rooms li:last-child{border-bottom:1px solid #e6e6e1}
+.home>.your-rooms li.peeking{background:white;box-shadow:inset 2px 0 #315efb}
+.home>.your-rooms .room-link{grid-area:name;font-size:12px;text-align:left}
+.home>.your-rooms .room-state{grid-area:state;display:flex;align-items:center;gap:6px;color:#444;font-size:10px}
+.home>.your-rooms .room-state i{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:#c99231}
+.home>.your-rooms .room-state i.live{background:#4d9c55}
+.home>.your-rooms .room-state i.gone{background:#bbb}
+.home>.your-rooms .room-detail{grid-area:detail;display:flex;flex-wrap:wrap;gap:2px 10px}
+.home>.your-rooms .room-detail small{margin:0;display:block;color:#888;font-size:9px}
+.home>.your-rooms .room-detail small.workspace-marker{color:#3a6b3a}
+.home>.your-rooms span.room-link{text-decoration:none;color:#444}
+.home>.your-rooms .workspace-note{margin:10px 0 0;color:#777;font-size:9px;line-height:1.45}
+.home>.your-rooms .actions{grid-area:actions;display:flex;align-items:center;gap:12px}
+.home>.your-rooms .actions.asking{grid-column:1/-1;grid-row:3;justify-content:flex-end;flex-wrap:wrap;padding:6px 0 2px;color:#444}
+.home>.your-rooms .link{font-size:10px}
+.home>.your-rooms .delete-all{margin:10px 0 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;color:#444}
+.home>.your-rooms button.danger{padding:5px 9px;border:1px solid #b75243;border-radius:3px;background:#b75243;color:white;font-size:9px}
+.home>.your-rooms .form-error{margin:8px 0}
+
+/* A board, in place of the hero, from this browser's copy */
+.board-peek{grid-area:hero;height:min(62dvh,640px);min-height:320px;margin:40px 0 32px;display:flex;flex-direction:column;border:1px solid #d3d3cd;border-radius:7px;background:white;overflow:hidden;box-shadow:0 12px 35px rgba(0,0,0,.06)}
+.board-peek>header{min-height:52px;padding:8px 10px 8px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #e3e3de}
+.board-peek>header>div{display:grid;gap:2px}
+.board-peek>header strong{font-size:12px;font-weight:600}
+.board-peek>header code{font-family:"SFMono-Regular",Consolas,monospace;letter-spacing:.08em}
+.board-peek>header small{color:#888;font-size:9px}
+.board-peek .actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.board-peek .actions button{padding:6px 10px;border:1px solid #d5d5cf;border-radius:4px;background:white;font-size:10px}
+.board-peek .actions button.enter{border-color:#191919;background:#191919;color:white}
+.board-peek .actions button.close{width:30px;padding:4px 0;border:0;background:none;color:#777;font-size:18px;line-height:1}
+.board-peek .board-wrap{flex:1;border-right:0}
+.peek-note{margin:auto;color:#888;font-size:11px}
+
+/* Colleagues, over the page */
+.overlay{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:20px;background:rgba(25,25,25,.3)}
+.overlay>[role=dialog]{width:min(440px,100%);max-height:calc(100dvh - 40px);overflow:auto;border-radius:7px;background:white;box-shadow:0 18px 50px rgba(0,0,0,.18)}
+.overlay .colleagues{border-bottom:0;padding:18px 24px 22px}
+.overlay .colleagues ul{max-height:none}
+.overlay .colleagues form{display:flex;gap:8px}
+.overlay .colleagues form input{height:32px;padding:0 10px;border:1px solid #d5d5cf;border-radius:4px;background:#fbfbf9;font-size:11px}
+
+@media(max-width:1100px){.home>header>span{display:none}.home>header .account small{max-width:220px}}
+@media(max-width:780px){
+  .landing.home{height:auto;min-height:100dvh;overflow:visible;grid-template-columns:minmax(0,1fr);grid-template-rows:60px auto auto auto;grid-template-areas:"bar" "hero" "card" "list";padding:0 5vw 48px}
+  .home>header .account small,.home>header .signed-in-as{display:none}
+  .home>.landing-copy{padding:32px 0 26px}
+  .home>.landing-copy h1{font-size:clamp(34px,10vw,56px);margin:14px 0 14px}
+  .home>.entry-card{position:static;max-height:none;margin-top:0}
+  .home>.your-rooms{margin-top:32px}
+  .home>.your-rooms li{padding:9px 2px;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name actions" "state state" "detail detail"}
+  .home>.your-rooms .actions.asking{grid-row:4}
+}

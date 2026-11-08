@@ -453,19 +453,59 @@ auto-release at the latest.
   `npm run test:audit-log`, `spec/permissions.test.ts`.
   - Left: live verification. A slash command fires no hook, so auto pauses
     after one until the host turns it on again (measured, by design).
-- **Clipboard.** Claude Code copies a selection with OSC 52, which xterm.js
-  ignores. Load `@xterm/addon-clipboard`. Fallback: `copyOnSelect: false` in
-  `/home/user/.claude.json` and Shift+drag. Check the participants' mirror
-  too.
-- **Terminal redeploy gap** (ADR 0001): forget the host's last snapshot when
-  the relay accepts the host again.
-- **Redesign the landing page.** Sign-in, "Your rooms", "Boards on this
-  browser", colleagues and both forms all sit in one card, which grew taller
-  than the window and hid Create room (found by hand on live, 19 Oct). The
-  stop-gap: the card stops at the window's height, everything below the
-  Join | Host tabs scrolls, and the whole card scrolls if what's above the
-  tabs is too tall on its own. Now that there are accounts, colleagues and
-  past rooms, not everything needs to be on the landing page.
+- ~~**Terminals the same size**~~ (crit 11; 8 Nov). The mirror already took
+  the host's columns and rows, but at a fixed 12px, so a phone watching a
+  desktop host saw the first 390px of a 1368px screen. Now the font follows
+  the participant's box ("fit", the default) and the grid stays the host's;
+  "Actual size" keeps the host's font and scrolls (`src/mirrorFit.ts`).
+  Checked by `npm run test:terminal-size-browser` (dev): desktop host and
+  phone participant and the reverse, the host resized mid-way, the screens
+  equal row by row and inside the box. Red before (cut off), and red if the
+  mirror stops taking the host's size.
+  - The host's terminal keeps its own size (decided 8 Nov, Corey): the
+    desktop host's experience isn't made worse to suit phones. A desktop
+    host's 190 columns fit a phone at about 3px a character, a thumbnail;
+    the phone can pinch-zoom, or switch to Actual size and scroll.
+- ~~**Clipboard.**~~ (8 Nov.) Claude Code 2.1.221 copies with OSC 52 (`]52;c;`,
+  read from the bundle), which xterm.js ignores. The host's terminal now
+  honours copies, never queries (`src/terminalClipboard.ts`, our own OSC
+  handler, not `@xterm/addon-clipboard`: the addon answers every query, if
+  only with an empty clipboard, and the answer lands in the program's input,
+  where bash took it for typing). The participants' mirror ignores OSC 52,
+  or the host's output would write to everyone's clipboard. Checked by
+  `npm run test:terminal-clipboard-browser` (dev, two browsers): a copy
+  reaches the host's clipboard, a query gets no answer, the participant's
+  clipboard is untouched. Red with the handler removed, and red with it on
+  the mirror. Not driven: Claude's own copy (a printf sends the same bytes).
+- ~~**Terminal redeploy gap** (ADR 0001): forget the host's last snapshot when
+  the relay accepts the host again.~~ Done 8 Nov. On the way: a participant
+  already watching also ignored the restarted relay, whose sequence starts
+  at 1 again, until it passed the old count; each connection now starts the
+  count afresh. `npm run test:terminal-redeploy-browser` (dev only: it
+  restarts the dev server by touching `server/riff.mjs`, and keeps Vite's
+  client from reloading the pages) was red before on both counts.
+  - Needs live: a `flyctl deploy` with a host idle on Claude and a
+    participant joining after it.
+- ~~**Redesign the landing page.**~~ (8 Nov.) Sign-in, "Your rooms", "Boards on this
+  browser", colleagues and both forms all sat in one card, which grew taller
+  than the window and hid Create room (found by hand on live, 19 Oct; the
+  stop-gap made the card scroll). Corey chose "two zones" from a sketch:
+  the card holds only what you do now (invites on top, then Join | Host,
+  the forms unchanged, so joining is still a name and a code and hosting
+  gains no step); the account moves to the header and colleagues open over
+  the page; beside the card on a wide screen, below it on a phone, one row
+  per room, merging the server's list with this browser's copies (Enter,
+  Open, Export, Delete). Open shows the copy's board in place of the hero
+  with the forms still beside it, "as of" when this browser last had it
+  open (Full page for the prompts too); on a phone it goes to the copy's
+  own page. Checked by `test:rooms-browser` (invites, the colleagues
+  overlay leaving the forms, a room and its copy as one row) and
+  `test:boards-browser` (Enter, the peek on a wide screen, the copy page,
+  Delete), both at 1920×1080 and 390×844 on dev. On a phone the line
+  about why to sign in is hidden for room. The host's files (ADR 0010)
+  ride on the same row ("Files: …", Delete files); files whose board copy
+  has gone get a row of their own. `test:workspace-browser` reads them
+  from the merged list.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own

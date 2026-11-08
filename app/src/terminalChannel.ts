@@ -15,6 +15,10 @@ export type TerminalData = {
 };
 
 export type TerminalEvent = TerminalSnapshot & { type: "snapshot" } | TerminalData & { type: "data" };
+// Each connection to the relay starts its own numbering: a redeploy, or the
+// room emptying for a moment, starts the relay's sequence again at 1. So a
+// listener hears "connected" and starts counting afresh.
+export type TerminalChannelEvent = TerminalEvent | { type: "connected" };
 
 function terminalUrl(roomId: string) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -26,12 +30,16 @@ function terminalUrl(roomId: string) {
 // whether the socket is the host's (docs/adr/0006).
 export function useTerminalChannel(roomId: string, token: string | null, facilitator: boolean) {
   const socketRef = useRef<WebSocket | null>(null);
-  const listenersRef = useRef(new Set<(event: TerminalEvent) => void>());
+  const listenersRef = useRef(new Set<(event: TerminalChannelEvent) => void>());
   const [connected, setConnected] = useState(false);
   const [hostConnected, setHostConnected] = useState(false);
   const [hasData, setHasData] = useState(false);
   const [snapshot, setSnapshot] = useState<TerminalSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Counts the relay accepting this page as host. A relay that restarted has
+  // no snapshot, so each acceptance tells the host to send one even if its
+  // screen hasn't changed (docs/adr/0001, the redeploy gap).
+  const [hostAccepted, setHostAccepted] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -47,6 +55,7 @@ export function useTerminalChannel(roomId: string, token: string | null, facilit
       socket.addEventListener("open", () => {
         setConnected(true);
         setError(null);
+        for (const listener of listenersRef.current) listener({ type: "connected" });
         socket.send(JSON.stringify({
           type: "hello",
           role: facilitator ? "host" : "participant",
@@ -65,6 +74,7 @@ export function useTerminalChannel(roomId: string, token: string | null, facilit
           setHostConnected(message.connected === true);
         } else if (message.type === "host-accepted") {
           setHostConnected(true);
+          setHostAccepted((count) => count + 1);
         } else if (message.type === "error") {
           const code = String(message.code ?? "terminal-relay-error");
           if (code === "room-ended" || code === "not-a-member") refused = true;
@@ -101,12 +111,12 @@ export function useTerminalChannel(roomId: string, token: string | null, facilit
     socket.send(JSON.stringify({ type: "data", data, cols, rows }));
   }, [facilitator]);
 
-  const subscribe = useCallback((listener: (event: TerminalEvent) => void) => {
+  const subscribe = useCallback((listener: (event: TerminalChannelEvent) => void) => {
     listenersRef.current.add(listener);
     return () => {
       listenersRef.current.delete(listener);
     };
   }, []);
 
-  return { connected, error, hasData, hostConnected, publish, publishData, snapshot, subscribe };
+  return { connected, error, hasData, hostAccepted, hostConnected, publish, publishData, snapshot, subscribe };
 }

@@ -228,11 +228,11 @@ try {
   }, room);
   const listed = async () => {
     await other.goto(`${baseUrl}/`, { waitUntil: "networkidle0" });
-    await other.waitForSelector(".local-boards li");
-    return other.$$eval(".local-boards li", (rows) => rows.map((row) => row.textContent));
+    await other.waitForSelector(".your-rooms li");
+    return other.$$eval(".your-rooms li", (rows) => rows.map((row) => row.textContent));
   };
   const clickIn = async (rowText, label) => {
-    const clicked = await other.$$eval(".local-boards li", (rows, rowText, label) => {
+    const clicked = await other.$$eval(".your-rooms li", (rows, rowText, label) => {
       const row = rows.find((r) => r.textContent.includes(rowText));
       const button = [...(row?.querySelectorAll("button") ?? [])].find((b) => b.textContent.trim() === label);
       button?.click();
@@ -258,7 +258,7 @@ try {
   // "Delete files" takes the workspace and leaves the board copy
   await clickIn("WSUI", "Delete files");
   await clickIn("WSUI", "Delete files");
-  await other.waitForFunction(() => ![...document.querySelectorAll(".local-boards li")].some((r) => r.textContent.includes("Files:")), { polling: 100 });
+  await other.waitForFunction(() => ![...document.querySelectorAll(".your-rooms li")].some((r) => r.textContent.includes("Files:")), { polling: 100 });
   const filesDeleted = await stored();
   console.log("delete files", JSON.stringify(filesDeleted));
   assert.deepEqual(filesDeleted, { workspace: false, left: false, copy: true });
@@ -271,10 +271,10 @@ try {
   });
   assert.ok((await listed()).some((row) => /WSUI/.test(row) && /Files:/.test(row)));
   await clickIn("WSUI", "Delete");
-  const asked = await other.$$eval(".local-boards li", (rows) => rows.find((r) => r.textContent.includes("WSUI"))?.textContent ?? "");
+  const asked = await other.$$eval(".your-rooms li", (rows) => rows.find((r) => r.textContent.includes("WSUI"))?.textContent ?? "");
   assert.match(asked, /and the host's files/, "Delete says it takes the files too");
   await clickIn("WSUI", "Delete");
-  await other.waitForFunction(() => ![...document.querySelectorAll(".local-boards li")].some((r) => r.textContent.includes("WSUI")), { polling: 100 });
+  await other.waitForFunction(() => ![...document.querySelectorAll(".your-rooms li")].some((r) => r.textContent.includes("WSUI")), { polling: 100 });
   const deleted = await stored();
   console.log("delete", JSON.stringify(deleted));
   assert.deepEqual(deleted, { workspace: false, left: false, copy: false });

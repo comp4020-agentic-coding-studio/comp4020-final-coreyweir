@@ -126,7 +126,8 @@ try {
   assert.equal(await participant.$eval(".terminal-heading", (element) => element.textContent.includes("Host terminal live")), true);
   assert.equal(await participant.$eval(".readonly-terminal", (element) => getComputedStyle(element).overflow), "hidden");
   await participant.waitForFunction(() => [...document.querySelectorAll(".participants span")].some((element) => element.getAttribute("title") === "Browser Participant"));
-  assert.equal((await participant.$$(".terminal-controls")).length, 0);
+  // A participant has none of the host's terminal controls, only the mirror's size.
+  assert.equal((await participant.$$(".terminal-controls button:not(.mirror-mode)")).length, 0);
   await participantContext.close();
   assert.deepEqual(pageErrors, []);
   console.log("Tab layouts, one-click Claude rendering, live participant data, and a prompt from staging to the queue passed.");

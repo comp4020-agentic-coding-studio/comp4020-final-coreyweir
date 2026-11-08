@@ -3,32 +3,70 @@ import { WorkspaceExport } from "./WorkspaceExport";
 import { Terminal } from "@xterm/xterm";
 import type { ClaudePodController, HostConfig } from "./claudePod";
 import type { ClaudeEvent } from "./queueRelease";
-import { useTerminalChannel, type TerminalEvent } from "./terminalChannel";
+import { useTerminalChannel, type TerminalChannelEvent } from "./terminalChannel";
 import { usePreviewHostChannel } from "./previewChannel";
+import { ACTUAL_FONT_SIZE, fitMirror, type MirrorMode } from "./mirrorFit";
 import "./terminal-stream.css";
 
 export type TerminalPaneHandle = { sendPrompt: (prompt: string) => boolean };
 
-function ParticipantTerminal({ subscribe }: { subscribe: (listener: (event: TerminalEvent) => void) => () => void }) {
+const MIRROR_MODE_KEY = "riff-mirror-mode";
+
+function savedMirrorMode(): MirrorMode {
+  try {
+    return localStorage.getItem(MIRROR_MODE_KEY) === "actual" ? "actual" : "fit";
+  } catch {
+    return "fit";
+  }
+}
+
+// The mirror takes the host's columns and rows from every event, never its
+// own box's, so Claude's output lays out exactly as on the host's screen.
+// Only the font size follows the box (src/mirrorFit.ts).
+function ParticipantTerminal({ subscribe, mode }: { subscribe: (listener: (event: TerminalChannelEvent) => void) => () => void; mode: MirrorMode }) {
   const targetRef = useRef<HTMLDivElement>(null);
+  const modeRef = useRef(mode);
+  const refitRef = useRef<() => void>(() => undefined);
+  modeRef.current = mode;
 
   useEffect(() => {
-    if (!targetRef.current) return;
+    refitRef.current();
+  }, [mode]);
+
+  useEffect(() => {
+    const box = targetRef.current;
+    if (!box) return;
     const terminal = new Terminal({
       allowTransparency: false,
       cursorBlink: false,
       disableStdin: true,
       fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-      fontSize: 12,
+      fontSize: ACTUAL_FONT_SIZE,
       lineHeight: 1.1,
       theme: { background: "#171816", foreground: "#e7e8df", cursor: "#171816" },
     });
-    terminal.open(targetRef.current);
+    terminal.open(box);
+    let frame = 0;
+    const refit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => fitMirror(terminal, box, modeRef.current));
+    };
+    refitRef.current = refit;
+    const observer = new ResizeObserver(refit);
+    observer.observe(box);
+    const resized = terminal.onResize(refit);
+    void document.fonts?.ready.then(refit);
     let sequence = 0;
     let desynchronized = false;
     let dataEvents = 0;
     let checkpointRenders = 0;
     const unsubscribe = subscribe((event) => {
+      if (event.type === "connected") {
+        // A new connection numbers from 1 again; the next snapshot redraws.
+        sequence = 0;
+        desynchronized = false;
+        return;
+      }
       if (event.sequence <= sequence) return;
       const continuous = event.sequence === sequence + 1;
       if (event.type === "snapshot") {
@@ -51,15 +89,21 @@ function ParticipantTerminal({ subscribe }: { subscribe: (listener: (event: Term
         targetRef.current.dataset.sequence = String(sequence);
         targetRef.current.dataset.dataEvents = String(dataEvents);
         targetRef.current.dataset.checkpointRenders = String(checkpointRenders);
+        targetRef.current.dataset.cols = String(terminal.cols);
+        targetRef.current.dataset.rows = String(terminal.rows);
       }
     });
     return () => {
+      cancelAnimationFrame(frame);
+      refitRef.current = () => undefined;
+      observer.disconnect();
+      resized.dispose();
       unsubscribe();
       terminal.dispose();
     };
   }, [subscribe]);
 
-  return <div className="terminal-target readonly-terminal" data-sequence="0" data-data-events="0" data-checkpoint-renders="0" ref={targetRef} />;
+  return <div className={`terminal-target readonly-terminal mirror-${mode}`} data-mode={mode} data-sequence="0" data-data-events="0" data-checkpoint-renders="0" ref={targetRef} />;
 }
 
 export const TerminalPane = forwardRef<TerminalPaneHandle, {
@@ -82,6 +126,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const [starting, setStarting] = useState(false);
   const [outputSize, setOutputSize] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [mirrorMode, setMirrorMode] = useState<MirrorMode>(savedMirrorMode);
   const channel = useTerminalChannel(roomId, token, facilitator);
   const publishPreview = usePreviewHostChannel(roomId, token, facilitator, controllerRef);
 
@@ -107,6 +152,14 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   useEffect(() => {
     if (facilitator) previewChangeRef.current(null, publishPreview(false));
   }, [facilitator, publishPreview]);
+
+  // The relay accepted this page as host, maybe after a restart that lost
+  // its snapshot: forget what was last sent, so the next tick sends one even
+  // if the screen hasn't changed since.
+  useEffect(() => {
+    lastSnapshotRef.current = "";
+    lastCheckpointAtRef.current = 0;
+  }, [channel.hostAccepted]);
 
   useEffect(() => {
     if (!facilitator) return;
@@ -148,6 +201,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
               outputTimerRef.current = 0;
               setOutputSize((size) => size + pending.length);
               const { cols, rows } = controllerRef.current?.dimensions() ?? { cols: 80, rows: 24 };
+              if (targetRef.current) Object.assign(targetRef.current.dataset, { cols: String(cols), rows: String(rows) });
               channel.publishData(pending, cols, rows);
             }, 16);
           },
@@ -177,8 +231,17 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       <header className="section-title terminal-heading">
         <div><h2>Workspace</h2><span className={facilitator && (status === "Claude running" || status === "WASIX Bash ready") || !facilitator && participantLive ? "live-dot" : "idle-dot"}>{facilitator ? status : participantStatus}</span></div>
         {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : controllerRef.current ? "Start Claude" : "Boot Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} /></div>}
+        {!facilitator && <div className="terminal-controls"><button className="mirror-mode" aria-pressed={mirrorMode === "actual"} title={mirrorMode === "fit" ? "Show the host's terminal at its own text size, and scroll" : "Shrink or grow the host's terminal to fit this box"} onClick={() => {
+          const next = mirrorMode === "fit" ? "actual" : "fit";
+          setMirrorMode(next);
+          try {
+            localStorage.setItem(MIRROR_MODE_KEY, next);
+          } catch {
+            // A preference that isn't remembered is still applied.
+          }
+        }}>{mirrorMode === "fit" ? "Actual size" : "Fit to box"}</button></div>}
       </header>
-      {facilitator ? <div className="terminal-target" data-output-size={outputSize} ref={targetRef} /> : <ParticipantTerminal subscribe={channel.subscribe} />}
+      {facilitator ? <div className="terminal-target" data-output-size={outputSize} ref={targetRef} /> : <ParticipantTerminal subscribe={channel.subscribe} mode={mirrorMode} />}
       <footer className="terminal-note">
         <span>{facilitator ? "Terminal output is shared with everyone in this room. Only you can type or approve actions." : "Read-only mirror. The facilitator controls input and permissions."}</span>
         {(error || channel.error) && <strong>{error ?? channel.error}</strong>}
