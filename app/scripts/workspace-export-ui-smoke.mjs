@@ -118,7 +118,7 @@ try {
       // The first keys after "ready" can beat the first prompt. Later lines follow
       // the previous one's sentinel. (On the phone a long line scrolls sideways and
       // the redraw can put output after the prompt, so no stricter match than this.)
-      if (n === 1) await host.waitForFunction(() => [...document.querySelectorAll(".terminal-target .xterm-rows > div")].some((r) => r.textContent.includes("wasmer:/work/repo#")), { timeout: 60_000, polling: 100 });
+      if (n === 1) await host.waitForFunction(() => [...document.querySelectorAll(".terminal-target .xterm-rows > div")].some((r) => r.textContent.includes("riff:/work/repo$")), { timeout: 60_000, polling: 100 });
       await host.click(".terminal-target .xterm");
       await host.keyboard.type(`${line}; echo DONE-$((${n} + 1000))`, { delay: 8 });
       await host.keyboard.press("Enter");
