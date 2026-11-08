@@ -29,7 +29,7 @@ binary-safe external-command I/O, terminal streaming, and byte-safe live
 external-command stdin maintained in the fork.
 
 Its source is the `chore: release riff.N` commit on `nodepod_fork`'s `main`
-(`riff.46` is `741e004`). A release cut on a side branch is merged into
+(`riff.47` is `dbe6e4f`). A release cut on a side branch is merged into
 `main` before its tarball lands here, so the source of what ships is never
 only on a branch someone may delete. The fork's `main` is local: nothing is
 pushed to its `origin`, which is upstream's.

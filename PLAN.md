@@ -607,7 +607,23 @@ auto-release at the latest.
     `npm create vite@latest` and `npx create-vite other-app` each scaffold
     in under a second. Left: the bridge still has no stdin at all, so
     `echo x | node script.js` and interactive `node` in the host's Bash
-    get nothing (a change to the bridge stub and protocol).
+    get nothing (a change to the bridge stub and protocol). Until 9 Nov a
+    bridged program that read stdin also *hung*, even under `< /dev/null`:
+    the bridge never ended its input, and Nodepod's EOF released only one
+    of the two refs a data+end reader holds (fixed in riff.47, with a unit
+    test). Now the host ends every bridged process's stdin at once, and the
+    bridge stub says what the guest offered (`RIFF_BRIDGE_STDIN`, by
+    `fstat`, since `isatty` is true for every fd here). When the terminal
+    was stdin and the program starts reading, Nodepod prints one line
+    saying keys can't reach it (`NODEPOD_STDIN_NOTICE`). A pipe gets end of
+    input with no notice: measured, `< /dev/null` under Claude's Bash tool
+    fstat's like a pipe, so a pipe notice would be wrong on every command
+    Claude runs. Checked by `test:wasix-claude-bash-browser` (pipe,
+    /dev/null, a non-reader: end of input, no notice) and
+    `test:wasix-terminal-browser` (a readline prompt ends with the notice).
+    `echo x | node` still silently reads nothing.
+    Not covered: programs reading /dev/tty directly (WASIX ones, like less)
+    still hang; a WASIX program's own stdin is fine.
   - ~~git failures.~~ Nodepod's git talks to GitHub's REST API, always with a
     token, so measured on dev: with no GitHub connected even a public clone
     fails ("authentication required. Set GITHUB_TOKEN", wrong advice in
@@ -737,16 +753,20 @@ auto-release at the latest.
   Left as they are: `ls -l` shows owners as `somebody somegroup` (the bash
   package's old uutils `ls`; GNU `ls` names `user` but shows every mode as
   `----------`, which is worse). Missing with bash's plain "command not
-  found": `sudo`, `apt`/`apt-get`, `make`, `ssh`, `wget` (curl is there),
+  found": `apt`/`apt-get`, `make`, `ssh`, `wget` (curl is there),
   `diff`, `patch`, `file`, `tput`, `ps`, `top`, `free`, `df`, `vi`/`vim`,
   `zip`/`unzip`; no /etc/os-release, and `uname` says
   `wasi riff 0.0.0 wasm32`. Any other program that reads keys from
   /dev/tty would hang the way less did. Typing ahead while a command runs
   keeps a whole line (typed with its Enter) but loses a part line: measured
   with and without the termcap entry, so it predates it (the runtime's tty,
-  hypothesis: its line buffer is dropped when readline takes the terminal). A `sudo` that runs its command
-  (the guest is uid 0 already) would be cheap, but it pretends, so it's a
-  call for Corey.
+  hypothesis: its line buffer is dropped when readline takes the terminal).
+  `sudo` (9 Nov, Corey's call: "just run the command"): the guest is uid 0
+  already, so it runs the command. `-n -E -H -u root|user --` are accepted;
+  `-v -k -K` do nothing (no password); any other user or option (a root
+  shell with `-s`/`-i`, ...) is refused with a line
+  saying sudo here only runs the command. Checked by
+  `test:wasix-claude-bash-browser`.
 
 - ~~**Web search and page reading for the host's Claude**~~ (versatility;
   done 9 Nov, Corey's call). Claude Code's WebFetch fetches from the host's

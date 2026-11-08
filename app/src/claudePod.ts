@@ -172,6 +172,20 @@ export function envFromBridge(request: BridgeRequest): Record<string, string> {
 }
 
 /**
+ * What a bridged command reading stdin is told, by what the guest gave it
+ * as stdin (the bridge stub's RIFF_BRIDGE_STDIN). Only the terminal gets a
+ * notice: someone may be typing, and the keys won't arrive. A pipe or file
+ * gets end of input without one, because it can't be told apart reliably:
+ * measured, `< /dev/null` under Claude's Bash tool fstat's like a pipe, and
+ * a notice there would be wrong for every command Claude runs.
+ */
+export function stdinNotice(command: string, kind: string | undefined): string | null {
+  const name = command.slice(command.lastIndexOf("/") + 1) || "this command";
+  if (kind === "tty") return `riff: ${name} wanted keyboard input, which Riff can't pass to it from Bash yet, so it got none.`;
+  return null;
+}
+
+/**
  * The production bridge handler: spawn a real Nodepod process per guest stub
  * request and relay its output frames back over the pipe. Exported so browser
  * smokes can drive the exact same code path the session uses.
@@ -190,7 +204,18 @@ export function createBridgeHostHandler(
     // answered. Without a TTY on stdin, prompting CLIs (create-vite and the
     // like) take their non-interactive path or stop with an error, instead
     // of waiting forever (docs/week-12.md, "npx create hangs").
-    const process = await pod.spawn(commandName, argv, { cwd, env: { ...envFromBridge(request), NODEPOD_STDIN_TTY: "0" } });
+    const { RIFF_BRIDGE_STDIN: stdinKind, ...env } = envFromBridge(request);
+    const notice = stdinNotice(commandName, stdinKind);
+    const process = await pod.spawn(commandName, argv, {
+      cwd,
+      env: { ...env, NODEPOD_STDIN_TTY: "0", ...(notice ? { NODEPOD_STDIN_NOTICE: notice } : {}) },
+    });
+    // No stdin crosses the bridge yet, so end the process's input now: a
+    // reader gets end of input instead of waiting forever (it used to hang
+    // even under `< /dev/null`). If the guest offered input (the terminal, a
+    // pipe, a file), Nodepod prints the notice when the program starts
+    // reading.
+    process.end();
     const encoder = new TextEncoder();
     process.on("output", (chunk: string) => {
       void output.writeStdout(encoder.encode(chunk));
