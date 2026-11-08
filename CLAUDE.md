@@ -16,16 +16,19 @@ Reused code does not answer the brief. What I change, decide and justify does.
 
 ## Where we are
 
-Week 10. Crit 9 ("All at once") was on 12 October; its decision is
-`docs/adr/0001`.
-Next is crit 10 on 19 October: the server tells people apart, checks what
-each may see and change, and logs who did what in a way that outlives the
-crit. That is built (`docs/adr/0005`, `docs/adr/0006`, checked in
-`spec/permissions.test.ts`); what's left of it is in `PLAN.md`. A3 is due at
-noon on 9 November. Toward A3, "Your rooms", invites and colleagues are
-built (`docs/adr/0008`), and so is the room lifecycle with its 4 MB size
-cap and pruning, and local copies, export and import (`docs/adr/0003`);
-next in `PLAN.md`'s P2 is the OPFS workspace.
+Week 13, the last stretch before A3 (noon, 9 November). The crits are
+over. Built so far: identity, rooms and permissions with the who-did-what
+log (ADRs 0005, 0006), credentials kept out of the guest (0007), "Your
+rooms", invites and colleagues (0008), the room lifecycle, size cap,
+pruning, local copies and board export/import (0003), and Riff's own free
+models for hosts (0009).
+
+What's left is measured against `README.md`: the OPFS workspace and
+cloning the host's repo at boot (resilience), workspace export (no
+lock-in), queue auto-release (ADR 0004, not too opinionated), the bugs
+found at the week-12 crit (`docs/week-12.md`), and polish (see `PLAN.md`'s
+P2). These are being built in parallel, each in its own git worktree;
+only the main checkout deploys.
 
 Update this section at each crit. A harness describing last week's project
 steers the agent into last week's work.
@@ -170,7 +173,13 @@ same commit. Each README quality turns into what it means for a change:
   cookies are per host and GitHub's callback is registered for `127.0.0.1`.
 - Start the dev server through `mise exec -- npx vite --host 127.0.0.1
   --port 8093 --strictPort` (in `app/`), or it has no GitHub client secret
-  or session secret and sign-in answers 503.
+  or session secret and sign-in answers 503. In a git worktree, copy
+  `mise.local.toml` from the main checkout first, without its
+  `FLY_API_TOKEN` line (it's gitignored; never commit it). Use your own
+  port, with `RIFF_ORIGIN` set after mise's (`mise exec -- env
+  RIFF_ORIGIN=http://127.0.0.1:<port> npx vite … --port <port>`), so
+  parallel dev servers don't collide. Each worktree's `app/.data/` is its
+  own database.
 - **Fly's proxy holds a websocket open after the server closes it.** The
   browser only finds out ~3 s later. Anything that shuts someone out tells
   the client in-band first (Hocuspocus `PermissionDenied`, a relay `error`
