@@ -122,7 +122,8 @@ const GIT_NOTE = "The .git folder is Nodepod's own store (objects in .git/object
 
 export function workspaceFileName(room: string | null, at: Date) {
   const day = at.toISOString().slice(0, 10);
-  return `riff-workspace-${(room ?? "workspace").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${day}.zip`;
+  const code = room?.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return code ? `riff-workspace-${code}-${day}.zip` : `riff-workspace-${day}.zip`;
 }
 
 function joinPath(dir: string, name: string) {

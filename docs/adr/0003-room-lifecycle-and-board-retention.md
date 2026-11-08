@@ -2,7 +2,8 @@
 
 - Status: accepted; lifecycle, keeping and End room implemented 2026-10-18;
   pruning and the size cap decided and implemented 2026-10-18; local copies,
-  export and import decided and implemented 2026-10-19 (amendments below)
+  export and import decided and implemented 2026-10-19; workspace export
+  decided and implemented 2026-11-08 (amendments below)
 - Date: 2026-10-12
 
 ## Context
@@ -473,5 +474,92 @@ SVG left out, a guest in the new room exporting the same images byte for
 byte and the same shape ids); `npm run test:rooms-browser` (sign-out
 deleting copies, and the other tab carrying on).
 
-**Not built:** the workspace export (it waits for the OPFS workspace) and
-transcripts. **Not checked:** a browser other than Chrome.
+**Not built:** the workspace export and transcripts (built 8 Nov, the
+amendment below). **Not checked:** a browser other than Chrome.
+
+## Amendment (2026-11-08): workspace export
+
+The README's "no lock-in" covers the filesystem Claude works in as well as
+the board. Only the host's browser has it, so export is the host's.
+
+**What it is.** An "Export" button in the workspace's controls (host only,
+once the workspace has booted) downloads one zip, `riff-workspace-<date>.zip`:
+
+- `repo/`: `/work/repo`, `.git` included, so commits that were never pushed
+  are in it. It unzips into an ordinary project folder (unix modes and
+  symlinks kept).
+- `claude/projects/-work-repo/`: Claude's session transcripts.
+- `riff-workspace.json`: what's in the zip, what was left out and why, what
+  was changed, and the repo's commits, each marked "unpushed" if no remote
+  branch has it.
+
+It reads the files through the running pod, so it doesn't care what backs the
+pod's filesystem (memory today, OPFS once that lands).
+
+**Decided with the host (8 Nov):**
+
+- **Dependencies are left out by default**, with a checkbox to include them:
+  `node_modules`, `.venv` and `__pycache__`, at any depth. They can be rebuilt
+  and can be huge. The summary names what was skipped and how big it was.
+  Build output (`dist`, `target`) is *not* excluded by name: in another
+  language it may be someone's source, and no list here is about one
+  framework. The other option, including everything, gives a complete zip that
+  can be tens of thousands of files.
+- **Transcripts are included by default**, with a checkbox to leave them
+  out and a line saying what they hold. The reasoning: this preserves a
+  workspace, it doesn't package an app for others. The earlier wording (opt-in,
+  "an export can contain secrets from the host's session") changes
+  accordingly: the warning stays beside the checkbox, the default flips.
+  Files in the workspace itself (a `.env`, say) go as they are, for the same
+  reason.
+- **Import is left for later.** It would need the OPFS workspace and boot
+  code to settle first, and an imported transcript becomes Claude's own
+  history (see "Claude session transcripts" above). The plan for when it
+  comes: into a new workspace only, never over an existing one, as board import
+  goes into a new room; the file is read by a parser that copies known fields
+  only; transcripts need their own ticked confirmation. Export is a plain zip,
+  so "no lock-in" holds without it.
+- **The git history stays in Nodepod's format.** Nodepod's git keeps commits
+  in its own store (`.git/objects/store.json`: hash to `{type, data}`, with
+  commits and trees as JSON, and file contents as text), not real git objects.
+  The zip carries it faithfully, and the manifest lists every commit and
+  marks the unpushed ones, so the work can be read without Riff. Converting
+  it to real git was considered and not done: every hash would change (the
+  store's own hashes are over its JSON, and objects cloned from GitHub are
+  stored under GitHub's hashes with JSON contents), so the converted history
+  would share no commit with the remote and couldn't be pushed back to it;
+  and file contents are stored as text, so binary files are already lossy in
+  it (measured 8 Nov: a committed file of bytes 0, 1, 2, 200, 255, 254, 128
+  came back from the store as 0, 1, 2 and four U+FFFD). The hashes for cloned
+  objects are read from Nodepod's source, not measured. The working tree is
+  complete and exact either way.
+
+**What never goes in, whatever is ticked:**
+
+- `.wasix-session`: Riff's own session folder (54 MB of command stubs and a
+  per-session certificate), rebuilt at every start. It isn't the host's work.
+- `.git-credentials` and `.git/credentials`.
+- A token Riff holds. ADR 0007 keeps the real model and GitHub tokens out of
+  the pod, so none should be there. As a second line, every file's bytes (and
+  the manifest's) are checked for the exact token values, and any match is
+  overwritten with `*` of the same length. The manifest names the files and
+  never a value. `.git/config` also loses the `user:token@` part of remote
+  URLs and any `extraheader` line. A secret a project keeps for itself (a
+  `.env`, a key Claude was given) isn't Riff's to find, and isn't touched.
+
+**Checked:** `npm run test:workspace-export` (in `app/`; the module against an
+in-memory filesystem: byte-for-byte round trip with binary, unicode, empty and
+nested files, modes and symlinks, each exclusion, each cleaning, and the
+commit list; ten mutations, one per rule, each turn it red);
+`npm run test:workspace-export-browser` (a real pod: files written by
+Nodepod's fs, a node process and WASIX bash, a git repo with a token in its
+remote, and a transcript; the zip read back outside the page, compared byte
+for byte, and accepted by `python3 -m zipfile -t`; three mutations red);
+`npm run test:workspace-export-ui` (the button, dialog, download and summary
+at 1280x800 and 390x844, a participant with no button).
+
+**Not checked:** a transcript Claude Code itself wrote (the path,
+`~/.claude/projects/-work-repo/`, is Claude Code's convention, written to by
+the smoke rather than by Claude); an OPFS-backed pod; a browser other than
+Chrome; a workspace in the hundreds of megabytes (the zip is built in
+memory).

@@ -18,6 +18,7 @@ import {
   exportWorkspace,
   overwriteSecrets,
   scrubGitConfig,
+  workspaceFileName,
 } from "../src/workspaceExport.ts";
 
 const enc = new TextEncoder();
@@ -295,4 +296,10 @@ test("no remote branches means every commit is unpushed, and a repo-less workspa
   const broken = await run(workspace({ [`${R}/.git/objects/store.json`]: file("{not json") }));
   assert.equal(broken.manifest.history, null, "a store that won't parse doesn't stop the export");
   assert.ok("repo/.git/objects/store.json" in broken.files, "and it's still carried as it was");
+});
+
+test("the file is named for the room and the day, or just the day with no room", () => {
+  const at = new Date("2026-11-08T23:30:00Z");
+  assert.equal(workspaceFileName("K7MQ2P", at), "riff-workspace-k7mq2p-2026-11-08.zip");
+  assert.equal(workspaceFileName(null, at), "riff-workspace-2026-11-08.zip");
 });

@@ -98,3 +98,18 @@
 @media(max-width:780px){.landing{grid-template-rows:60px auto auto}.entry-card{max-height:none;overflow:visible}.entry-card>form,.entry-card>.colleagues{min-height:0;overflow:visible}}
 /* Riff's free models or your own endpoint (docs/adr/0009) */
 .entry-card fieldset.model-choice{border:0;padding:0;margin:0;min-width:0;display:grid;gap:10px}.entry-card fieldset.model-choice legend{padding:0;margin-bottom:8px;font-size:9px;font-weight:600}
+/* Workspace export (src/WorkspaceExport.tsx). A fixed overlay, because .terminal-pane clips what overflows it. */
+.ws-export-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:12px;background:rgba(25,25,25,.45)}
+.ws-export{width:min(440px,100%);max-height:calc(100dvh - 24px);overflow:auto;padding:20px;display:grid;gap:12px;border-radius:7px;background:white;color:#191919;box-shadow:0 12px 35px rgba(0,0,0,.25);font-size:10px;line-height:1.5}
+.ws-export h2{margin:0;font-size:14px}
+.ws-export p{margin:0}
+.ws-export code{font-size:9px;background:#f0f0ec;padding:0 3px;border-radius:2px}
+.ws-export-option{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;font-weight:600}
+.ws-export-option input{margin:2px 0 0;width:auto;height:auto}
+.ws-export-option small{display:block;margin-top:2px;color:#777;font-weight:400;font-size:9px}
+.ws-export .ws-export-quiet,.ws-export-summary .ws-export-quiet{color:#777;font-size:9px}
+.ws-export-summary{padding:10px;display:grid;gap:5px;border:1px solid #d5d5cf;border-radius:4px;background:#f7f7f4;font-size:9px;overflow-wrap:anywhere}
+.ws-export-actions{display:flex;gap:8px}
+.ws-export-actions button{padding:7px 11px;border:1px solid #d5d5cf;border-radius:4px;background:white;font-size:9px}
+.ws-export-actions .ws-export-go{border-color:#191919;background:#191919;color:white}
+.ws-export-actions button:disabled{opacity:.5;cursor:default}

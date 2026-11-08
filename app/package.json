@@ -58,6 +58,7 @@
     "test:board-file": "node --test scripts/board-file.test.mjs",
     "test:workspace-export": "node --test scripts/workspace-export.test.mjs",
     "test:workspace-export-browser": "node scripts/workspace-export-browser-smoke.mjs",
+    "test:workspace-export-ui": "node scripts/workspace-export-ui-smoke.mjs",
     "test:models": "node --test --test-force-exit scripts/models.test.mjs",
     "test:models-browser": "node scripts/models-browser-smoke.mjs",
     "test:rooms": "node --test --test-force-exit scripts/rooms.test.mjs",

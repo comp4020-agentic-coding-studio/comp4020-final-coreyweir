@@ -34,7 +34,7 @@ README, PROCESS.md and the reflections are mine to write.
 |---|---|---|
 | [0001](docs/adr/0001-the-terminal-mirror-is-not-persisted.md) | The terminal mirror stays in server memory and is never persisted | Yes (today's behaviour) |
 | [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
-| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import. 4 MB per room, pruning from 70% of the volume | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`), size cap and pruning (`f512b5a`, `7d27daa`), 18 Oct; local copies, export and import (`4e17a8f`, `65ba779`), 19 Oct |
+| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import. 4 MB per room, pruning from 70% of the volume | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`), size cap and pruning (`f512b5a`, `7d27daa`), 18 Oct; local copies, export and import (`4e17a8f`, `65ba779`), 19 Oct; workspace export, 8 Nov |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
 | [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes (`389ffff`, `4acb32b`; push token in the client 18 Oct) |
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
@@ -378,10 +378,18 @@ auto-release at the latest.
   fields only, images byte for byte and checked (type, magic bytes,
   2048px, decodes). Checked by `npm run test:board-file` and
   `npm run test:boards-browser` (dev and live, both sizes).
-  - Left: workspace export, a zip of OPFS (fflate) including Claude
-    transcripts from `~/.claude/projects/-work-repo/`, never credentials,
-    with the OPFS workspace below; transcripts allowed in, with warnings on
-    both export and import.
+  - ~~Workspace export, a zip including Claude transcripts, never
+    credentials.~~ Built 8 Nov (ADR 0003's third amendment): a host-only
+    "Export" in the workspace controls, `app/src/workspaceExport.ts`
+    (fflate), `repo/` with `.git`, transcripts by default, `node_modules`
+    and the like left out unless ticked, Riff's `.wasix-session` and any
+    token Riff holds never in, a manifest listing the commits and which
+    are unpushed. Checked by `npm run test:workspace-export`,
+    `test:workspace-export-browser` and `test:workspace-export-ui`.
+    - Left: import (decided 8 Nov: later, into a new workspace only, after
+      the OPFS work; transcripts behind their own confirmation); real-git
+      history (Nodepod's git isn't git, see the ADR); a transcript Claude
+      Code wrote itself and an OPFS-backed pod weren't measured; live.
 - **OPFS workspace.**
   - The host's filesystem survives a reload or crash, one workspace per repo.
   - Check: reload mid-task, and unpushed edits are still there.
