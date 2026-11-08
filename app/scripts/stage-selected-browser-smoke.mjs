@@ -1,5 +1,6 @@
 // "Stage selected text" on the board (App.tsx, selectedText): it stages the
-// words of exactly one shape that has some, and says why not otherwise.
+// words of the one selected shape that has some, whatever text-less shapes
+// are selected with it, and says why not otherwise.
 //
 //   RIFF_URL=https://comp4020-final-coreyweir.fly.dev npm run test:stage-selected-browser
 //
@@ -7,7 +8,8 @@
 // rectangle, an arrow) without booting anything. Nothing selected: the
 // button is disabled and says why. The note: enabled, and it stages the
 // note's words. The rectangle: stages its label. Both (shift-click): disabled,
-// "not 2 shapes". The arrow: disabled, it has no text. A participant who
+// "2 shapes with text". The arrow: disabled, "no text in the selection".
+// The rectangle and the arrow: enabled, and it stages the label. A participant who
 // joins stages the note the same way. Every button in the bar fits it,
 // none over another, at both sizes (SIZES=desktop or phone for one). The room is ended.
 //
@@ -121,11 +123,16 @@ try {
     await expectButton(tab, say, true);
     await stageAndCheck(tab, say, LABEL);
     await click(tab, "note", true);
-    await expectButton(tab, say, false, /not 2 shapes/);
+    await expectButton(tab, say, false, /2 shapes with text are selected; select one/);
     await click(tab, "empty");
     await click(tab, "arrow");
-    await expectButton(tab, say, false, /has no text/);
+    await expectButton(tab, say, false, /no text in the selection/);
     await barFits(tab, say, size.width);
+    // A box with an arrow off it: one of them has words, so those go.
+    await click(tab, "geo", true);
+    await tab.waitForFunction(() => document.querySelector(".send-board-button")?.getAttribute("aria-label") === "Send 2 selected to Claude", { timeout: 5000, polling: 100 });
+    await expectButton(tab, say, true);
+    await stageAndCheck(tab, say, LABEL);
     await tab.screenshot({ path: path.join(work, `stage-selected-${size.name}.png`) });
 
     // A participant, the same way.

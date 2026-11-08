@@ -931,19 +931,28 @@ function jumpToStaging() {
 
 const STAGE_ONE = "Select one sticky note, text box or labelled shape to stage its text";
 
+/** A shape's words, if it's a kind quickdraw gives words to and they aren't blank. */
+function wordsOf(shape: ShapeRecord) {
+  const words = shape.type === "note" || shape.type === "text" ? shape.props.text : shape.type === "geo" ? shape.props.label : undefined;
+  return typeof words === "string" && words.trim() ? words.trim() : null;
+}
+
 /**
- * The text "Stage selected text" stages: one sticky note, text box, or
- * drawn shape with a label (the shapes quickdraw gives words). Anything
- * else, or more than one, would mean choosing whose words go.
+ * The text "Stage selected text" stages: the words of the one shape in the
+ * selection that has any (a sticky note, text box, or drawn shape with a
+ * label). Arrows, strokes and images selected with it don't count, so a
+ * region around a box and its arrows still works; two shapes with words
+ * would mean choosing whose words go.
  */
 function selectedText(store: ReturnType<typeof useQuickdrawStore>, selected: string[]): { id: string; text: string } | { why: string } {
   const shapes = selected.map((id) => store.get(id)).filter((record): record is ShapeRecord => record?.typeName === "shape");
-  if (shapes.length !== 1) return { why: shapes.length ? `${STAGE_ONE}, not ${shapes.length} shapes.` : `${STAGE_ONE}.` };
-  const [shape] = shapes;
-  const words = shape.type === "note" || shape.type === "text" ? shape.props.text : shape.type === "geo" ? shape.props.label : undefined;
-  if (typeof words !== "string") return { why: `${STAGE_ONE}: this one has no text.` };
-  if (!words.trim()) return { why: "This shape's text is empty." };
-  return { id: shape.id, text: words.trim() };
+  if (!shapes.length) return { why: `${STAGE_ONE}.` };
+  const worded = shapes.flatMap((shape) => {
+    const text = wordsOf(shape);
+    return text ? [{ id: shape.id, text }] : [];
+  });
+  if (worded.length === 1) return worded[0];
+  return { why: worded.length ? `${STAGE_ONE}: ${worded.length} shapes with text are selected; select one.` : `${STAGE_ONE}: no text in the selection.` };
 }
 
 function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, stageWhy, sendBoard, prompts }: {
