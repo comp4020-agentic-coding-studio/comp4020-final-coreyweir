@@ -555,11 +555,20 @@ commit list; ten mutations, one per rule, each turn it red);
 Nodepod's fs, a node process and WASIX bash, a git repo with a token in its
 remote, and a transcript; the zip read back outside the page, compared byte
 for byte, and accepted by `python3 -m zipfile -t`; three mutations red);
-`npm run test:workspace-export-ui` (the button, dialog, download and summary
-at 1280x800 and 390x844, a participant with no button).
+`npm run test:workspace-export-ui` (the page itself, so it also runs against
+the built live app: a host typing into WASIX bash, the dialog and download,
+the zip checked as above, then a reload with the pod restored from OPFS
+(ADR 0010) and a second export with the same bytes, a participant with no
+button, the room ended; at 1280x800 and 390x844; passed on dev and on live,
+8 Nov). The browser smoke also exports from a pod restored from OPFS, both
+before WASIX starts (files in Nodepod's volume) and after (in the shared
+store). Export reads the pod, so OPFS only matters through what it restores,
+and that is what these check.
 
 **Not checked:** a transcript Claude Code itself wrote (the path,
 `~/.claude/projects/-work-repo/`, is Claude Code's convention, written to by
-the smoke rather than by Claude); an OPFS-backed pod; a browser other than
-Chrome; a workspace in the hundreds of megabytes (the zip is built in
-memory).
+the smoke rather than by Claude); a browser other than Chrome; a workspace in
+the hundreds of megabytes (the zip is built in memory). **Seen, not ours:** a
+`chmod` from WASIX bash doesn't reach the volume (`ls` says rwx, the volume
+says 644), so an executable made that way exports as 644; one made through
+Nodepod's own fs keeps its mode.

@@ -387,10 +387,20 @@ auto-release at the latest.
     token Riff holds never in, a manifest listing the commits and which
     are unpushed. Checked by `npm run test:workspace-export`,
     `test:workspace-export-browser` and `test:workspace-export-ui`.
+    - Checked on dev and live (8 Nov), including a pod restored from OPFS:
+      `test:workspace-export-ui` drives the page, so it runs against the
+      built app; `test:workspace-export-browser` imports source and is dev
+      only.
     - Left: import (decided 8 Nov: later, into a new workspace only, after
       the OPFS work; transcripts behind their own confirmation); real-git
       history (Nodepod's git isn't git, see the ADR); a transcript Claude
-      Code wrote itself and an OPFS-backed pod weren't measured; live.
+      Code wrote itself wasn't measured; a `chmod` from WASIX bash doesn't
+      reach the volume, so such a file exports as 644.
+    - Seen while testing: a smoke typing `$(...)` into WASIX bash stalled
+      the shell in about a third of runs (a command substitution forks a
+      subshell); with none, 0 stalls in 10 runs. A hypothesis, not chased:
+      not export's, but it will bite anything that types into the host's
+      terminal.
 - ~~**OPFS workspace.**~~ Decided and built 8 Nov (ADR 0010; `5deaaad`
   ADR, `16ee967` saving, `b77233a` list and delete). One workspace per
   *room* (its permanent id), not per repo as first planned: everything
