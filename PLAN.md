@@ -418,9 +418,17 @@ auto-release at the latest.
   restores an unpushed commit, bytes, mode 755 and a transcript; takeover;
   the landing page's delete paths). Measured on dev: 10,000 small files
   in OPFS about 10 s after they were written; boot with them restored
-  about 1.3 s.
-  - Left: the same smoke and a reload mid-task on live, and on a phone;
-    the "Your rooms" marker (above) once that list wants it, through
+  about 1.3 s. On live, `npm run test:workspace-ui-browser` (8 Nov, at
+  1600×1000 and 390×844): hosted from the landing page, Bash typed into,
+  an unpushed commit and four raw bytes back after an unannounced reload,
+  /tmp not, the second tab asking before it takes over and the first
+  then not saving.
+  - Found on the way: typing into the host's bash with no gap between
+    keys stalls its input part-way through a command in about half the
+    runs, on dev and live, with the workspace off too (the smoke types at
+    20 ms a key; `TYPE_DELAY=0` reproduces).
+  - Left: a reload mid-task with Claude itself on live, by hand, and on a
+    real phone; the "Your rooms" marker (above) once that list wants it, through
     `listWorkspaces()`; Nodepod's `attachSharedStore` drops file modes
     (worked around with `reapplyModes`, belongs in the fork); WASIX
     bash's `chmod` doesn't reach the store; a crash (rather than a reload)
