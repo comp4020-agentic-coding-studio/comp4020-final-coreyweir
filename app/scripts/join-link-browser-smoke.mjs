@@ -86,6 +86,18 @@ try {
   assert.match(await twin.$eval(".join-link .form-error", (element) => element.textContent), /already goes by that name/);
   console.log("taken name: refused on the join page");
 
+  // Once the room has ended, the link says so before asking for a name.
+  await host.click("button.participants");
+  await host.click(".end-room > button");
+  await host.waitForSelector(".end-room.asking");
+  await Promise.all([host.waitForNavigation({ waitUntil: "networkidle0" }), host.click(".end-room button.danger")]);
+  const late = await newPage();
+  await late.goto(link, { waitUntil: "networkidle0" });
+  await late.waitForSelector(".join-link .no-room h2");
+  assert.match(await late.$eval(".join-link .no-room", (element) => element.textContent), new RegExp(`No live room ${code}.*no live room with that code`));
+  assert.equal(await late.$(".join-link form"), null, "no name asked for a room nobody can join");
+  console.log("ended room: the link says there's no live room, before asking for a name");
+
   assert.deepEqual(errors, []);
   console.log(`join link browser smoke passed at ${viewport.width}x${viewport.height}`);
 } finally {

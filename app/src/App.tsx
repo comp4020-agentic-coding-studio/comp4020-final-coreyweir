@@ -1420,7 +1420,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 // straight in; for anyone else it's the join form with the code filled in.
 // Opened from a room's link by a browser that isn't in the room yet: ask
 // for a name before going in, the last one used filled in.
-function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
+function JoinByLink({ code, keep, gone = false }: { code: string; keep?: boolean; gone?: boolean }) {
   const user = useUser();
   const [name, setName] = useState(savedName);
   const [busy, setBusy] = useState(false);
@@ -1454,6 +1454,22 @@ function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
     }
   }
 
+  // No live room with that code (ended, or the host gave it a new one):
+  // said before asking for a name. The lookup says no more than that, and
+  // neither does this.
+  if (gone) {
+    return (
+      <main className="landing closed join-link">
+        <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
+        <section className="entry-card no-room">
+          <h2>No live room <code>{code}</code></h2>
+          <p>{problem(new ApiError(404, "no_such_room"))}</p>
+          <div className="closed-actions"><button className="primary" onClick={() => location.assign(location.pathname)}>Back to start</button></div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="landing closed join-link">
       <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
@@ -1472,7 +1488,7 @@ function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
 }
 
 function RoomGate({ roomId, code }: { roomId: string | null; code: string | null }) {
-  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean; pushRevoked?: string } | { join: string; keep?: boolean } | { error: string } | null>(null);
+  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean; pushRevoked?: string } | { join: string; keep?: boolean; gone?: boolean } | { error: string } | null>(null);
   const [withoutGitHub, setWithoutGitHub] = useState(false);
   const user = useUser();
 
@@ -1501,14 +1517,14 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
       } else {
         setState(code ? { join: code, keep: found?.keep } : { error: "This browser isn't in that room. Ask the host for the code." });
       }
-    })().catch((failure) => active && setState(code && failure instanceof ApiError && failure.status === 404 ? { join: code } : { error: problem(failure) }));
+    })().catch((failure) => active && setState(code && failure instanceof ApiError && failure.status === 404 ? { join: code, gone: true } : { error: problem(failure) }));
     return () => {
       active = false;
     };
   }, [code, roomId]);
 
   if (!state) return <main className="landing"><section className="entry-card"><p>Finding the room...</p></section></main>;
-  if ("join" in state) return <JoinByLink code={state.join} keep={state.keep} />;
+  if ("join" in state) return <JoinByLink code={state.join} keep={state.keep} gone={state.gone} />;
   if ("error" in state) {
     return (
       <main className="landing">
