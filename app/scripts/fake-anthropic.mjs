@@ -3,8 +3,11 @@
 // request and records each turn's prompt: the text blocks of the last user
 // message, which is what reached the model. A prompt containing "slow"
 // gets its reply after SLOW_MS, so a smoke can send while Claude is busy;
-// one containing "fail" gets a 400, so a turn ends in an API error. Image
-// blocks reaching the model are recorded per turn.
+// one containing "fail" gets a 400, so a turn ends in an API error. One
+// containing "webfetch <url>" or "websearch <query>" gets that tool call. Image
+// blocks reaching the model are recorded per turn. It also answers Claude Code's
+// remote-session web routes (`/v1/code/sessions/<id>/worker/web-fetch` and
+// `web-search`) with a canned page or result, recorded in `workerCalls`.
 //
 // It listens on this machine's first non-loopback address: Nodepod keeps
 // 127.0.0.0/8 inside the guest.
@@ -50,6 +53,8 @@ function textBlocks(content) {
 
 export async function startFakeAnthropic({ reply = "Done." } = {}) {
   const turns = [];
+  const requests = [];
+  const workerCalls = [];
   const server = http.createServer((req, res) => {
     if (req.method === "OPTIONS") {
       res.writeHead(204, cors);
@@ -67,6 +72,19 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
         res.end(JSON.stringify({ input_tokens: 10 }));
         return;
       }
+      // Claude Code's remote-session web tools: with
+      // CLAUDE_CODE_WEB{FETCH,SEARCH}_USE_CCR_PROXY and a session id it asks
+      // `<base>/v1/code/sessions/<id>/worker/web-fetch|web-search` instead of
+      // fetching from the browser.
+      const worker = /\/v1\/code\/sessions\/([^/]+)\/worker\/(web-fetch|web-search)$/.exec(path);
+      if (worker) {
+        workerCalls.push({ at: Date.now(), session: decodeURIComponent(worker[1]), route: worker[2], authorization: req.headers.authorization ?? null, body });
+        res.writeHead(200, { ...cors, "content-type": "application/json" });
+        res.end(JSON.stringify(worker[2] === "web-fetch"
+          ? { url: body.url, destination_url: body.url, title: "Fake page", text: `The worker read ${body.url}: Riff worker page`, content_type: "text/plain" }
+          : { results: [{ title: "Riff worker result", url: "https://example.com/riff-worker-result", snippet: `found for ${body.query}` }] }));
+        return;
+      }
       if (!path.endsWith("/v1/messages")) {
         res.writeHead(404, { ...cors, "content-type": "application/json" });
         res.end(JSON.stringify({ type: "error", error: { type: "not_found_error", message: "not here" } }));
@@ -82,6 +100,9 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
         stop_sequence: null,
         usage: { input_tokens: 10, output_tokens: 2 },
       };
+      // Every request, side requests included: which model, which tools (a
+      // server tool shows as its type), and the conversation it carried.
+      requests.push({ at: Date.now(), model: body.model, tools: (body.tools ?? []).map((tool) => tool.type && tool.type !== "custom" ? tool.type : tool.name), text: JSON.stringify(body.messages ?? []) });
       if (!body.stream) {
         res.writeHead(200, { ...cors, "content-type": "application/json" });
         res.end(JSON.stringify(message));
@@ -113,6 +134,23 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
         res.end();
         return;
       }
+      // "webfetch <url>" and "websearch <query>" get that tool call first.
+      const webCall = isTurn && !answered && blocks.map((text) => /\bweb(fetch|search) (\S+)/.exec(text)).find(Boolean);
+      if (webCall) {
+        const [name, input] = webCall[1] === "fetch"
+          ? ["WebFetch", { url: webCall[2], prompt: "What is this page's title?" }]
+          : ["WebSearch", { query: webCall[2] }];
+        const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-cache" });
+        send("message_start", { type: "message_start", message: { ...message, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } });
+        send("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: `toolu_${Date.now()}`, name, input: {} } });
+        send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(input) } });
+        send("content_block_stop", { type: "content_block_stop", index: 0 });
+        send("message_delta", { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 5 } });
+        send("message_stop", { type: "message_stop" });
+        res.end();
+        return;
+      }
       const slow = isTurn && blocks.some((text) => text.includes("slow"));
       const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-cache" });
@@ -131,6 +169,8 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
   return {
     url: `http://${lanAddress()}:${server.address().port}`,
     turns,
+    requests,
+    workerCalls,
     /** How many turns carried exactly this prompt as one of their text blocks. */
     count: (prompt) => turns.filter((turn) => turn.blocks.includes(prompt)).length,
     close: () => new Promise((resolve) => server.close(resolve)),
