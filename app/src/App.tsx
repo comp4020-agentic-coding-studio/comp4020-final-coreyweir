@@ -523,7 +523,7 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
               ? <button className="room-link" onClick={() => room ? goToRoom(room.id) : copy && onOpen(copy)}>{code ? <>Room <code>{code}</code></> : "A room"}</button>
               : <span className="room-link">A room you hosted</span>}
             <span className="room-state">
-              {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept" : "board not kept"}</>
+              {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept on server" : "board not kept on server"}</>
                 : endedNow && (copy?.roomId === endedNow || workspace?.room === endedNow) ? <><i className="gone"></i>Ended just now</>
                 : <><i className="gone"></i>Not live</>}
             </span>
@@ -793,7 +793,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
             <label>Git repository <small>Optional</small><input value={config.repo} onChange={(event) => updateConfig("repo", event.target.value)} placeholder="https://github.com/group/project.git" /></label>
             <GitHubPush user={user} back="/?setup=host" beforeLeaving={() => { saveName(name); localStorage.setItem("riff-host-config", JSON.stringify(config)); }} />
             <ImportBoard imported={imported} onChange={setImported} />
-            <label className="check"><input type="checkbox" checked={keepBoard} onChange={(event) => setKeepBoard(event.target.checked)} /><span>Keep the board after the room ends<small>{keepBoard ? "Kept on the server while space allows, read-only. Everyone who joins is told." : "Deleted from the server when the room ends. Everyone who joins is told."}</small></span></label>
+            <label className="check"><input type="checkbox" checked={keepBoard} onChange={(event) => setKeepBoard(event.target.checked)} /><span>Keep the board on the server after the room ends<small>{keepBoard ? "Read-only, while space allows." : "Deleted from the server when the room ends."}</small></span></label>
             <p className="local-note">These settings stay in this browser and are never included in the room link.</p>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="primary" disabled={busy || riffModels === null}>{busy ? "Creating..." : "Create room"}</button>
@@ -1033,7 +1033,7 @@ function RoomBanner({ state, endsAt, keep, facilitator, onExport }: { state: Roo
   return (
     <p className="room-banner ended" role="status">
       This room has ended. {keep ? "The server keeps this board while space allows; you can look, but not change it." : "The server doesn't keep this board."}{" "}
-      <button className="link" onClick={onExport}>Export it</button> to keep your own copy.
+      <button className="link" onClick={onExport}>Export it</button> as a file.
     </p>
   );
 }
@@ -1283,7 +1283,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     <div className="app">
       <header className="topbar">
         <button className="brand brand-button" onClick={() => location.assign(location.pathname)}>riff</button>
-        <div className="room-name"><i className={room.status}></i><span>Room {room.code}</span><small>{room.status}</small><small className="board-fate" title={boardFate(room.keep)}>· board {room.keep ? "kept" : "not kept"}</small></div>
+        <div className="room-name"><i className={room.status}></i><span>Room {room.code}</span><small>{room.status}</small><small className="board-fate" title={boardFate(room.keep)}>· board {room.keep ? "kept" : "not kept"} on server</small></div>
         <nav>
           <button className={view === "board" ? "active" : ""} onClick={() => setView("board")}>Board</button>
           <button className={view === "room" ? "active" : ""} onClick={() => setView("room")}>Room</button>
