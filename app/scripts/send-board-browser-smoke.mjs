@@ -194,7 +194,7 @@ try {
     let button = await sendButton(tab);
     assert.equal(button.text, "Send board to Claude", say("the label"));
     assert.equal(button.disabled, true, say("disabled before the pod boots"));
-    assert.match(button.title, /Boot Claude/, say(`says why: ${button.title}`));
+    assert.match(button.title, /Start Claude first/, say(`says why: ${button.title}`));
     assert.ok(button.rect.right <= size.width && button.rect.width > 0, say(`the button is on screen: ${JSON.stringify(button.rect)}`));
 
     await startBash(tab);

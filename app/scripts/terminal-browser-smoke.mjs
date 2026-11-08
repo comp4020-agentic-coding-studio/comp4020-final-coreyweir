@@ -159,8 +159,8 @@ try {
   await host.reload({ waitUntil: "networkidle0" });
   await openTab("Room");
   await host.waitForSelector(".terminal-heading");
-  assert.equal(await host.$eval(".terminal-controls button", (element) => [element.textContent, element.disabled].join()), "Boot Claude,false");
-  assert.match(await host.$eval(".terminal-empty", (element) => element.textContent), /Boot Claude to start/);
+  assert.equal(await host.$eval(".terminal-controls button", (element) => [element.textContent, element.disabled].join()), "Start Claude,false");
+  assert.match(await host.$eval(".terminal-empty", (element) => element.textContent), /Start Claude to run Claude Code/);
   assert.equal(await host.$(".room-banner.booting"), null);
   assert.deepEqual(pageErrors, []);
   console.log("Tab layouts, one-click Claude rendering, live participant data, and a prompt from staging to the queue passed.");

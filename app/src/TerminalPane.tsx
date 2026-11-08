@@ -262,7 +262,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
         setGithubRefused(null);
         setError(swapped
           ? "GitHub connected again: git uses the new token from now on, nothing restarted."
-          : "GitHub connected again. Boot Claude again to give it the new token.");
+          : "GitHub connected again. Start Claude again to give it the new token.");
       })().catch((failure) => setError(`GitHub connected, but Riff couldn't open the token: ${String(failure)}`));
     });
   }, [githubRefused]);
@@ -373,7 +373,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
     <article className="terminal-pane">
       <header className="section-title terminal-heading" data-report={report ?? undefined}>
         <div><h2>Workspace</h2><span className={facilitator && (status === "Claude running" || status === "Bash ready") || !facilitator && participantLive ? "live-dot" : "idle-dot"}>{facilitator ? status : participantStatus}</span></div>
-        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : controllerRef.current ? "Start Claude" : "Boot Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} ready={attached} /></div>}
+        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : "Start Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} ready={attached} /></div>}
         {!facilitator && <div className="terminal-controls"><button className="mirror-mode" aria-pressed={mirrorMode === "actual"} title={mirrorMode === "fit" ? "Show the host's terminal at its own text size, and scroll" : "Shrink or grow the host's terminal to fit this box"} onClick={() => {
           const next = mirrorMode === "fit" ? "actual" : "fit";
           setMirrorMode(next);
@@ -390,7 +390,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
         {(facilitator ? !attached : !participantLive) && (
           <p className="terminal-empty" role="status">
             {facilitator
-              ? starting ? status : "Boot Claude to start Claude Code in this tab. Everyone in the room sees this terminal."
+              ? starting ? status : "Start Claude to run Claude Code in this tab. Everyone in the room sees this terminal."
               : ended ? "This room has ended, so there's no terminal to watch." : channel.hostConnected ? "Nothing on the host's terminal yet. It appears here when they start Claude." : "Waiting for the host. Their terminal appears here."}
           </p>
         )}
