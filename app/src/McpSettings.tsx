@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { ClaudePodController } from "./claudePod";
 import type { ClaudeState } from "./queueRelease";
 import { GITHUB_TOOLSETS, customProblem, loadMcp, saveMcp, serverName, type CustomMcp, type McpSettings } from "./mcp";
+import { WEB_MCP_NAME } from "./webTools";
 import "./mcp.css";
 
 // The host's MCP servers for this room (docs/adr/0012): a button in the
@@ -24,6 +25,19 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
   const [draft, setDraft] = useState<CustomMcp | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
+  const addForm = useRef<HTMLFormElement>(null);
+  const drafting = draft !== null;
+  // An opened form is scrolled into view whole, above the sticky Apply bar,
+  // with the cursor in its first field.
+  useEffect(() => {
+    if (!drafting) return;
+    addForm.current?.scrollIntoView({ block: "end" });
+    addForm.current?.querySelector("input")?.focus({ preventScroll: true });
+  }, [drafting]);
+  // A refusal grows the form: keep Add and the message clear of the bar.
+  useEffect(() => {
+    if (draftError) addForm.current?.scrollIntoView({ block: "end" });
+  }, [draftError]);
   const saved = loadMcp(roomId);
   const count = (saved.github.on && hasGithub ? 1 : 0) + saved.custom.length;
   const running = getController()?.isRunning() ?? false;
@@ -82,12 +96,17 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
   const setGithub = (next: Partial<McpSettings["github"]>) => setSettings((current) => ({ ...current, github: { ...current.github, ...next } }));
   return (
     <>
-      <button ref={opener} className="mcp-open" title="MCP servers Claude can use in this room" onClick={show}>MCPs{count ? ` ${count}` : ""}</button>
+      {/* The count is the servers the host added; Riff's own web server is always there and not counted. */}
+      <button ref={opener} className="mcp-open" title={count ? `MCP servers: ${count} you added, plus Riff's built-in web search` : "MCP servers: Riff's built-in web search, and any you add"} aria-label={count ? `MCPs, ${count} added` : "MCPs"} onClick={show}>MCPs{count ? <span className="mcp-count">{count}</span> : null}</button>
       {open && createPortal(
         <div className="ws-export-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !applying) close(); }}>
           <section className="ws-export mcp-settings" role="dialog" aria-modal="true" aria-labelledby="mcp-title">
             <h2 id="mcp-title">MCP servers</h2>
             <p>Tools Claude can use in this room, from servers you choose. Only you see this, and it stays in this browser. Tokens go only to their own server; Claude sees a stand-in.</p>
+
+            <ul className="mcp-builtin" aria-label="Built in">
+              <li><strong>{WEB_MCP_NAME}</strong> <span>(built in)</span><small>Search, and read pages through Jina Reader, from this browser. Always there.</small></li>
+            </ul>
 
             <fieldset className="mcp-github">
               <label className="ws-export-option">
@@ -129,7 +148,7 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
                 </ul>
               )}
               {draft ? (
-                <form className="mcp-add" aria-label="Add an MCP server" onSubmit={(event) => { event.preventDefault(); addDraft(); }}>
+                <form ref={addForm} className="mcp-add" aria-label="Add an MCP server" onSubmit={(event) => { event.preventDefault(); addDraft(); }}>
                   <label>Name<input value={draft.name} onChange={editDraft("name")} placeholder="e.g. jina" autoComplete="off" autoCapitalize="none" /></label>
                   <label>URL<input type="url" value={draft.url} onChange={editDraft("url")} placeholder="https://mcp.example.com/mcp" autoComplete="off" /></label>
                   <label>Header <small>Optional</small><input value={draft.header} onChange={editDraft("header")} placeholder="e.g. Authorization" autoComplete="off" autoCapitalize="none" /></label>
@@ -145,7 +164,7 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
 
             <p className="ws-export-quiet">{!running
               ? "Claude uses these when it starts."
-              : busy ? "Claude is working: apply when it has finished, since applying restarts it."
+              : busy ? `Claude is ${claudeState === "starting" ? "starting" : "working"}: apply when it has finished, since applying restarts it.`
               : "Applying restarts Claude (a few seconds), and it carries on the same conversation."}</p>
             {error && <p className="form-error" role="alert">{error}</p>}
             {done && <p className="mcp-done" role="status">{done}</p>}

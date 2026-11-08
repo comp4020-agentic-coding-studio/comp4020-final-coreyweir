@@ -764,24 +764,72 @@ export class ClaudePodController {
     // Ctrl-U clears whatever is typed at Claude's prompt first. A Claude
     // that is still drawing itself (its hooks can say idle first) drops
     // what's typed, so ask again every few seconds, then stop it outright.
-    for (let attempt = 0; attempt < 3 && !gone; attempt++) {
-      process.write("\x15/exit\r");
+    const began = Date.now();
+    let how = "";
+    const ask = () => process.write("\x15/exit\r");
+    how = "/exit";
+    ask();
+    await until(2_000);
+    if (!gone) {
+      // Measured (8 Nov, under load): Claude says "See ya!" and then stays
+      // alive for as long as a background check it started is still
+      // running, typically its install-type probe, `npm config get
+      // prefix`, which can sit in "starting" for 15 s and more while
+      // Nodepod loads npm into a fresh worker. A Claude that has quit
+      // doesn't need it: stop its children, and it exits by itself.
+      const stopped = this.stopChildrenOf(process.pid);
+      if (stopped.length) {
+        how = `/exit, then its children (${stopped.join(", ")})`;
+        await until(4_000);
+      }
+    }
+    for (let attempt = 1; attempt < 3 && !gone; attempt++) {
+      how = `/exit x${attempt + 1}`;
+      ask();
       await until(4_000);
     }
     if (!gone) {
+      how = "SIGTERM";
       process.kill("SIGTERM");
       await until(4_000);
     }
     if (!gone) {
+      how = "SIGKILL";
       process.kill("SIGKILL");
       await until(4_000);
     }
+    console.info(`[restart] Claude ${gone ? "stopped" : "still running"} after ${how}, ${Date.now() - began} ms`);
     if (!gone) throw new Error("Claude didn't stop, so the MCP servers aren't applied yet. Interrupt it, then apply again.");
     this.terminalNote(`\x1b[38;5;244m${note}\x1b[0m`);
     const transcripts = "/home/user/.claude/projects/-work-repo";
     const volume = this.pod?.volume;
     const conversation = Boolean(volume?.existsSync(transcripts) && volume.readdirSync(transcripts).some((name) => String(name).endsWith(".jsonl")));
     await this.startClaude(conversation ? ["--continue"] : []);
+  }
+
+  /** Stops every live process below `pid`; returns what it stopped. */
+  private stopChildrenOf(pid: number | null) {
+    const manager = this.pod?.processManager;
+    if (!manager || pid === null) return [];
+    const live = manager.listProcesses().filter((entry) => entry.state !== "exited");
+    const below = new Set<number>([pid]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const entry of live) {
+        if (entry.parentPid !== undefined && below.has(entry.parentPid) && !below.has(entry.pid)) {
+          below.add(entry.pid);
+          grew = true;
+        }
+      }
+    }
+    below.delete(pid);
+    const stopped: string[] = [];
+    for (const entry of live) {
+      if (!below.has(entry.pid)) continue;
+      manager.kill(entry.pid, "SIGKILL");
+      stopped.push(entry.command.split(" ").slice(0, 4).join(" "));
+    }
+    return stopped;
   }
 
   /**

@@ -178,6 +178,9 @@ try {
   // 2. The room.
   const context = await browser.createBrowserContext();
   const host = await context.newPage();
+  // How each restart stopped Claude (claudePod.ts restartClaude).
+  const restarts = [];
+  host.on("console", (message) => /^\[restart\]/.test(message.text()) && restarts.push(message.text()));
   host.on("pageerror", (error) => pageErrors.push(String(error)));
   await host.setViewport(viewport);
   // Stand in for the sealed push token and Riff's own GitHub check, so the
@@ -216,8 +219,13 @@ try {
   await guest.waitForSelector(".terminal-heading");
   assert.equal(await guest.$(".mcp-open"), null, "only the host has MCPs");
 
+  // Riff's own web server is listed, not counted: the button counts what
+  // the host added (none yet).
+  assert.equal(await rows(host, ".mcp-open"), "MCPs", "nothing added, no count");
   await host.click(".mcp-open");
   await host.waitForSelector(".mcp-settings");
+  assert.match(await rows(host, ".mcp-builtin"), /web\s*\(built in\).*Jina Reader/);
+  assert.equal(await host.$(".mcp-builtin input"), null, "the built-in server isn't a switch");
   const githubBox = ".mcp-github .ws-export-option input";
   assert.equal(await host.$eval(githubBox, (input) => input.disabled || input.checked), false, "GitHub is there to turn on, off by default");
   await host.click(githubBox);
@@ -225,13 +233,17 @@ try {
   assert.equal(await host.$eval(".mcp-mode input", (input) => input.checked), true, "read only first");
   const fits = await host.$eval(".mcp-settings", (element) => { const box = element.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.top >= 0; });
   assert.ok(fits, "the dialog fits the window");
+  const applyInView = await host.$eval(".mcp-settings .ws-export-go", (button) => { const box = button.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight; });
+  assert.ok(applyInView, "Apply is in reach without scrolling the dialog");
   await shot(host, "github");
+  const githubApplyAt = Date.now();
   await host.click(".mcp-settings .ws-export-go");
   await waitRows(host, ".mcp-settings .mcp-done", /Claude restarted on the same conversation/, 60_000);
   await shot(host, "applied");
   await host.click(".mcp-settings .ws-export-actions button:not(.ws-export-go)");
-  assert.match(await rows(host, ".mcp-open"), /MCPs 1/);
+  assert.equal(await host.$eval(".mcp-open", (button) => [button.textContent, button.getAttribute("aria-label")].join("|")), "MCPs1|MCPs, 1 added");
   await host.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "idle", { timeout: 60_000, polling: 200 });
+  console.log(`room: GitHub's Apply, Claude idle again in ${Date.now() - githubApplyAt} ms (${restarts.at(-1)})`);
   await waitRows(host, ".terminal-note", /MCP server "github" refused its token/, 60_000);
   assert.doesNotMatch(await rows(host, ".terminal-note"), /no longer accepts/, "GitHub's MCP refusing isn't GitHub refusing");
   assert.equal(await host.evaluate(() => Object.keys(localStorage).some((key) => key.startsWith("riff-mcp:"))), true, "kept in this browser");
@@ -243,11 +255,23 @@ try {
   await host.click(".mcp-open");
   await host.waitForSelector(".mcp-settings .mcp-add-open");
   await host.click(".mcp-settings .mcp-add-open");
+  // The form opens in view, Add above the sticky Apply bar, cursor in Name.
+  await host.waitForSelector(".mcp-add");
+  const addInView = await host.evaluate(() => {
+    const add = document.querySelector(".mcp-add-actions button[type=submit]").getBoundingClientRect();
+    const bar = document.querySelector(".mcp-settings > .ws-export-actions").getBoundingClientRect();
+    return add.bottom <= bar.top && document.activeElement === document.querySelector(".mcp-add input");
+  });
+  assert.ok(addInView, "the opened form's Add button clears the Apply bar, and Name has the cursor");
   const field = (index) => `.mcp-add label:nth-of-type(${index}) input`;
   await host.type(field(1), "GitHub");
   await host.type(field(2), roomMock.url);
   await host.click(".mcp-add-actions button[type=submit]");
   await waitRows(host, ".mcp-add .form-error", /GitHub's own server/, 5_000);
+  await host.click(field(1), { clickCount: 3 });
+  await host.type(field(1), "web");
+  await host.click(".mcp-add-actions button[type=submit]");
+  await waitRows(host, ".mcp-add .form-error", /"web" is Riff's own server/, 5_000);
   await host.click(field(1), { clickCount: 3 });
   await host.type(field(1), "Mock");
   await host.type(field(4), SECRET);
@@ -260,12 +284,18 @@ try {
   await waitRows(host, ".mcp-custom-list", /mock.*token in Authorization/, 5_000);
   const custFits = await host.$eval(".mcp-settings", (element) => { const box = element.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; });
   assert.ok(custFits, "the dialog with the form fits the window's width");
+  const applyAt = Date.now();
   await host.click(".mcp-settings .ws-export-go");
   await waitRows(host, ".mcp-settings .mcp-done", /Claude restarted on the same conversation/, 60_000);
   await shot(host, "custom-applied");
   await host.click(".mcp-settings .ws-export-actions button:not(.ws-export-go)");
-  assert.match(await rows(host, ".mcp-open"), /MCPs 2/);
+  assert.equal(await host.$eval(".mcp-open", (button) => button.getAttribute("aria-label")), "MCPs, 2 added");
   await host.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "idle", { timeout: 60_000, polling: 200 });
+  console.log(`room: the custom Apply, Claude idle again in ${Date.now() - applyAt} ms (${restarts.at(-1)})`);
+  // /exit stops it, if need be with the background checks it was still
+  // waiting on; signals mean a restart took 16 s or more (measured 8 Nov).
+  assert.equal(restarts.length, 2, `two restarts: ${restarts.join("; ")}`);
+  for (const line of restarts) assert.match(line, /^\[restart\] Claude stopped after \/exit/, line);
   const reached = Date.now() + 60_000;
   while (!roomMock.seen.some((request) => request.carried === SECRET)) {
     if (Date.now() > reached) throw new Error(`the room's custom server never got its token: ${JSON.stringify(roomMock.seen)}`);
