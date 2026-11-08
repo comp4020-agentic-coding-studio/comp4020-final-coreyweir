@@ -18,6 +18,7 @@ import {
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
 } from "./boardFile";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
+import { SAVED_SUMMARY, type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
 
 type View = "board" | "room" | "preview";
 // models: "riff" is Riff's own free models through the server
@@ -123,12 +124,26 @@ function useUser() {
   return user;
 }
 
+// What signing out would leave on this machine: board copies, and the
+// files of rooms hosted here (docs/adr/0010).
+function leavingWhat({ boards, workspaces }: { boards: number; workspaces: number }) {
+  const parts = [
+    boards ? (boards === 1 ? "a copy of 1 board you've been in" : `copies of ${boards} boards you've been in`) : null,
+    workspaces ? (workspaces === 1 ? "the files of 1 room you hosted" : `the files of ${workspaces} rooms you hosted`) : null,
+  ];
+  return parts.filter(Boolean).join(", and ");
+}
+
+function leavingCount({ boards, workspaces }: { boards: number; workspaces: number }) {
+  return boards + workspaces;
+}
+
 function Account({ user, onColleagues }: { user: User | null | undefined; onColleagues?: () => void }) {
   // Signing out on a shared machine is when the boards it kept matter.
-  const [leaving, setLeaving] = useState<number | null>(null);
+  const [leaving, setLeaving] = useState<{ boards: number; workspaces: number } | null>(null);
   async function startSignOut() {
-    const copies = await listCopies().catch(() => []);
-    if (copies.length) setLeaving(copies.length);
+    const [copies, workspaces] = await Promise.all([listCopies().catch(() => []), listWorkspaces().catch(() => [])]);
+    if (copies.length || workspaces.length) setLeaving({ boards: copies.length, workspaces: workspaces.length });
     else await finishSignOut(false);
   }
   async function finishSignOut(deleteBoards: boolean) {
@@ -153,9 +168,9 @@ function Account({ user, onColleagues }: { user: User | null | undefined; onColl
       <button className="link" onClick={() => void startSignOut()}>Sign out</button>
       {leaving !== null && (
         <span className="signing-out" role="group" aria-label="Signing out">
-          <span>This browser has {leaving === 1 ? "a copy of 1 board" : `copies of ${leaving} boards`} you've been in. Delete {leaving === 1 ? "it" : "them"} too?</span>
+          <span>This browser has {leavingWhat(leaving)}. Delete {leavingCount(leaving) === 1 ? "it" : "them"} too?</span>
           <button onClick={() => void finishSignOut(true)}>Sign out and delete</button>
-          <button onClick={() => void finishSignOut(false)}>Sign out, keep {leaving === 1 ? "it" : "them"}</button>
+          <button onClick={() => void finishSignOut(false)}>Sign out, keep {leavingCount(leaving) === 1 ? "it" : "them"}</button>
           <button className="link" onClick={() => setLeaving(null)}>Cancel</button>
         </span>
       )}
@@ -359,18 +374,27 @@ function ColleaguesPanel({ onClose }: { onClose: () => void }) {
 // One row per room: the rooms you're in, as the server lists them (by
 // GitHub account when signed in, by this browser's guest secrets
 // otherwise; never anyone else's, docs/adr/0008), merged with every board
-// this browser keeps a copy of (docs/adr/0003, second amendment). A live
-// room enters; a copy opens read-only, beside the forms on a wide screen
-// and as its own page on a phone. Delete takes the copy and this browser's
-// place in the room with it.
-type RoomRow = { key: string; room: ListedRoom | null; copy: LocalCopy | null; code: string | null };
+// this browser keeps a copy of (docs/adr/0003, second amendment) and the
+// files of every room hosted here (docs/adr/0010). A live room enters; a
+// copy opens read-only, beside the forms on a wide screen and as its own
+// page on a phone. Delete takes the copy, this browser's place in the
+// room and the host's files with it; Delete files takes the files alone.
+type RoomRow = { key: string; room: ListedRoom | null; copy: LocalCopy | null; workspace: WorkspaceSummary | null; code: string | null };
 
-function roomRows(rooms: ListedRoom[], copies: LocalCopy[]): RoomRow[] {
+function roomRows(rooms: ListedRoom[], copies: LocalCopy[], workspaces: WorkspaceSummary[]): RoomRow[] {
   const copyOf = new Map(copies.flatMap((copy) => copy.roomId ? [[copy.roomId, copy] as const] : []));
-  const rows: RoomRow[] = rooms.map((room) => ({ key: room.id, room, copy: copyOf.get(room.id) ?? null, code: room.code }));
-  const listed = new Set(rooms.map((room) => room.id));
+  const workspaceOf = new Map(workspaces.map((workspace) => [workspace.room, workspace]));
+  const rows: RoomRow[] = rooms.map((room) => ({ key: room.id, room, copy: copyOf.get(room.id) ?? null, workspace: workspaceOf.get(room.id) ?? null, code: room.code }));
+  const seen = new Set(rooms.map((room) => room.id));
   for (const copy of copies) {
-    if (!copy.roomId || !listed.has(copy.roomId)) rows.push({ key: copy.database, room: null, copy, code: copy.code });
+    if (copy.roomId && seen.has(copy.roomId)) continue;
+    if (copy.roomId) seen.add(copy.roomId);
+    rows.push({ key: copy.database, room: null, copy, workspace: copy.roomId ? workspaceOf.get(copy.roomId) ?? null : null, code: copy.code });
+  }
+  // files whose board copy has gone (the browser cleared IndexedDB but not
+  // OPFS) still get a row, so none are kept silently
+  for (const workspace of workspaces) {
+    if (!seen.has(workspace.room)) rows.push({ key: `workspace:${workspace.room}`, room: null, copy: null, workspace, code: null });
   }
   return rows;
 }
@@ -401,9 +425,10 @@ async function exportCopy(copy: LocalCopy) {
   }
 }
 
-function RoomsList({ list, copies, peeking, onOpen, onChanged }: {
+function RoomsList({ list, copies, workspaces, peeking, onOpen, onChanged }: {
   list: RoomList | null;
   copies: LocalCopy[] | null;
+  workspaces: WorkspaceSummary[];
   peeking: string | null;
   onOpen: (copy: LocalCopy) => void;
   onChanged: () => Promise<unknown>;
@@ -411,9 +436,10 @@ function RoomsList({ list, copies, peeking, onOpen, onChanged }: {
   const now = useNow();
   const [asking, setAsking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const rows = roomRows(list?.rooms ?? [], copies ?? []);
+  const rows = roomRows(list?.rooms ?? [], copies ?? [], workspaces);
   if (!rows.length) return null;
   const copyCount = copies?.length ?? 0;
+  const deletable = rows.filter((row) => row.copy || row.workspace).length;
 
   async function act(action: () => Promise<unknown>) {
     setError(null);
@@ -431,16 +457,27 @@ function RoomsList({ list, copies, peeking, onOpen, onChanged }: {
       <h2>Your rooms</h2>
       {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
-        {rows.map(({ key, room, copy, code }) => (
+        {rows.map(({ key, room, copy, workspace, code }) => (
           <li key={key} className={copy && copy.database === peeking ? "peeking" : undefined}>
-            <button className="room-link" onClick={() => room ? goToRoom(room.id) : copy && onOpen(copy)}>{code ? <>Room <code>{code}</code></> : "A room"}</button>
+            {room || copy
+              ? <button className="room-link" onClick={() => room ? goToRoom(room.id) : copy && onOpen(copy)}>{code ? <>Room <code>{code}</code></> : "A room"}</button>
+              : <span className="room-link">A room you hosted</span>}
             <span className="room-state">
               {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept" : "board not kept"}</> : <><i className="gone"></i>Not live</>}
             </span>
-            {copy && <small>{copyDetail(copy, Boolean(room))}</small>}
-            {copy && asking === copy.database ? (
+            <span className="room-detail">
+              {copy ? <small>{copyDetail(copy, Boolean(room))}</small> : workspace && !room && <small>no board copy</small>}
+              {workspace && <WorkspaceMarker workspace={workspace} />}
+            </span>
+            {workspace && asking === `workspace:${workspace.room}` ? (
               <span className="actions asking">
-                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}?</span>
+                <span>Delete the host's files for this room from this browser? Anything not pushed is lost.</span>
+                <button className="danger" onClick={() => void act(() => deleteWorkspace(workspace.room))}>Delete files</button>
+                <button className="link" onClick={() => setAsking(null)}>Cancel</button>
+              </span>
+            ) : copy && asking === copy.database ? (
+              <span className="actions asking">
+                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}{workspace ? ", and the host's files (anything not pushed is lost)" : ""}?</span>
                 <button className="danger" onClick={() => void act(() => deleteCopy(copy))}>Delete</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
@@ -450,20 +487,22 @@ function RoomsList({ list, copies, peeking, onOpen, onChanged }: {
                 {copy && <>
                   <button className="link" onClick={() => onOpen(copy)}>Open</button>
                   <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export</button>
-                  <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>
                 </>}
+                {workspace && <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>}
+                {copy && <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>}
               </span>
             )}
           </li>
         ))}
       </ul>
-      {copyCount > 1 && (asking === "all" ? (
+      {workspaces.length > 0 && <p className="workspace-note"><small>Files: what the host's terminal had, kept so a reload or crash loses nothing. {SAVED_SUMMARY}</small></p>}
+      {deletable > 1 && (asking === "all" ? (
         <p className="delete-all asking">
-          <span>Delete all {copyCount} copies on this browser, and its place in every room?</span>
+          <span>Delete all {copyCount} copies{workspaces.length ? ` and ${workspaces.length === 1 ? "the host's files" : `${workspaces.length} rooms' host files`}` : ""} on this browser, and its place in every room?</span>
           <button className="danger" onClick={() => void act(deleteAllCopies)}>Delete all</button>
           <button className="link" onClick={() => setAsking(null)}>Cancel</button>
         </p>
-      ) : <p className="delete-all"><button className="link" onClick={() => setAsking("all")}>Delete all copies</button></p>)}
+      ) : <p className="delete-all"><button className="link" onClick={() => setAsking("all")}>Delete all</button></p>)}
     </section>
   );
 }
@@ -522,6 +561,16 @@ function BoardPeek({ copy, room, onClose }: { copy: LocalCopy; room: ListedRoom 
       {opened instanceof Y.Doc ? <PeekBoard key={copy.database} doc={opened} />
         : <p className="peek-note">{opened === "failed" ? "Couldn't open this browser's copy." : "Opening the copy..."}</p>}
     </section>
+  );
+}
+
+// A room hosted in this browser has its files here too (docs/adr/0010).
+function WorkspaceMarker({ workspace }: { workspace: WorkspaceSummary }) {
+  const saved = workspace.savedAt ? `saved ${shortDate(workspace.savedAt)} ${new Date(workspace.savedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : "not saved yet";
+  return (
+    <small className="workspace-marker" title={SAVED_SUMMARY}>
+      Files: {workspace.files.toLocaleString()} ({formatBytes(workspace.bytes)}), {saved}
+    </small>
   );
 }
 
@@ -590,7 +639,11 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
   const [imported, setImported] = useState<ParsedBoard | null>(null);
   const list = useRoomList();
   const [copies, setCopies] = useState<LocalCopy[] | null>(null);
-  const refreshCopies = () => listCopies().then(setCopies, () => setCopies([]));
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const refreshCopies = () => Promise.all([
+    listCopies().then(setCopies, () => setCopies([])),
+    listWorkspaces().then(setWorkspaces, () => setWorkspaces([])),
+  ]);
   useEffect(() => {
     void refreshCopies();
   }, []);
@@ -684,7 +737,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
           </form>
         )}
       </section>
-      <RoomsList list={list} copies={copies} peeking={peeked?.database ?? null} onChanged={refreshCopies} onOpen={(copy) => {
+      <RoomsList list={list} copies={copies} workspaces={workspaces} peeking={peeked?.database ?? null} onChanged={refreshCopies} onOpen={(copy) => {
         if (narrow) location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`);
         else setPeek((current) => current === copy.database ? null : copy.database);
       }} />

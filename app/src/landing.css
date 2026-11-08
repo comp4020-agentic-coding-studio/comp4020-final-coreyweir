@@ -49,7 +49,11 @@
 .home>.your-rooms .room-state i{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:#c99231}
 .home>.your-rooms .room-state i.live{background:#4d9c55}
 .home>.your-rooms .room-state i.gone{background:#bbb}
-.home>.your-rooms li small{grid-area:detail;margin:0;display:block;color:#888;font-size:9px}
+.home>.your-rooms .room-detail{grid-area:detail;display:flex;flex-wrap:wrap;gap:2px 10px}
+.home>.your-rooms .room-detail small{margin:0;display:block;color:#888;font-size:9px}
+.home>.your-rooms .room-detail small.workspace-marker{color:#3a6b3a}
+.home>.your-rooms span.room-link{text-decoration:none;color:#444}
+.home>.your-rooms .workspace-note{margin:10px 0 0;color:#777;font-size:9px;line-height:1.45}
 .home>.your-rooms .actions{grid-area:actions;display:flex;align-items:center;gap:12px}
 .home>.your-rooms .actions.asking{grid-column:1/-1;grid-row:3;justify-content:flex-end;flex-wrap:wrap;padding:6px 0 2px;color:#444}
 .home>.your-rooms .link{font-size:10px}
