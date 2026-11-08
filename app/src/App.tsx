@@ -87,6 +87,8 @@ function boardFate(keep: boolean) {
 }
 
 function megabytes(bytes: number) {
+  // a board with a few notes would read "0 MB", as if it held nothing
+  if (bytes > 0 && bytes < 0.005 * 1024 * 1024) return "under 0.01 MB";
   return `${(bytes / 1024 / 1024).toFixed(bytes < 1024 * 1024 ? 2 : 1).replace(/\.0+$/, "")} MB`;
 }
 
