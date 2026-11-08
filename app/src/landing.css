@@ -8,12 +8,13 @@
 .landing.home{height:100dvh;overflow:auto;grid-template-columns:minmax(0,1fr) minmax(360px,440px);grid-template-rows:64px auto 1fr;grid-template-areas:"bar bar" "hero card" "list card";column-gap:4vw;align-content:start;padding:0 5vw 40px}
 
 /* Header: brand, tagline, account on the right */
-.home>header{grid-area:bar;justify-content:flex-start;gap:16px;position:sticky;top:0;z-index:30;background:#f7f7f4}
-.home>header .account{position:relative;margin:0 0 0 auto;padding:0;border:0;flex-wrap:nowrap;gap:12px}
-.home>header .account small{flex-basis:auto;order:-1;max-width:330px;text-align:right}
-.home>header .account .link{margin-left:0}
-.home>header .account strong{font-weight:600}
-.home>header .account .signing-out{position:absolute;top:calc(100% + 12px);right:0;z-index:40;width:min(360px,88vw);padding:14px;border:1px solid #d3d3cd;border-radius:6px;background:white;box-shadow:0 12px 35px rgba(0,0,0,.1);line-height:1.45}
+.home>header{grid-area:bar}
+:is(.home,.join-link)>header{justify-content:flex-start;gap:16px;position:sticky;top:0;z-index:30;background:#f7f7f4}
+:is(.home,.join-link)>header .account{position:relative;margin:0 0 0 auto;padding:0;border:0;flex-wrap:nowrap;gap:12px}
+:is(.home,.join-link)>header .account small{flex-basis:auto;order:-1;max-width:330px;text-align:right}
+:is(.home,.join-link)>header .account .link{margin-left:0}
+:is(.home,.join-link)>header .account strong{font-weight:600}
+:is(.home,.join-link)>header .account .signing-out{position:absolute;top:calc(100% + 12px);right:0;z-index:40;width:min(360px,88vw);padding:14px;border:1px solid #d3d3cd;border-radius:6px;background:white;box-shadow:0 12px 35px rgba(0,0,0,.1);line-height:1.45}
 
 /* Hero, shorter than it was, so the rooms show without scrolling */
 .home>.landing-copy{grid-area:hero;align-self:start;padding:56px 0 36px}
@@ -83,10 +84,10 @@
 .overlay .colleagues form{display:flex;gap:8px}
 .overlay .colleagues form input{height:32px;padding:0 10px;border:1px solid #d5d5cf;border-radius:4px;background:#fbfbf9;font-size:11px}
 
-@media(max-width:1100px){.home>header>span{display:none}.home>header .account small{max-width:220px}}
+@media(max-width:1100px){:is(.home,.join-link)>header>span{display:none}:is(.home,.join-link)>header .account small{max-width:220px}}
 @media(max-width:780px){
   .landing.home{height:auto;min-height:100dvh;overflow:visible;grid-template-columns:minmax(0,1fr);grid-template-rows:60px auto auto auto;grid-template-areas:"bar" "hero" "card" "list";padding:0 5vw 48px}
-  .home>header .account small,.home>header .signed-in-as{display:none}
+  :is(.home,.join-link)>header .account small,:is(.home,.join-link)>header .signed-in-as{display:none}
   .home>.landing-copy{padding:32px 0 26px}
   .home>.landing-copy h1{font-size:clamp(34px,10vw,56px);margin:14px 0 14px}
   .home>.entry-card{position:static;max-height:none;margin-top:0}
@@ -110,3 +111,9 @@
 .landing.closed .closed-actions .primary{padding:0 18px}
 .landing.closed .closed-actions .secondary{height:41px;padding:0 18px;border:1px solid #d5d5cf;border-radius:4px;background:white;font-size:10px}
 @media(max-width:780px){.landing.closed{grid-template-rows:60px auto}}
+
+/* Opened from a room's link: one card, the name first */
+.landing.join-link>.entry-card>h2 code{font-family:"SFMono-Regular",Consolas,monospace;letter-spacing:.08em}
+.landing.join-link>.entry-card>form{padding-top:18px}
+.landing.join-link>.entry-card>button.link{margin:0 26px 22px}
+.landing.join-link>.entry-card>form{min-height:0}

@@ -105,3 +105,5 @@
 .ws-export-actions button{padding:7px 11px;border:1px solid #d5d5cf;border-radius:4px;background:white;font-size:9px}
 .ws-export-actions .ws-export-go{border-color:#191919;background:#191919;color:white}
 .ws-export-actions button:disabled{opacity:.5;cursor:default}
+/* Share room: the link, the code, and the host's invites in one panel */
+.share-panel .share-link{margin:14px 16px 0;display:flex;gap:6px}.share-panel .share-link input{flex:1;min-width:0;height:32px;padding:0 9px;border:1px solid #d5d5cf;border-radius:3px;background:#fbfbf9;color:#444;font-size:12px}.share-panel .share-link button{padding:0 12px;border:1px solid #191919;border-radius:3px;background:#191919;color:white;font-size:12px;white-space:nowrap}.share-panel .room-code{margin-top:16px}.share-panel .invite-box{margin-top:18px}.people-panel>.end-room{margin-top:16px}.share-panel{padding-bottom:16px}.share-panel .local-note{margin:4px 16px 0}.share-panel .form-error{margin:12px 16px 0}

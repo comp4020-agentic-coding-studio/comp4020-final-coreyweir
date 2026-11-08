@@ -254,7 +254,7 @@ try {
   const rows = await listed();
   console.log("listed", JSON.stringify(rows));
   assert.ok(rows.some((row) => /WSUI/.test(row) && /Files: [^(]+\(\d/.test(row)), "the room's row says this browser has its files");
-  assert.ok(await other.$eval(".workspace-note", (n) => n.textContent.includes("Not saved: /tmp")), "the list says what is saved");
+  assert.ok(await other.$eval(".workspace-note", (n) => n.textContent.includes("/work and /home/user")), "the list says what the files are");
   // "Delete files" takes the workspace and leaves the board copy
   await clickIn("WSUI", "Delete files");
   await clickIn("WSUI", "Delete files");
@@ -272,7 +272,7 @@ try {
   assert.ok((await listed()).some((row) => /WSUI/.test(row) && /Files:/.test(row)));
   await clickIn("WSUI", "Delete");
   const asked = await other.$$eval(".your-rooms li", (rows) => rows.find((r) => r.textContent.includes("WSUI"))?.textContent ?? "");
-  assert.match(asked, /and the host's files/, "Delete says it takes the files too");
+  assert.match(asked, /and the files/, "Delete says it takes the files too");
   await clickIn("WSUI", "Delete");
   await other.waitForFunction(() => ![...document.querySelectorAll(".your-rooms li")].some((r) => r.textContent.includes("WSUI")), { polling: 100 });
   const deleted = await stored();

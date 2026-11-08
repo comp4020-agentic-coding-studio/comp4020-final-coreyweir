@@ -76,6 +76,7 @@
     "test:lifecycle-browser": "node scripts/lifecycle-browser-smoke.mjs",
     "test:limits-browser": "node scripts/limits-browser-smoke.mjs",
     "test:boards-browser": "node scripts/boards-browser-smoke.mjs",
+    "test:join-link-browser": "node scripts/join-link-browser-smoke.mjs",
     "test:queue-release-browser": "node scripts/queue-release-browser-smoke.mjs",
     "test:queue-release-resilience-browser": "node scripts/queue-release-resilience-browser-smoke.mjs",
     "test:image-paste-browser": "node scripts/image-paste-browser-smoke.mjs",
