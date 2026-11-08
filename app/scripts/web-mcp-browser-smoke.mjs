@@ -91,12 +91,17 @@ try {
   }
   await until(async () => /bypass permissions on/.test(await screen()), "Claude ready", 60_000);
 
+  const TOOL_CALL = /web - (search|fetch)|mcp__web/i;
+  const seen = [];
   async function call(prompt) {
     const before = fake.requests.length;
     assert.equal(await page.evaluate((text) => window.__controller.sendPrompt(text), prompt), true);
     let result;
     let tools = [];
-    await until(() => {
+    await until(async () => {
+      // Claude draws on the alternate screen, which keeps no scrollback:
+      // look for the call while it is on screen.
+      if (TOOL_CALL.test(await screen())) seen.push(prompt);
       for (const request of fake.requests.slice(before)) {
         if (request.tools.length) tools = request.tools;
         const last = JSON.parse(request.text).at(-1)?.content;
@@ -126,16 +131,17 @@ try {
   assert(searched.tools.includes("mcp__web__search") && searched.tools.includes("mcp__web__fetch"), `web tools offered: ${searched.tools}`);
   assert(!searched.tools.includes("WebSearch"), "WebSearch isn't offered on the free models");
   assert(searched.tools.includes("WebFetch"), "WebFetch stays (CORS-open sites work)");
-  const results = JSON.parse(JSON.parse(searched.result)[0]?.text ?? searched.result).results ?? [];
-  assert(results.length > 0 && results.every((item) => /^https?:\/\//.test(item.link)), `search results: ${searched.result.slice(0, 300)}`);
-  assert(!results.some((item) => item.link.includes("duckduckgo.com/l/")), "redirect links resolved");
+  const text = JSON.parse(searched.result)[0]?.text ?? searched.result;
+  const results = [...text.matchAll(/^\d+\. .+\n {3}(\S+)/gm)].map((match) => match[1]);
+  assert(results.length > 0 && results.every((link) => /^https?:\/\//.test(link)), `search results: ${text.slice(0, 300)}`);
+  assert(!results.some((link) => link.includes("duckduckgo.com/l/")), "redirect links resolved");
 
   const fetched = await call("mcpfetch https://example.com/");
   assert.match(fetched.result, /Example Domain/, `fetch result: ${fetched.result.slice(0, 300)}`);
 
   assert(requested.some((url) => url.startsWith("https://r.jina.ai/https://html.duckduckgo.com/html?q=claude+code+nodepod")), "the search left from the browser through Jina");
   assert(requested.some((url) => url === "https://r.jina.ai/https://example.com/"), "the fetch left from the browser through Jina");
-  assert.match(await screen(), /web - (search|fetch)|mcp__web/i, "the room sees the tool call");
+  assert.deepEqual([...new Set(seen)], ["mcpsearch claude+code+nodepod", "mcpfetch https://example.com/"], "the room sees each tool call");
   await page.evaluate(() => window.__controller.dispose());
   console.log(`web MCP: ${results.length} search results, example.com fetched, both through Jina from the browser; WebSearch denied on the free models.`);
 } finally {

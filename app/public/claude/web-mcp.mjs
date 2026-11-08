@@ -160,6 +160,18 @@ export const TOOLS = [
   },
 ];
 
+/**
+ * What the model (and, in verbose mode, everyone watching the terminal)
+ * reads: plain text, not escaped JSON.
+ */
+export function asText(out) {
+  if (out.error) return `Error: ${out.error}`;
+  if (out.results) {
+    return out.results.map((item, index) => `${index + 1}. ${item.title}\n   ${item.link}${item.snippet ? `\n   ${item.snippet}` : ""}`).join("\n\n");
+  }
+  return out.content;
+}
+
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 /** One JSON-RPC message in, its reply out (undefined for a notification). */
@@ -186,7 +198,7 @@ export async function handle(message, fetchImpl = globalThis.fetch) {
       const run = params?.name === "search" ? search : params?.name === "fetch" ? fetchPage : null;
       if (!run) return { jsonrpc: "2.0", id, error: { code: -32602, message: `Unknown tool: ${params?.name}` } };
       const out = await run(args, fetchImpl);
-      return reply({ content: [{ type: "text", text: JSON.stringify(out) }], isError: Boolean(out.error) });
+      return reply({ content: [{ type: "text", text: asText(out) }], isError: Boolean(out.error) });
     }
     default:
       return { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } };

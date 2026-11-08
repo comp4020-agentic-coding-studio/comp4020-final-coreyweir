@@ -74,7 +74,11 @@ test("MCP: initialize, tools/list, tools/call, unknown method; notifications get
   assert.deepEqual((await handle({ jsonrpc: "2.0", id: 2, method: "tools/list" })).result.tools.map((tool) => tool.name), ["search", "fetch"]);
   const called = await handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "fetch", arguments: { url: "https://example.com/" } } }, reply(200, "Example Domain"));
   assert.equal(called.result.isError, false);
-  assert.deepEqual(JSON.parse(called.result.content[0].text), { url: "https://example.com/", content: "Example Domain" });
+  assert.equal(called.result.content[0].text, "Example Domain", "the page's text, not JSON");
+  const searched = await handle({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "search", arguments: { query: "x", max_results: 2 } } }, reply(200, PAGE));
+  assert.equal(searched.result.content[0].text, "1. Claude Code overview\n   https://docs.claude.com/claude-code\n   Claude Code is an agentic coding tool that lives in your terminal and understands your codebase.\n\n2. Second result\n   https://example.org/second");
+  const failed = await handle({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "search", arguments: { query: "x" } } }, reply(503, "down"));
+  assert.deepEqual([failed.result.isError, failed.result.content[0].text], [true, "Error: Jina returned HTTP 503: down"]);
   assert.equal((await handle({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "nope" } })).error.code, -32602);
   assert.equal((await handle({ jsonrpc: "2.0", id: 5, method: "resources/list" })).error.code, -32601);
   assert.equal(await handle({ jsonrpc: "2.0", method: "notifications/initialized" }), undefined);

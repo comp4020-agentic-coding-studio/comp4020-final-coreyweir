@@ -746,8 +746,13 @@ auto-release at the latest.
   from the browser; red with no tools listed, no deny, redirects
   unresolved, or fetching without Jina). Claude Code connects MCP servers
   in the background: a prompt sent in the first second or so after Claude
-  starts may not be offered the tools. Left: live, and whether Nemotron
-  picks these tools over WebFetch on its own (unmeasured).
+  starts may not be offered the tools. Tool results are plain text (a
+  numbered list, the page's markdown), not JSON, since verbose mode shows
+  them on everyone's mirror. Measured on dev with Riff's real free model
+  (Nemotron 3 Ultra), unprompted: "search the web for…" called `search`
+  and answered with the right GitHub URL; "read <Wikipedia page>" called
+  `fetch` (a site WebFetch can't read from the browser) and quoted its
+  first sentence. Left: live.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own
