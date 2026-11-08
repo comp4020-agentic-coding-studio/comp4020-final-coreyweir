@@ -453,6 +453,17 @@ auto-release at the latest.
   `npm run test:audit-log`, `spec/permissions.test.ts`.
   - Left: live verification. A slash command fires no hook, so auto pauses
     after one until the host turns it on again (measured, by design).
+  - Resilience (8 Nov, `628ee23`): `npm run test:queue-release-resilience-browser`
+    hides the host's tab for a minute, freezes it for 45 s mid-turn, exits
+    and restarts Claude, and reloads mid-turn; auto carries on and every
+    prompt arrives once. It found that a reloaded host page could leave the
+    room seeing "Claude is working" for good (its "off" was written before
+    the room's state arrived, and Yjs kept the old page's value); the page
+    now publishes only once synced. After a reload Claude starts a new
+    session: the turn that was running is gone, though its transcript is in
+    the saved `/home/user/.claude`. Not handled: a Send typed while Claude
+    shows a dialog mid-turn (a question or plan approval) goes into the
+    dialog; Claude's `Notification` hook could tell Riff about one.
 - ~~**Images into the host's Claude**~~ (8 Nov, `d07ddcc`). xterm reads
   only text from the clipboard, so a pasted screenshot did nothing. Claude
   Code 2.1.221 attaches an image itself when its absolute path is pasted
