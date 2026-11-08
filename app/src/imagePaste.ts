@@ -41,8 +41,8 @@ export function imagesIn(data: DataTransfer | null): File[] {
 }
 
 /**
- * Whether the host's model can read an image. Riff's free model
- * (`RIFF_MODEL`, docs/adr/0009) reads text only: OpenRouter answers a
+ * Whether the host's model can read an image. Riff's free models
+ * (`RIFF_MODEL` and `RIFF_SMALL_MODEL`, docs/adr/0009) read text only: OpenRouter answers a
  * request with an image in it 404 "No endpoints found that support image
  * input" (measured 8 Nov 2026).
  */
@@ -79,7 +79,7 @@ export async function fitImage(blob: Blob): Promise<FittedImage> {
 export const PASTE_DIR = "/tmp/riff";
 
 export type ImagePasteIO = {
-  /** False when the model in use can't read images (Riff's free model). */
+  /** False when the model in use can't read images (Riff's free models). */
   readsImages: () => boolean;
   exists: (path: string) => boolean;
   save: (path: string, bytes: Uint8Array) => void;
@@ -88,7 +88,7 @@ export type ImagePasteIO = {
   notice: (text: string) => void;
 };
 
-export const TEXT_ONLY_NOTICE = "Riff's free model reads text only, so the image wasn't given to Claude. To share images, host with your own API endpoint.";
+export const TEXT_ONLY_NOTICE = "Riff's free models read text only, so the image wasn't given to Claude. To share images, host with your own API endpoint.";
 
 /**
  * Save each image under /tmp/riff and paste its path, one paste at a time
