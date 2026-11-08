@@ -110,6 +110,15 @@ async function save(request: Extract<WorkerRequest, { op: "save" }>) {
   for (const blob of request.drop) await blobDirectory.removeEntry(blob).catch(() => {});
 }
 
+// Blobs only, no manifest: a seeded workspace (an import) writes its files
+// in batches and its manifest last, so until then it holds nothing.
+async function blobs(request: Extract<WorkerRequest, { op: "blobs" }>) {
+  const directory = await roomDirectory(request.room, true);
+  if (!directory) throw new Error("no workspace directory");
+  const blobDirectory = await directory.getDirectoryHandle("b", { create: true });
+  for (const write of request.writes) await writeSync(blobDirectory, write.blob, new Uint8Array(write.data));
+}
+
 async function list() {
   const root = await rootDirectory();
   const found: Array<{ room: string; savedAt: number; bytes: number; files: number }> = [];
@@ -141,6 +150,9 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       reply({ id: request.id, ok: true, value: loaded }, loaded.files.map((file) => file.data));
     } else if (request.op === "save") {
       await save(request);
+      reply({ id: request.id, ok: true, value: null });
+    } else if (request.op === "blobs") {
+      await blobs(request);
       reply({ id: request.id, ok: true, value: null });
     } else if (request.op === "list") {
       reply({ id: request.id, ok: true, value: await list() });

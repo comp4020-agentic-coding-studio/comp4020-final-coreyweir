@@ -23,6 +23,8 @@ import {
 } from "./boardFile";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
 import { type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
+import { ImportWorkspace, type PickedWorkspace, seedFromExport } from "./ImportWorkspace";
+import { ExportFiles } from "./ExportFiles";
 
 type View = "board" | "room" | "preview";
 // models: "riff" is Riff's own free models through the server
@@ -35,6 +37,12 @@ const DEFAULT_HOST_CONFIG: SavedHostConfig = {
   repo: "",
   models: "riff",
 };
+
+// The real tokens this browser holds for hosting, for an export to make
+// sure none of them travels (ADR 0007).
+async function hostSecrets() {
+  return [savedHostConfig().token, await unwrapPushToken().catch(() => null) ?? ""].filter(Boolean);
+}
 
 function savedHostConfig(): SavedHostConfig {
   try {
@@ -551,8 +559,9 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 {room && <button className="link" onClick={() => goToRoom(room.id)}>Enter</button>}
                 {copy && <>
                   <button className="link" onClick={() => onOpen(copy)}>Open</button>
-                  <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export</button>
+                  <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>
                 </>}
+                {workspace && <ExportFiles workspace={workspace} code={code ?? null} secrets={hostSecrets} />}
                 {workspace && <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>}
                 {copy && <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>}
               </span>
@@ -710,6 +719,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imported, setImported] = useState<ParsedBoard | null>(null);
+  const [workspaceExport, setWorkspaceExport] = useState<PickedWorkspace | null>(null);
   const list = useRoomList();
   const [copies, setCopies] = useState<LocalCopy[] | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
@@ -778,6 +788,8 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
             void submit(async () => {
               const access = await createRoom(shownName.trim(), keepBoard);
               if (imported) await seedCopy(access.room.id, (doc) => applyBoardFile(doc, imported));
+              // the real tokens, so none of them goes into the guest (ADR 0007)
+              if (workspaceExport) await seedFromExport(access.room.id, workspaceExport, [config.token, await unwrapPushToken().catch(() => null) ?? ""]);
               return access;
             });
           }}>
@@ -796,6 +808,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
             <label>Git repository <small>Optional</small><input value={config.repo} onChange={(event) => updateConfig("repo", event.target.value)} placeholder="https://github.com/group/project.git" /></label>
             <GitHubPush user={user} back="/?setup=host" beforeLeaving={() => { saveName(name); localStorage.setItem("riff-host-config", JSON.stringify(config)); }} />
             <ImportBoard imported={imported} onChange={setImported} />
+            <ImportWorkspace picked={workspaceExport} repo={config.repo} onChange={setWorkspaceExport} />
             <label className="check"><input type="checkbox" checked={keepBoard} onChange={(event) => setKeepBoard(event.target.checked)} /><span>Keep the board on the server after the room ends<small>{keepBoard ? "Read-only, while space allows." : "Deleted from the server when the room ends."}</small></span></label>
             <p className="local-note">These settings stay in this browser and are never included in the room link.</p>
             {error && <p className="form-error" role="alert">{error}</p>}
