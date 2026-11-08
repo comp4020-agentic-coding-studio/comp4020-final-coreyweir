@@ -25,6 +25,19 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
   const [draft, setDraft] = useState<CustomMcp | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
+  const addForm = useRef<HTMLFormElement>(null);
+  const drafting = draft !== null;
+  // An opened form is scrolled into view whole, above the sticky Apply bar,
+  // with the cursor in its first field.
+  useEffect(() => {
+    if (!drafting) return;
+    addForm.current?.scrollIntoView({ block: "end" });
+    addForm.current?.querySelector("input")?.focus({ preventScroll: true });
+  }, [drafting]);
+  // A refusal grows the form: keep Add and the message clear of the bar.
+  useEffect(() => {
+    if (draftError) addForm.current?.scrollIntoView({ block: "end" });
+  }, [draftError]);
   const saved = loadMcp(roomId);
   const count = (saved.github.on && hasGithub ? 1 : 0) + saved.custom.length;
   const running = getController()?.isRunning() ?? false;
@@ -135,7 +148,7 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
                 </ul>
               )}
               {draft ? (
-                <form className="mcp-add" aria-label="Add an MCP server" onSubmit={(event) => { event.preventDefault(); addDraft(); }}>
+                <form ref={addForm} className="mcp-add" aria-label="Add an MCP server" onSubmit={(event) => { event.preventDefault(); addDraft(); }}>
                   <label>Name<input value={draft.name} onChange={editDraft("name")} placeholder="e.g. jina" autoComplete="off" autoCapitalize="none" /></label>
                   <label>URL<input type="url" value={draft.url} onChange={editDraft("url")} placeholder="https://mcp.example.com/mcp" autoComplete="off" /></label>
                   <label>Header <small>Optional</small><input value={draft.header} onChange={editDraft("header")} placeholder="e.g. Authorization" autoComplete="off" autoCapitalize="none" /></label>
@@ -151,7 +164,7 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
 
             <p className="ws-export-quiet">{!running
               ? "Claude uses these when it starts."
-              : busy ? "Claude is working: apply when it has finished, since applying restarts it."
+              : busy ? `Claude is ${claudeState === "starting" ? "starting" : "working"}: apply when it has finished, since applying restarts it.`
               : "Applying restarts Claude (a few seconds), and it carries on the same conversation."}</p>
             {error && <p className="form-error" role="alert">{error}</p>}
             {done && <p className="mcp-done" role="status">{done}</p>}
