@@ -3,7 +3,9 @@
 - Status: accepted; lifecycle, keeping and End room implemented 2026-10-18;
   pruning and the size cap decided and implemented 2026-10-18; local copies,
   export and import decided and implemented 2026-10-19; workspace export
-  decided and implemented 2026-11-08 (amendments below)
+  and import, reopening, leaving and deleting decided and implemented
+  2026-11-08; the board as a picture 2026-11-09 (amendments below). Not
+  built: images out of the board document (option C)
 - Date: 2026-10-12
 
 ## Context
@@ -408,7 +410,8 @@ Option C, chosen to follow, and to be built with export, which has to
 package images anyway: the browser uploads each image once, the server
 stores it on the volume, and the board holds a reference. Server memory per
 room is then strokes and text, and the cap becomes a disk limit. Until then,
-4 MB is the price of keeping images inline (ADR 0002).
+4 MB is the price of keeping images inline (ADR 0002). (Still not built,
+9 Nov: export went ahead with the images inline in the board file.)
 
 ### The case for the options we didn't pick
 
@@ -574,6 +577,45 @@ deleting copies, and the other tab carrying on).
 
 **Not built:** the workspace export and transcripts (built 8 Nov, the
 amendment below). **Not checked:** a browser other than Chrome.
+
+### The board as a picture (2026-11-09)
+
+Asked for by the host: the file is for starting a room again, but a crit's
+board is usually wanted as a picture, for a report or a chat. Every
+"Export board" (a row's menu, the People panel, the desktop peek, a
+copy's page) is now **Export board (JSON)**, with **Export board (PNG)**
+after it, downloading `riff-<code>-board.png`. No new store, so nothing
+for no-lock-in to answer beyond the picture itself.
+
+- **One renderer, from the document** (`app/src/boardPicture.ts`): the
+  board's records go into an editor of their own that is never on the
+  page, and quickdraw's `exportImage` (Send board's board.png) draws them
+  on the room's paper and dots at twice board scale, under ~24 MP. A row
+  on the start page has no board mounted, only this browser's copy; the
+  room's board carries the person's camera and selection. Rendering the
+  document gives the same picture wherever it's asked for: the smoke
+  finds the room's PNG and the row's (from IndexedDB) byte for byte equal.
+- **quickdraw's image cache:** `exportImage` decodes images itself but
+  draws from a cache by asset id that only starts loading when a shape
+  is drawn, so a board never on screen exported grey boxes where its
+  images were (the first run of the smoke caught it on the row). The
+  picture's editor uses ids of its own (`picture:<id>`), fills the cache
+  and waits for it (or for the image failing to load), one picture at a
+  time. That cache never empties, so each image exported stays decoded
+  for the life of the tab; bounded by the room's 4 MB.
+- **An empty board** has no picture: on a copy, whose board can't change,
+  the button is off with a tooltip; in the room and on a row, which don't
+  watch the board, it says "The board is empty, so there's no picture to
+  make."
+
+**Checked:** `npm run test:boards-browser` on dev at both sizes: the empty
+room's message, then the PNG from the People panel, a row (from the
+copy), the peek (desktop) and the copy's page: named for the room, a PNG
+signature, 224×224 for a 64-unit image, and its middle the pasted image's
+noise (over 100 colours in 32×32), which a blank or grey-box picture
+doesn't have. `test:workspace-export-files-ui` with the new labels.
+**Not checked:** live; a large board near the 24 MP cap; a browser other
+than Chrome.
 
 ## Amendment (2026-11-08): workspace export
 

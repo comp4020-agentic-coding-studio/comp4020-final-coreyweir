@@ -97,10 +97,24 @@ Where what was built differs from the decision above, or adds to it:
   in a request is answered 404, measured 8 Nov), so on Riff's models an
   image pasted into the host's terminal isn't given to Claude and the
   terminal says so (`app/src/imagePaste.ts`).
+- **No WebSearch** (9 Nov). Claude Code's WebSearch is a server tool the
+  provider runs: OpenRouter ran it through Exa for $0.007 a search
+  (measured 8 Nov, on Riff's key). The key has no billing (key limit $0),
+  so on Riff's models WebSearch is denied in the host's Claude settings
+  and Claude isn't offered it (`app/src/webTools.ts`). Search comes from
+  Riff's web MCP server instead (PLAN, "Web search and page reading").
 - **Log:** model requests are tallied per host every 10 seconds, with the
   reply's status and bytes (`model.request status=200 times=N bytes=B`), so
   a 429 shows up. Never what was asked or answered. Refusals are logged as
   denials, like any other.
+- **The web (8 Nov), for every host, not only on these models.** WebFetch
+  works from the host's browser once Claude skips its claude.ai domain
+  check (`skipWebFetchPreflight`, `c764e16`); CORS decides which sites it
+  can read (`npm run test:webfetch-browser`, with the fake model). WebFetch hands
+  the page to Claude's small model (seen with the fake model), which on
+  these models is Lightning. Not measured: a real WebFetch or WebSearch turn on
+  Riff's models. A built-in web server for Claude is not on main yet (its
+  MCP name, `web`, is reserved, ADR 0012).
 
 ## Consequences
 

@@ -166,6 +166,27 @@ function syntheticIpForHost(host: string): IpAddr {
   return { family: 4, octets: [10, (hash >>> 16) & 0xff, (hash >>> 8) & 0xff, hash & 0xff] };
 }
 
+/**
+ * What localhost means to the guest: the workspace's own servers, which run
+ * beside the WASIX session (in Nodepod), not inside it. A guest connect to a
+ * loopback address on a port nothing listens on is refused, as on a machine;
+ * otherwise each request goes to that server, never to the network.
+ */
+export interface LocalServers {
+  listening(port: number): boolean;
+  request(port: number, init: { method: string; path: string; headers: Record<string, string>; body: Uint8Array | null }): Promise<{
+    status: number;
+    headers: Record<string, string | string[]>;
+    body: Uint8Array;
+  }>;
+}
+
+function isLoopback(ip: IpAddr): boolean {
+  if (ip.family === 4) return ip.octets[0] === 127 || ip.octets.every((octet) => octet === 0);
+  // ::1 and ::
+  return ip.octets.slice(0, 15).every((octet) => octet === 0) && (ip.octets[15] === 1 || ip.octets[15] === 0);
+}
+
 interface ParsedRequest {
   method: string;
   target: string;
@@ -199,6 +220,8 @@ class GatewayConnection {
   readonly localAddr: SocketAddr;
   readonly scheme: "http" | "https";
   readonly tls?: BrowserTlsServer;
+  /** Set when the guest connected to localhost: requests go to this server. */
+  readonly local?: LocalServers;
   private readonly deadline: ReturnType<typeof setTimeout>;
 
   constructor(
@@ -208,7 +231,9 @@ class GatewayConnection {
     peerAddr: SocketAddr,
     localAddr: SocketAddr,
     authority?: BrowserCertificateAuthority,
+    local?: LocalServers,
   ) {
+    this.local = local;
     this.session = session;
     this.socketId = socketId;
     this.defaultPort = defaultPort;
@@ -340,6 +365,7 @@ class GatewayConnection {
   }
 
   private async dispatch(request: ParsedRequest): Promise<void> {
+    if (this.local) return this.dispatchLocal(this.local, request);
     try {
       const headers: Record<string, string> = { ...request.headers };
       for (const name of hopHeaders(headers.connection)) delete headers[name];
@@ -397,6 +423,40 @@ class GatewayConnection {
       if (this.state === "done") return;
       if (this.responseStarted) this.closeFromGateway();
       else this.respondSimple(request, 502, "gateway upstream failure");
+    }
+  }
+
+  /** A request to one of the workspace's servers (LocalServers). */
+  private async dispatchLocal(local: LocalServers, request: ParsedRequest): Promise<void> {
+    try {
+      const headers: Record<string, string> = { ...request.headers };
+      for (const name of hopHeaders(headers.connection)) delete headers[name];
+      delete headers.expect;
+      const response = await local.request(this.defaultPort, {
+        method: request.method,
+        path: request.target,
+        headers,
+        body: request.method === "GET" || request.method === "HEAD" ? null : (request.body ?? new Uint8Array(0)),
+      });
+      if (this.state === "done") return;
+      const stripped = hopHeaders(String(response.headers.connection ?? ""));
+      stripped.add("content-length");
+      const headLines = [`HTTP/1.1 ${response.status} ${response.status < 400 ? "OK" : "Error"}`];
+      for (const [name, value] of Object.entries(response.headers)) {
+        if (stripped.has(name.toLowerCase())) continue;
+        for (const one of Array.isArray(value) ? value : [value]) {
+          if (!/[\r\n]/.test(String(one))) headLines.push(`${name}: ${one}`);
+        }
+      }
+      headLines.push(`content-length: ${response.body.byteLength}`, "connection: close");
+      this.responseStarted = true;
+      this.writeToGuest(latin1Encode(`${headLines.join("\r\n")}\r\n\r\n`));
+      if (request.method !== "HEAD" && response.body.byteLength) this.writeToGuest(response.body);
+      this.finishResponse();
+    } catch {
+      if (this.state === "done") return;
+      if (this.responseStarted) this.closeFromGateway();
+      else this.respondSimple(request, 502, "the workspace's server did not answer");
     }
   }
 
@@ -480,10 +540,12 @@ class BrowserGatewaySession {
   private disposed = false;
   private readonly port: MessagePort;
   private readonly authority: BrowserCertificateAuthority;
+  private readonly local?: LocalServers;
 
-  constructor(port: MessagePort, authority: BrowserCertificateAuthority) {
+  constructor(port: MessagePort, authority: BrowserCertificateAuthority, local?: LocalServers) {
     this.port = port;
     this.authority = authority;
+    this.local = local;
     port.onmessage = (event: MessageEvent) => this.onFrame(event.data);
   }
 
@@ -647,8 +709,15 @@ class BrowserGatewaySession {
       this.reply(reqId, responseErr(reqId, NETWORK_ERROR.InsufficientMemory));
       return;
     }
+    const local = this.local && isLoopback(peer.ip) ? this.local : undefined;
+    if (local && !local.listening(peer.port)) {
+      this.reply(reqId, responseErr(reqId, NETWORK_ERROR.ConnectionRefused));
+      return;
+    }
     const localAddr: SocketAddr = { ip: GUEST_IP, port: 40000 + Number(sockId % 20000n) };
-    const conn = new GatewayConnection(this, sockId, peer.port, peer, localAddr, peer.port === 443 ? this.authority : undefined);
+    const conn = local
+      ? new GatewayConnection(this, sockId, peer.port, peer, localAddr, undefined, local)
+      : new GatewayConnection(this, sockId, peer.port, peer, localAddr, peer.port === 443 ? this.authority : undefined);
     this.sockets.set(sockId.toString(), conn);
 
     // The client must pre-register the socket before issuing ConnectTcp.
@@ -677,8 +746,8 @@ export interface NetGatewayBrowserHandle {
 // Attach a plaintext-HTTP-only WASIX network gateway to one end of a
 // MessageChannel. The caller transfers the other end (`channel.port2`) to
 // the WASIX worker and passes it as `Runtime({ networkGatewayPort })`.
-export function attachNetGatewayBrowser(port: MessagePort, authority = createCertificateAuthority()): NetGatewayBrowserHandle {
-  const session = new BrowserGatewaySession(port, authority);
+export function attachNetGatewayBrowser(port: MessagePort, authority = createCertificateAuthority(), local?: LocalServers): NetGatewayBrowserHandle {
+  const session = new BrowserGatewaySession(port, authority, local);
   return {
     dispose: () => session.dispose(),
   };

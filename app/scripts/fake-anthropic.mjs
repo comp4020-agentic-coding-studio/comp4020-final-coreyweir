@@ -4,7 +4,9 @@
 // message, which is what reached the model. A prompt containing "slow"
 // gets its reply after SLOW_MS, so a smoke can send while Claude is busy;
 // one containing "fail" gets a 400, so a turn ends in an API error. One
-// containing "webfetch <url>" or "websearch <query>" gets that tool call. Image
+// containing "webfetch <url>" or "websearch <query>" gets that tool call
+// ("mcpfetch"/"mcpsearch" call Riff's web MCP server's tools instead; "askuser"
+// calls AskUserQuestion, a dialog mid-turn). Image
 // blocks reaching the model are recorded per turn. It also answers Claude Code's
 // remote-session web routes (`/v1/code/sessions/<id>/worker/web-fetch` and
 // `web-search`) with a canned page or result, recorded in `workerCalls`.
@@ -16,7 +18,7 @@ import os from "node:os";
 
 export const SLOW_MS = 4_000;
 
-function lanAddress() {
+export function lanAddress() {
   for (const entries of Object.values(os.networkInterfaces())) {
     for (const entry of entries ?? []) if (entry.family === "IPv4" && !entry.internal) return entry.address;
   }
@@ -113,7 +115,11 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
       // Claude Code also streams side requests (a title, a topic); only a
       // request that carries tools is a turn of the conversation.
       const isTurn = Array.isArray(body.tools) && body.tools.length > 0;
-      if (isTurn) turns.push({ at: Date.now(), blocks, images: imageBlocks(lastUser?.content), toolResult: Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result"), messages: (body.messages ?? []).length });
+      // What a tool answered, as text, so a smoke can judge a command's output.
+      const toolText = Array.isArray(lastUser?.content)
+        ? lastUser.content.filter((block) => block?.type === "tool_result").map((block) => typeof block.content === "string" ? block.content : (block.content ?? []).map((part) => part?.text ?? "").join("")).join("\n")
+        : "";
+      if (isTurn) turns.push({ at: Date.now(), blocks, images: imageBlocks(lastUser?.content), toolResult: Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result"), toolText, messages: (body.messages ?? []).length });
       if (isTurn && blocks.some((text) => text.includes("fail"))) {
         res.writeHead(400, { ...cors, "content-type": "application/json" });
         res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "the fake API refuses prompts containing fail" } }));
@@ -127,7 +133,23 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
         res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-cache" });
         send("message_start", { type: "message_start", message: { ...message, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } });
         send("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: `toolu_${Date.now()}`, name: "Bash", input: {} } });
-        send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify({ command: "sleep 3", description: "Wait" }) } });
+        send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(blocks.some((text) => text.includes("touchtool")) ? { command: "touch riff-probe.txt", description: "Create a file" } : { command: "sleep 3", description: "Wait" }) } });
+        send("content_block_stop", { type: "content_block_stop", index: 0 });
+        send("message_delta", { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 5 } });
+        send("message_stop", { type: "message_stop" });
+        res.end();
+        return;
+      }
+      // "bash: <command>" runs that command with the Bash tool first;
+      // "bash&: <command>" runs it as a background task (run_in_background).
+      const bashCall = isTurn && !answered && blocks.map((text) => /\bbash(&?): ([^\n]+)/.exec(text)).find(Boolean);
+      if (bashCall) {
+        const input = { command: bashCall[2].trim(), description: "Run the command", ...(bashCall[1] ? { run_in_background: true } : {}) };
+        const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-cache" });
+        send("message_start", { type: "message_start", message: { ...message, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } });
+        send("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: `toolu_${Date.now()}`, name: "Bash", input: {} } });
+        send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(input) } });
         send("content_block_stop", { type: "content_block_stop", index: 0 });
         send("message_delta", { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 5 } });
         send("message_stop", { type: "message_stop" });
@@ -135,11 +157,19 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
         return;
       }
       // "webfetch <url>" and "websearch <query>" get that tool call first.
-      const webCall = isTurn && !answered && blocks.map((text) => /\bweb(fetch|search) (\S+)/.exec(text)).find(Boolean);
+      // "mcpfetch <url>" and "mcpsearch <query>" call Riff's web MCP server.
+      // "askuser" gets an AskUserQuestion tool call: a dialog in Claude's
+      // terminal, mid-turn, waiting for the host's answer.
+      const webCall = isTurn && !answered && blocks.map((text) => /\b(web|mcp)(fetch|search) (\S+)|\b(askuser)\b/.exec(text)).find(Boolean);
       if (webCall) {
-        const [name, input] = webCall[1] === "fetch"
-          ? ["WebFetch", { url: webCall[2], prompt: "What is this page's title?" }]
-          : ["WebSearch", { query: webCall[2] }];
+        const [, kind, what, arg, ask] = webCall;
+        const [name, input] = ask
+          ? ["AskUserQuestion", { questions: [{ question: "Which colour should the button be?", header: "Colour", multiSelect: false, options: [{ label: "Teal", description: "The room's accent" }, { label: "Plum", description: "Something new" }] }] }]
+          : kind === "mcp"
+          ? [`mcp__web__${what}`, what === "fetch" ? { url: arg } : { query: arg.replace(/\+/g, " "), max_results: 3 }]
+          : what === "fetch"
+            ? ["WebFetch", { url: arg, prompt: "What is this page's title?" }]
+            : ["WebSearch", { query: arg }];
         const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-cache" });
         send("message_start", { type: "message_start", message: { ...message, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } });

@@ -19,8 +19,9 @@ import { attachNetGatewayBrowser, type NetGatewayBrowserHandle } from "./netGate
 import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
 import { createRiffHook, promptKeystrokes, riffHookSettings, RIFF_HOOK_COMMAND } from "./claudeHooks";
-import { isInterruptKey, type ClaudeEvent } from "./queueRelease";
-import { RIFF_MODEL } from "./api";
+import { isAnswerKey, isInterruptKey, type ClaudeEvent } from "./queueRelease";
+import { RIFF_MODEL, riffModelsUrl } from "./api";
+import { deniedWebTools, WEB_MCP_PATH, WEB_MCP_SOURCE, webMcpServers } from "./webTools";
 import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } from "./imagePaste";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
@@ -28,6 +29,7 @@ import type { PodFiles } from "./boardForClaude";
 import { credentialFor, forgetCredentials, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
 import { GITHUB_MCP_ORIGIN, mcpServers, NO_MCP, serverName, type McpSettings } from "./mcp";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
+import { DetachableCommands, DETACH_COMMAND, detachingCommand, isDetach } from "./bashDetach";
 import { SESSION_ENV_FILE, SESSION_HOME, SESSION_HOSTNAME, SESSION_USER, sessionEnvScript, sessionHelperCommands, XTERM_TERMCAP } from "./sessionSystem";
 import { createPythonFetchHandler, isPythonFetch, PYTHON_FETCH_COMMAND, pythonLaunchers, pythonSessionFiles } from "./pythonCommand";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
@@ -254,6 +256,8 @@ export class ClaudePodController {
   private wasixAtPrompt = false;
   private wasixInterruptPending = false;
   private foregroundBridgeProcesses = new Map<number, (signal: number) => void>();
+  /** Claude's Bash commands that may return before their background jobs end (bashDetach.ts). */
+  private detachable = new DetachableCommands();
   private rawInput: { dispose: () => void } | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private fitTimers: number[] = [];
@@ -392,9 +396,10 @@ export class ClaudePodController {
   async boot() {
     if (this.pod) return;
     this.report("Loading Claude runtime");
-    const [shim, run, claude] = await Promise.all([
+    const [shim, run, webMcp, claude] = await Promise.all([
       fetchText("/claude/shim.cjs"),
       fetchText("/claude/run.cjs"),
+      fetchText(WEB_MCP_SOURCE),
       // Derived in-browser from the published npm tarball rather than served as
       // a prebuilt artifact; cached after the first cold boot.
       loadClaudeBundle({ report: this.report }),
@@ -449,18 +454,21 @@ export class ClaudePodController {
       files: {
         "/opt/claude/shim.cjs": shim,
         "/opt/claude/run.cjs": run,
+        [WEB_MCP_PATH]: webMcp,
         "/opt/claude/claude-booted.patched.js": claude,
         "/home/user/.claude.json": JSON.stringify({
           firstStartTime: new Date().toISOString(),
           hasCompletedOnboarding: true,
           projects: { "/work/repo": { hasTrustDialogAccepted: true } },
-          // The host's MCP servers for this room, tokens as placeholders.
-          mcpServers: mcp.servers,
+          // Riff's built-in web server (webTools.ts), then the host's MCP
+          // servers for this room, tokens as placeholders. Built-in names
+          // win, and stay through every Apply.
+          mcpServers: this.claudeMcpServers(webMcpServers(), mcp.servers),
         }),
         "/home/user/.claude/settings.json": JSON.stringify({
           showThinkingSummaries: true,
           verbose: true,
-          permissions: { defaultMode: "bypassPermissions" },
+          permissions: { defaultMode: "bypassPermissions", deny: deniedWebTools(this.config.baseUrl, riffModelsUrl()) },
           // The host chose this mode by hosting; without this Claude Code
           // asks on every boot, in red on everyone's mirror, with "No,
           // exit" as the default. The key its own dialog writes on accept
@@ -648,6 +656,7 @@ export class ClaudePodController {
     this.rawInput?.dispose();
     this.rawInput = xterm.onData((data: string) => {
       if (isInterruptKey(data)) this.onClaudeEvent({ event: "Interrupt" });
+      else if (isAnswerKey(data)) this.onClaudeEvent({ event: "AnswerKey" });
       process.write(data);
     });
     this.onClaudeEvent({ event: "Started" });
@@ -679,6 +688,21 @@ export class ClaudePodController {
     this.notifyResize();
     xterm.focus();
     this.report("Claude running");
+  }
+
+  private hostMcpNames = new Set<string>();
+
+  /**
+   * The one place Claude's whole `mcpServers` is put together: what's
+   * already there and the host didn't set (built-in servers such as `web`)
+   * stays and wins over a host server of the same name, the host's previous
+   * servers go, and the host's current ones (`mcpServers()` in mcp.ts) are
+   * added.
+   */
+  private claudeMcpServers(current: Record<string, unknown>, host: Record<string, unknown>) {
+    const builtIn = Object.fromEntries(Object.entries(current).filter(([name]) => !this.hostMcpNames.has(name)));
+    this.hostMcpNames = new Set(Object.keys(host).filter((name) => !(name in builtIn)));
+    return { ...host, ...builtIn };
   }
 
   /** Claude's mcpServers and the credentials behind their placeholders. */
@@ -722,7 +746,7 @@ export class ClaudePodController {
     const path = "/home/user/.claude.json";
     const volume = this.pod.volume;
     const config = volume.existsSync(path) ? JSON.parse(String(volume.readFileSync(path, "utf8"))) as Record<string, unknown> : {};
-    config.mcpServers = servers;
+    config.mcpServers = this.claudeMcpServers((config.mcpServers ?? {}) as Record<string, unknown>, servers);
     volume.writeFileSync(path, JSON.stringify(config, null, 2));
     if (!this.isRunning() || !this.process) return false;
     await this.restartClaude("Restarting Claude to load the MCP servers. The conversation carries on.");
@@ -734,18 +758,78 @@ export class ClaudePodController {
     const process = this.process;
     if (!process) return;
     const exited = this.claudeExited;
-    // Ctrl-U clears whatever is typed at Claude's prompt first.
-    process.write("\x15/exit\r");
-    const gone = await Promise.race([exited?.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10_000))]);
+    let gone = false;
+    void exited?.then(() => { gone = true; });
+    const until = (ms: number) => Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, ms))]);
+    // Ctrl-U clears whatever is typed at Claude's prompt first. A Claude
+    // that is still drawing itself (its hooks can say idle first) drops
+    // what's typed, so ask again every few seconds, then stop it outright.
+    const began = Date.now();
+    let how = "";
+    const ask = () => process.write("\x15/exit\r");
+    how = "/exit";
+    ask();
+    await until(2_000);
     if (!gone) {
-      process.kill?.();
-      await exited;
+      // Measured (8 Nov, under load): Claude says "See ya!" and then stays
+      // alive for as long as a background check it started is still
+      // running, typically its install-type probe, `npm config get
+      // prefix`, which can sit in "starting" for 15 s and more while
+      // Nodepod loads npm into a fresh worker. A Claude that has quit
+      // doesn't need it: stop its children, and it exits by itself.
+      const stopped = this.stopChildrenOf(process.pid);
+      if (stopped.length) {
+        how = `/exit, then its children (${stopped.join(", ")})`;
+        await until(4_000);
+      }
     }
+    for (let attempt = 1; attempt < 3 && !gone; attempt++) {
+      how = `/exit x${attempt + 1}`;
+      ask();
+      await until(4_000);
+    }
+    if (!gone) {
+      how = "SIGTERM";
+      process.kill("SIGTERM");
+      await until(4_000);
+    }
+    if (!gone) {
+      how = "SIGKILL";
+      process.kill("SIGKILL");
+      await until(4_000);
+    }
+    console.info(`[restart] Claude ${gone ? "stopped" : "still running"} after ${how}, ${Date.now() - began} ms`);
+    if (!gone) throw new Error("Claude didn't stop, so the MCP servers aren't applied yet. Interrupt it, then apply again.");
     this.terminalNote(`\x1b[38;5;244m${note}\x1b[0m`);
     const transcripts = "/home/user/.claude/projects/-work-repo";
     const volume = this.pod?.volume;
     const conversation = Boolean(volume?.existsSync(transcripts) && volume.readdirSync(transcripts).some((name) => String(name).endsWith(".jsonl")));
     await this.startClaude(conversation ? ["--continue"] : []);
+  }
+
+  /** Stops every live process below `pid`; returns what it stopped. */
+  private stopChildrenOf(pid: number | null) {
+    const manager = this.pod?.processManager;
+    if (!manager || pid === null) return [];
+    const live = manager.listProcesses().filter((entry) => entry.state !== "exited");
+    const below = new Set<number>([pid]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const entry of live) {
+        if (entry.parentPid !== undefined && below.has(entry.parentPid) && !below.has(entry.pid)) {
+          below.add(entry.pid);
+          grew = true;
+        }
+      }
+    }
+    below.delete(pid);
+    const stopped: string[] = [];
+    for (const entry of live) {
+      if (!below.has(entry.pid)) continue;
+      manager.kill(entry.pid, "SIGKILL");
+      stopped.push(entry.command.split(" ").slice(0, 4).join(" "));
+    }
+    return stopped;
   }
 
   /**
@@ -764,7 +848,16 @@ export class ClaudePodController {
       // stay in this tab; the app server never sees guest network plaintext.
       const channel = new MessageChannel();
       const certificateAuthority = createCertificateAuthority();
-      this.netGateway = attachNetGatewayBrowser(channel.port1, certificateAuthority);
+      // localhost in the session is the workspace's own servers (Nodepod's),
+      // so `curl localhost:PORT` reaches what the preview shows.
+      this.netGateway = attachNetGatewayBrowser(channel.port1, certificateAuthority, {
+        listening: (port) => [...this.previewServers.values()].some((server) => server.port === port),
+        request: async (port, init) => {
+          if (!this.pod) throw new Error("Workspace has not booted");
+          const response = await this.pod.request(port, init);
+          return { status: response.statusCode, headers: response.headers, body: new Uint8Array(response.body) };
+        },
+      });
       const session = await WasixSession.open({
         volume: this.pod!.volume,
         root: "/work/repo",
@@ -794,6 +887,7 @@ export class ClaudePodController {
         ["git", bridgeStubBytes],
         // Answered by the page itself (startBridge), not Nodepod.
         [PYTHON_FETCH_COMMAND, bridgeStubBytes],
+        [DETACH_COMMAND, bridgeStubBytes],
       ]));
       // One uutils 0.11.0 atom fetch, installed under each multicall name.
       // The shared-store write cost of repeated bytes is accepted for now;
@@ -898,18 +992,47 @@ export class ClaudePodController {
     try {
       const { session, bridge } = await this.ensureWasixSession();
       const cwd = request.cwd || session.root;
-      const result = await session.run(INTERACTIVE_BASH, this.bashArgsWithCd(cwd, request.args), {
+      const args = this.bashArgsWithCd(cwd, request.args);
+      if (args[0] === "-c" && args.length >= 2) args[args.length - 1] = detachingCommand(args[args.length - 1]);
+      // A command that started background jobs says so when it's done
+      // (bashDetach.ts): Claude gets its status then, and the exec stays
+      // running for the jobs, out of reach of this tool call's abort.
+      let detached = false;
+      let unregister = () => {};
+      let detach!: (status: number) => void;
+      const done = new Promise<{ code: number; detached: boolean }>((resolve) => {
+        detach = (status) => resolve({ code: status, detached: true });
+      });
+      const abort = new AbortController();
+      const forwardAbort = () => { if (!detached) abort.abort(); };
+      context.signal?.addEventListener("abort", forwardAbort, { once: true });
+      if (context.signal?.aborted) abort.abort();
+      const run = session.run(INTERACTIVE_BASH, args, {
           cwd,
           // Deliberately the WASIX base env, not arbitrary request.env overrides:
           // keep the bridge paths and composed tools available at shell startup.
           // Tokens already ride the base env (W5).
           env: this.wasixBaseEnv(bridge),
-          signal: context.signal,
+          signal: abort.signal,
+          onStart: (execId) => {
+            unregister = this.detachable.register(WasixSession.bridgeChannel(session.controlRoot, execId).guestRoot, detach);
+          },
           onOutput: (stream, chunk) => {
+            if (detached) return;
             if (stream === "stdout") context.writeStdout(chunk);
             else context.writeStderr(chunk);
           },
         });
+      const result = await Promise.race([run.then(({ code }) => ({ code, detached: false })), done]).finally(() => {
+        context.signal?.removeEventListener("abort", forwardAbort);
+      });
+      if (result.detached) {
+        detached = true;
+        report(`[bash] exited ${result.code}; its background jobs keep running`);
+        void run.catch(() => {}).finally(unregister);
+        return { exitCode: result.code };
+      }
+      unregister();
       // A tool timeout aborts via context.signal, which now SIGKILLs this one
       // command instead of tearing the session down. The command therefore
       // *completes*, with whatever exit code the kill produced, rather than
@@ -1061,8 +1184,9 @@ export class ClaudePodController {
     // preceding guest writes and Bash sees the tool's writes without a barrier.
     const nodepod = createBridgeHostHandler(pod, this.report, this.registerBridgeProcess);
     const pythonFetch = createPythonFetchHandler(session);
-    const handler: BridgeHostHandler = (request, output) =>
-      isPythonFetch(request) ? pythonFetch(request, output) : nodepod(request, output);
+    const handler: BridgeHostHandler = async (request, output) =>
+      isDetach(request) ? this.detachable.answer(request)
+        : isPythonFetch(request) ? pythonFetch(request, output) : nodepod(request, output);
     this.bridgeLoop = (async () => {
       try {
         await bridgeServeAll(bridge, handler);

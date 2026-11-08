@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type * as Y from "yjs";
 import type { QueuedPrompt, SentBy } from "./room";
 import type { TerminalPaneHandle } from "./TerminalPane";
-import { acknowledgesSend, canSend, CLAUDE_STATE_LABEL, isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease";
+import { acknowledgesSend, canSend, CLAUDE_STATE_LABEL, DIALOG_OPEN, hasDialog, isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease";
 
 /**
  * The host's side: follows Claude's events, publishes Claude's state to the
@@ -79,6 +79,15 @@ export function useQueueRelease({ facilitator, roomState, synced, terminalRef, q
   return { state, unacknowledged, dispatch, send, setAuto };
 }
 
+// What an empty queue says: true now, whatever went before (a queue that
+// has sent everything is as empty as one never used), and to whom it's
+// shown: the host is the one who queues, a participant is told who does.
+export function emptyQueue(facilitator: boolean, editable: boolean, auto: boolean) {
+  if (facilitator && !editable) return "Nothing queued.";
+  if (facilitator) return auto ? "Nothing queued. Auto is on: the next prompt you queue from staging goes to Claude when it's free." : "Nothing queued. Queue a prompt from staging.";
+  return auto ? "Nothing queued. Auto is on: the next prompt the host queues goes to Claude when it's free." : "Nothing queued. The host queues prompts from staging.";
+}
+
 export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostHere, ended = false, canSendNow, waiting = false, onSend, onDelete, onAuto }: {
   queued: QueuedPrompt[];
   facilitator: boolean;
@@ -101,8 +110,10 @@ export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostH
     ? "Waiting for Claude to take the last prompt"
     : canSendNow
     ? claudeState === "working" ? "Claude is working: this goes in as a follow-up" : "Send to Claude"
+    : hasDialog(claudeState) ? DIALOG_OPEN
     : claudeState === "starting" ? "Claude is still starting" : "Start Claude first";
-  const stateTitle = claudeState === "paused" ? "A turn was interrupted or failed, or a slash command ran: auto waits until Claude finishes a turn, or the host turns auto on again" : undefined;
+  const stateTitle = claudeState === "paused" ? "A turn was interrupted or failed, or a slash command ran: auto waits until Claude finishes a turn, or the host turns auto on again"
+    : hasDialog(claudeState) ? "Claude asked something in the host's terminal: nothing is sent until the host answers" : undefined;
   return (
     <article className="queue">
       <header className="section-title queue-heading">
@@ -123,7 +134,7 @@ export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostH
             {editable && <button onClick={() => onDelete(prompt.id)} aria-label="Remove queued prompt">&times;</button>}
           </div>
         ))}
-        {!queued.length && <p className="empty">{auto ? "Auto is on: the next prompt the host queues goes to Claude when it's free." : "The host hasn't queued anything yet."}</p>}
+        {!queued.length && <p className="empty">{emptyQueue(facilitator, editable, auto)}</p>}
       </div>
     </article>
   );

@@ -16,6 +16,14 @@
 // still be queued while a slow turn runs. "slow" prompts keep Claude busy
 // for a few seconds; one also checks a Send while Claude works.
 //
+// "Queued for the participant" means their queue showed it at all: a
+// recorder in their page keeps every prompt the queue has rendered. A slash
+// command queued with auto on leaves the queue within milliseconds and never
+// reaches the model, so polling the page missed it (measured: 2 runs in 3).
+// It can't tell a prompt the participant never rendered because add and
+// remove arrived in one update; that hasn't been seen.
+// DEBUG_QUEUE=1 prints how quickly each prompt showed.
+//
 //   RIFF_URL=http://127.0.0.1:8096 npm run test:queue-release-browser
 import assert from "node:assert/strict";
 import puppeteer from "puppeteer-core";
@@ -49,6 +57,8 @@ const PROMPTS = {
   rapidSecond: "Rapid, second: waits for Claude to take the first.",
   slow: "A slow one, so Claude is busy.",
   followUp: "A follow-up sent\nwhile Claude was busy.",
+  ask: "Ask the host (askuser) which colour to use.",
+  afterAsk: "After the host answered Claude's question.",
 };
 
 try {
@@ -83,6 +93,16 @@ try {
   await participant.click(".entry-card form .primary");
   await participant.waitForFunction(() => location.search.startsWith("?id="), { timeout: 10_000 });
 
+  // Every prompt the participant's queue has ever shown, however briefly:
+  // with auto on and Claude idle a prompt can leave the queue a moment after
+  // it arrives, quicker than polling the page can see.
+  await participant.evaluate(() => {
+    window.__queueSeen = new Set();
+    const record = () => document.querySelectorAll(".queue-row p").forEach((element) => window.__queueSeen.add(element.textContent));
+    new MutationObserver(record).observe(document.body, { childList: true, subtree: true, characterData: true });
+    record();
+  });
+  const seenQueued = (page) => page.evaluate(() => [...window.__queueSeen]);
   const stateOn = (page) => page.$eval(".claude-state", (element) => element.dataset.state).catch(() => null);
   const autoOn = (page) => page.$eval(".auto-release input", (element) => element.checked);
   const queuedTexts = (page) => page.$$eval(".queue-row p", (elements) => elements.map((element) => element.textContent));
@@ -115,7 +135,9 @@ try {
       [...document.querySelectorAll(".prompt-card")].find((card) => card.querySelector("textarea")?.value === value).querySelector("footer button").click();
     }, text);
     // With auto on and Claude idle it may go before the participant sees it queued.
-    await until(async () => (await queuedTexts(participant)).includes(text) || fake.count(text) > 0, `"${text}" queued for the participant`, 10_000);
+    const t0 = Date.now();
+    await until(async () => (await seenQueued(participant)).includes(text), `"${text}" queued for the participant`, 10_000);
+    if (process.env.DEBUG_QUEUE) console.log(`"${text}": seen by the participant after ${Date.now() - t0} ms; polled now: ${(await queuedTexts(participant)).includes(text)}, at the model: ${fake.count(text)}`);
   };
   await queue(PROMPTS.manual);
   await queue(PROMPTS.autoFirst);
@@ -208,17 +230,69 @@ try {
   const sendFirst = () => host.evaluate(() => document.querySelector(".queue-row .send-prompt").click());
   await sendFirst();
   await until(async () => (await stateOn(participant)) === "working", "the participant to see Claude working", 10_000);
+  // Send stays disabled until Claude has taken the slow prompt (the room
+  // shows "working" as soon as it's sent); a click before that does nothing.
+  if (process.env.DEBUG_QUEUE) console.log(`follow-up Send disabled when the participant saw working: ${await host.$eval(".queue-row .send-prompt", (button) => button.disabled)}`);
+  await until(() => host.$eval(".queue-row .send-prompt", (button) => !button.disabled), "Send enabled while Claude works", 10_000);
   await sendFirst();
-  await until(() => fake.count(PROMPTS.followUp) === 1, "the follow-up to reach the model", 30_000);
+  await until(() => fake.count(PROMPTS.followUp) === 1, "the follow-up to reach the model", 30_000).catch(async (error) => {
+    console.log({
+      host: await stateOn(host),
+      queued: await queuedTexts(host),
+      turns: fake.turns.slice(-3).map((turn) => ({ blocks: turn.blocks.map((block) => block.slice(0, 80)), toolResult: turn.toolResult })),
+      screen: (await screen()).slice(-1200),
+    });
+    throw error;
+  });
   await until(async () => (await stateOn(participant)) === "idle", "Claude idle at the end", 15_000);
+
+  // A dialog mid-turn: Claude asks the host a question (AskUserQuestion).
+  // Keys typed now answer it, so a Send would go into the dialog (measured:
+  // the prompt was lost and the first option chosen). Send is off and says
+  // why, auto waits, and the room sees Claude asking. The host answers in
+  // the terminal; when the turn ends, auto sends the next.
+  await queue(PROMPTS.ask);
+  await sendFirst();
+  await until(async () => (await stateOn(participant)) === "asking", "the participant to see Claude asking", 20_000);
+  await until(async () => /Which colour should the button be\?/.test(await screen()), "the question on the host's screen", 10_000);
+  await queue(PROMPTS.afterAsk);
+  const sendButton = () => host.$eval(".queue-row .send-prompt", (button) => ({ disabled: button.disabled, title: button.title }));
+  assert.deepEqual(await sendButton(), { disabled: true, title: "Claude is asking something in the terminal. Answer it first." });
+  assert.equal(await participant.$eval(".claude-state", (element) => element.textContent), "Claude is asking the host");
+  await host.click(".auto-release input");
+  await until(() => autoOn(participant), "the participant to see auto on", 10_000);
+  await sleep(2_000);
+  assert.equal(fake.count(PROMPTS.afterAsk), 0, "auto waits while Claude asks");
+  assert.deepEqual(await queuedTexts(host), [PROMPTS.afterAsk]);
+  await host.click(".terminal-target .xterm");
+  await host.keyboard.press("Enter");
+  await until(() => fake.count(PROMPTS.afterAsk) === 1, "auto to send once the question was answered and the turn ended", 30_000);
+  const toolResults = fake.requests.flatMap((request) => JSON.parse(request.text))
+    .flatMap((message) => Array.isArray(message.content) ? message.content : [])
+    .filter((block) => block.type === "tool_result")
+    .map((block) => typeof block.content === "string" ? block.content : JSON.stringify(block.content));
+  assert.ok(toolResults.some((text) => /Which colour[\s\S]*Teal/.test(text)), `the host's answer reached the model: ${JSON.stringify(toolResults)}`);
+  assert.ok(!toolResults.some((text) => text.includes("After the host")), "no prompt went into the dialog");
+  await until(async () => (await stateOn(participant)) === "idle", "Claude idle after the question", 15_000);
 
   // Every prompt exactly once, and nothing else asked of the model.
   await sleep(3_000);
   const counts = Object.fromEntries(Object.entries(PROMPTS).map(([key, text]) => [key, fake.count(text)]));
   console.log(JSON.stringify({ counts, turns: fake.turns.length }));
   for (const [key, count] of Object.entries(counts)) assert.equal(count, 1, `${key} reached the model ${count} times`);
-  assert.equal(fake.turns.length, Object.keys(PROMPTS).length, "one turn per prompt");
+  assert.equal(fake.turns.filter((turn) => !turn.toolResult).length, Object.keys(PROMPTS).length, "one turn per prompt (the question's answer is a tool result)");
   assert.deepEqual(await queuedTexts(participant), []);
+  // Everything was sent: the empty queue says so to each in their role,
+  // not that nothing was ever queued.
+  const emptyText = (page, selector) => page.$eval(selector, (element) => element.textContent);
+  const auto = await autoOn(host);
+  assert.equal(await emptyText(host, ".queue-list .empty"), auto
+    ? "Nothing queued. Auto is on: the next prompt you queue from staging goes to Claude when it's free."
+    : "Nothing queued. Queue a prompt from staging.");
+  assert.equal(await emptyText(participant, ".queue-list .empty"), auto
+    ? "Nothing queued. Auto is on: the next prompt the host queues goes to Claude when it's free."
+    : "Nothing queued. The host queues prompts from staging.");
+  assert.match(await emptyText(participant, ".staging .empty"), /^Nothing staged yet\. Type a prompt above, or select something with text on the board/);
   await participantContext.close();
   assert.deepEqual(pageErrors, []);
   console.log("Queue release smoke passed: Send and auto each delivered every prompt once, newlines intact.");

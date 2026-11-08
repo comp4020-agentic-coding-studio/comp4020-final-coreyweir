@@ -34,7 +34,7 @@ README, PROCESS.md and the reflections are mine to write.
 |---|---|---|
 | [0001](docs/adr/0001-the-terminal-mirror-is-not-persisted.md) | The terminal mirror stays in server memory and is never persisted | Yes (today's behaviour) |
 | [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
-| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import. 4 MB per room, pruning from 70% of the volume | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`), size cap and pruning (`f512b5a`, `7d27daa`), 18 Oct; local copies, export and import (`4e17a8f`, `65ba779`), 19 Oct; workspace export and import, 8 Nov |
+| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import. 4 MB per room, pruning from 70% of the volume | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`), size cap and pruning (`f512b5a`, `7d27daa`), 18 Oct; local copies, export and import (`4e17a8f`, `65ba779`), 19 Oct; workspace export and import, 8 Nov; reopening (`290514b`, `99d743a`), leaving and deleting (`f890f56`, `c055309`), 8 Nov; the board as a PNG (`287cec3`), 9 Nov. Not built: images out of the board document |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | Yes (8 Nov, hooks fallback) |
 | [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes (`389ffff`, `4acb32b`; push token in the client 18 Oct) |
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
@@ -42,6 +42,8 @@ README, PROCESS.md and the reflections are mine to write.
 | [0008](docs/adr/0008-your-rooms-invites-and-colleagues.md) | Your rooms (members' and invited rooms only, live over a websocket), host-only invites by GitHub id, colleagues you keep; the room state half of 0003 | Yes (`a0bee0f`, `ef1401f`, `7e6023e`, `79a008f`, 18 Oct) |
 | [0009](docs/adr/0009-riffs-own-free-models-for-hosts.md) | Hosts can use Riff's own free models (OpenRouter), through a host-only proxy on our server; the key never leaves the server | Yes (`e2ad15b`, `dc88e22`) |
 | [0010](docs/adr/0010-the-hosts-workspace-persists-in-opfs.md) | The host's workspace persists in this browser (OPFS), one per room; the room's repository is cloned at boot | Yes (`16ee967`, `50bec09`, `b77233a`), 8 Nov |
+| [0011](docs/adr/0011-the-preview-gets-its-own-origin.md) | Every member's preview loads from its room's own origin (`<label>.preview.airiff.tech`), never Riff's (2a); 2b, the host's preview served from its own pod again, designed | Partly: 2a (`72e9e84`, `a5a63f6`, `a748ad7`), 8 Nov; 2b not built |
+| [0012](docs/adr/0012-mcp-servers-for-the-hosts-claude.md) | The host can give Claude GitHub's MCP server and custom MCP servers, per room; tokens as placeholders, each sent only to its own server; Apply restarts Claude with `--continue` | Yes (`25f7cbf`, `395e666`, `6c3fafb`, `f4df1d7`), 9 Nov |
 
 ## Work, in order
 
@@ -339,8 +341,10 @@ auto-release at the latest.
   (`7e6023e`). Checked by `spec/rooms.test.ts` (live), `npm run test:rooms`,
   `npm run test:rooms-browser` (dev, both sizes).
   - Left: one real GitHub account inviting another on live.
-  - The OPFS column ("this browser still has the workspace") comes with
-    OPFS. Never a public directory.
+  - ~~The OPFS column ("this browser still has the workspace") comes with
+    OPFS. Never a public directory.~~ Built with OPFS (8 Nov): a hosted
+    room's row says "Files: ..." and offers Export files and Delete files
+    (see "Redesign the landing page" below).
 - **Room lifecycle** (ADR 0003):
   - ~~room records: state, the host's last-seen time, and a permanent id
     beside the join code~~ (the columns exist since P1.4);
@@ -393,6 +397,12 @@ auto-release at the latest.
   fields only, images byte for byte and checked (type, magic bytes,
   2048px, decodes). Checked by `npm run test:board-file` and
   `npm run test:boards-browser` (dev and live, both sizes).
+  - ~~The board as a picture~~ (Corey, 9 Nov; ADR 0003's "The board as a
+    picture"): every "Export board" is now "Export board (JSON)" with
+    "Export board (PNG)" after it, `riff-<code>-board.png`, drawn from the
+    room's document by quickdraw's own export, so a row renders from the
+    stored copy. Checked by `test:boards-browser` (dev, both sizes). Needs
+    live.
   - ~~Workspace export, a zip including Claude transcripts, never
     credentials.~~ Built 8 Nov (ADR 0003's third amendment): a host-only
     "Export" in the workspace controls, `app/src/workspaceExport.ts`
@@ -452,8 +462,8 @@ auto-release at the latest.
     runs, on dev and live, with the workspace off too (the smoke types at
     20 ms a key; `TYPE_DELAY=0` reproduces).
   - Left: a reload mid-task with Claude itself on live, by hand, and on a
-    real phone; the "Your rooms" marker (above) once that list wants it, through
-    `listWorkspaces()`; Nodepod's `attachSharedStore` drops file modes
+    real phone; ~~the "Your rooms" marker (above) once that list wants it, through
+    `listWorkspaces()`~~ (the merged list has it); Nodepod's `attachSharedStore` drops file modes
     (worked around with `reapplyModes`, belongs in the fork); WASIX
     bash's `chmod` doesn't reach the store; a crash (rather than a reload)
     is unmeasured.
@@ -485,9 +495,17 @@ auto-release at the latest.
     the room's state arrived, and Yjs kept the old page's value); the page
     now publishes only once synced. After a reload Claude starts a new
     session: the turn that was running is gone, though its transcript is in
-    the saved `/home/user/.claude`. Not handled: a Send typed while Claude
-    shows a dialog mid-turn (a question or plan approval) goes into the
-    dialog; Claude's `Notification` hook could tell Riff about one.
+    the saved `/home/user/.claude`.
+  - Dialogs mid-turn (9 Nov): a Send while Claude asked a question or
+    showed a permission prompt went into the dialog. Now hooks
+    (`PermissionRequest`, `Elicitation`, a late `Notification`) mark Claude
+    as asking: Send is off and says why, auto waits, the room sees
+    "Claude is asking the host"; an answer's `PostToolUse`, Esc, or the
+    turn's end clear it, and since a No to a permission prompt fires no
+    hook, the host's answer key does (ADR 0004). Checked by
+    `test:queue-release` and a question step in
+    `test:queue-release-browser`. Left: live, and a real permission prompt
+    or plan approval through the room (measured only on a bare controller).
 - ~~**Images into the host's Claude**~~ (8 Nov, `d07ddcc`). xterm reads
   only text from the clipboard, so a pasted screenshot did nothing. Claude
   Code 2.1.221 attaches an image itself when its absolute path is pasted
@@ -730,7 +748,42 @@ auto-release at the latest.
   (the guest is uid 0 already) would be cheap, but it pretends, so it's a
   call for Corey.
 
-- **MCP servers for the host's Claude** (ADR 0012; Corey, 9 Nov). An
+- ~~**Web search and page reading for the host's Claude**~~ (versatility;
+  done 9 Nov, Corey's call). Claude Code's WebFetch fetches from the host's
+  browser, so CORS refuses most sites (measured: example.com and Wikipedia
+  fail, raw.githubusercontent.com works), and its WebSearch is a provider
+  server tool. Rejected: Claude Code's remote-session web routes (an own
+  endpoint like the course's LiteLLM wouldn't serve them) and provider
+  server tools (Anthropic's `web_fetch`, OpenRouter's): the room would have
+  no evidence a fetch happened. Built: `app/public/claude/web-mcp.mjs`, a
+  dependency-free JavaScript port of Corey's duckduckgo-jina-mcp, written
+  into the pod at boot and started by Claude Code as a user-scoped stdio
+  MCP server (`~/.claude.json`, `app/src/webTools.ts`). `search` reads
+  DuckDuckGo's HTML results through Jina Reader and `fetch` reads a page
+  through it (12,000 characters); Jina allows any origin, so both work from
+  the browser, and each shows in the terminal as a tool call. The URL or
+  query goes to Jina (and DuckDuckGo); Jina's free tier is about 20
+  requests a minute per IP, the host's. On Riff's models WebSearch is
+  denied (ADR 0009). Checks: `npm run test:web-mcp` (8 tests: parsing,
+  adverts, redirect links, errors, the cut, MCP replies, stdio framing,
+  who loses WebSearch; red with the y.js advert rule or the deny removed);
+  `npm run test:web-mcp-browser` (fake API, real Jina: tools offered,
+  WebSearch not, real results and example.com come back through r.jina.ai
+  from the browser; red with no tools listed, no deny, redirects
+  unresolved, or fetching without Jina). Claude Code connects MCP servers
+  in the background: a prompt sent in the first second or so after Claude
+  starts may not be offered the tools. Tool results are plain text (a
+  numbered list, the page's markdown), not JSON, since verbose mode shows
+  them on everyone's mirror. Measured on dev with Riff's real free model
+  (Nemotron 3 Ultra), unprompted: "search the web for…" called `search`
+  and answered with the right GitHub URL; "read <Wikipedia page>" called
+  `fetch` (a site WebFetch can't read from the browser) and quoted its
+  first sentence. It sits beside the host's own MCP servers (ADR 0012) as
+  a built-in: `web` is written at boot, a host's Apply keeps it, and a host
+  server named `web` doesn't replace it (`test:mcp-browser` checks it's in
+  the config at boot and connected in `/mcp` after Apply). Left: live.
+
+- ~~**MCP servers for the host's Claude**~~ (ADR 0012; Corey, 9 Nov). An
   "MCPs" button in the host's terminal controls: GitHub's MCP server (read
   only or read and write, toolsets), then custom servers (name, https URL,
   one header). Tokens as `mcp` placeholders, each sent only to its server's
@@ -742,14 +795,33 @@ auto-release at the latest.
   the placeholder in Claude's config, the refusal path, Apply on a running
   Claude carrying the conversation, and the dialog at W x H; with
   `GITHUB_TOKEN` set, GitHub's tools listed (27 read only, 44 read and
-  write with the default toolsets). Next: custom servers.
+  write with the default toolsets). Custom servers done 9 Nov: the same
+  smoke runs a local mock MCP server (its token swapped in only for it, no
+  placeholder ever leaving the browser, one credential per server), one
+  that refuses its token (an MCP notice naming it), Jina's open server
+  when reachable (12 tools), the form's checks, and Apply straight after
+  Claude starts (which hung once: Claude drops an /exit typed while it is
+  still drawing; Apply now asks again, then stops it). `npm run test:mcp`
+  checks the form's rules and the config.
+  - The name `web` is reserved too (`f4df1d7`), for a built-in web server
+    that isn't on main yet; entries the host didn't set survive Apply.
+- ~~**WebFetch from the host's browser**~~ (8 Nov; `c764e16`,
+  `db0bd77`). Every WebFetch failed with "check failed": Claude Code first
+  asks claude.ai whether the domain is blocked, and CORS refuses that from
+  a browser. `skipWebFetchPreflight` in Claude's settings skips it. The
+  fetch itself leaves from the host's browser, so CORS decides what it can
+  read: a site that allows any origin is read, one that doesn't is a
+  "Network Error", and Jina Reader (`r.jina.ai`) reads either. Checked by
+  `npm run test:webfetch-browser` (dev, needs the internet, the fake model
+  calling WebFetch). Not measured: WebSearch with Riff's free models.
 
 ### P3: if there's time
-- **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own
+- ~~**A mode with no API key.**~~ Decided 19 Oct (ADR 0009): Riff's own
   OpenRouter key behind a host-only proxy on our server. OpenCode Zen is
   out: measured 19 Oct, its free models answer 403 `FreeTierError` to
-  anything but OpenCode itself. Being built now, ahead of the rest of P2,
-  because without it a marker with no key can't see Claude work.
+  anything but OpenCode itself. Built 19 Oct, ahead of the rest of P2,
+  because without it a marker with no key can't see Claude work
+  (`e2ad15b` server, `dc88e22` client; the form's wording `2d50df1`, 8 Nov).
 - ~~**Send the board, or a selection, to Claude**~~ (week-12 #5; built
   8 Nov, Corey's design). A host-only button on the board, "Send board to
   Claude" ("Send selected shape(s) to Claude" with a selection), writes
