@@ -1542,6 +1542,17 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       room.roomState.set("previewGeneration", generation);
     });
   }
+  // A host page that opens has no preview yet, whatever the last one
+  // published: a page that closes (End room, a crash, a reload) can't clear
+  // the flag, and participants would frame a preview nobody serves. Once,
+  // after the page has the server's copy, as the queue does for Claude's
+  // state (QueuePanel.tsx).
+  const previewCleared = useRef(false);
+  useEffect(() => {
+    if (!facilitator || room.full || !room.controlSynced || previewCleared.current) return;
+    previewCleared.current = true;
+    if (!preview && room.roomState.get("previewLive") === true) room.roomState.set("previewLive", false);
+  }, [facilitator, preview, room.controlSynced, room.full, room.roomState]);
 
   if (room.shutOut) {
     return <RoomClosed reason={room.shutOut} roomId={roomId} />;
