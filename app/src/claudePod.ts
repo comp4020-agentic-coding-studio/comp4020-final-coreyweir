@@ -874,6 +874,14 @@ export class ClaudePodController {
     };
   }
 
+  /** The workspace as a zip (workspaceExport.ts). The real tokens are passed
+   * only so the export can check none of them travelled. */
+  async exportWorkspace(options: Omit<import("./workspaceExport").ExportOptions, "secrets"> = {}) {
+    if (!this.pod) throw new Error("Workspace has not booted");
+    const { exportWorkspace, podSource } = await import("./workspaceExport");
+    return exportWorkspace(podSource(this.pod), { ...options, secrets: [this.config.token, this.config.githubToken ?? ""] });
+  }
+
   private notifyResize() {
     if (!this.terminal) return;
     const cols = this.terminal.xterm.cols || 80;
