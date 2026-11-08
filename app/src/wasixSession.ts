@@ -164,6 +164,11 @@ function osc133BashRc(root: string): string {
     // outside the mounted workspace. Children were unaffected, which is why
     // this survived the original session implementation.
     `cd ${shellSingleQuote(root)}`,
+    // One stream to the terminal, as a pty gives: stdout and stderr reach the
+    // page through separate pipes with no order between them, so readline's
+    // prompt and echo (stderr) overtook command output (stdout) mid-escape
+    // and garbled the screen.
+    "exec 2>&1",
     "__riff_osc133() { printf '\\033]133;%s\\007' \"$1\"; }",
     "PS0='\\[\\033]133;C\\007\\]'",
     "PROMPT_COMMAND='__riff_osc133 \"D;$?\"'",
