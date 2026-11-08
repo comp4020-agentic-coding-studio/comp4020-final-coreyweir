@@ -6,7 +6,7 @@ import { canSend, type ClaudeState } from "./queueRelease";
 import {
   type Access, ApiError, createRoom, currentUser, deleteRoomFromServer, endRoom, enterRoom, leaveRoom, reopenRoom, storedSecret, storedSecrets, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
   acceptInvite, addColleague, cancelInvite, declineInvite, inviteToRoom, listColleagues, removeColleague, watchRooms,
-  type Colleagues, type EndedRoom, type ListedRoom, type RoomInfo, type RoomList,
+  type Colleagues, type EndedRoom, type ListedRoom, type RoomInfo, type RoomList, type RoomState,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
   RIFF_MODEL_ENV, riffModelsAvailable, riffModelsUrl,
 } from "./api";
@@ -87,6 +87,8 @@ function boardFate(keep: boolean) {
 }
 
 function megabytes(bytes: number) {
+  // a board with a few notes would read "0 MB", as if it held nothing
+  if (bytes > 0 && bytes < 0.005 * 1024 * 1024) return "under 0.01 MB";
   return `${(bytes / 1024 / 1024).toFixed(bytes < 1024 * 1024 ? 2 : 1).replace(/\.0+$/, "")} MB`;
 }
 
@@ -1107,22 +1109,28 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, h
   return (
     <section className="crit-room" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
       {/* A participant's terminal stops asking once the room ends; a new one starts if the host revives it. Never remount the host's: it runs Claude. */}
-      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} onPodReady={onPodReady} onBootStatus={onBootStatus} />
+      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} claudeState={facilitator ? release.state : undefined} ended={ended} onPodReady={onPodReady} onBootStatus={onBootStatus} />
       <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} ended={ended} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
     </section>
   );
 }
 
-function PreviewView({ roomId, previewKey, previewOrigin, live, generation, facilitator, preview }: {
+function PreviewView({ roomId, previewKey, previewOrigin, live: published, roomState, generation, facilitator, preview }: {
   roomId: string;
   previewKey: string;
   previewOrigin: string;
   live: boolean;
+  roomState: RoomState;
   generation: number;
   facilitator: boolean;
   preview: { url: string; revision: number } | null;
 }) {
   const [reload, setReload] = useState(0);
+  // The flag is the host's page's to clear, and a page that closes (End
+  // room, a crash) can't. Away or ended, the relay has no host to ask, so
+  // a participant's frame would only show the relay's refusal.
+  const gone = !facilitator && roomState !== "live";
+  const live = published && !gone;
   // Both roles load the room's preview origin (docs/adr/0011), so the frame
   // may keep its own storage (allow-same-origin) without reaching Riff's.
   const source = live && generation > 0 ? previewFrameUrl(previewOrigin, roomId, previewKey, generation) : null;
@@ -1130,7 +1138,7 @@ function PreviewView({ roomId, previewKey, previewOrigin, live, generation, faci
     <section className="preview-pane">
       <header className="preview-heading"><div><h2>Preview</h2><span className={live ? "live" : "offline"}><i></i>{live ? "Live" : "Not live"}</span></div>{source && <nav className="preview-actions"><button onClick={() => setReload((value) => value + 1)}>Refresh</button>{facilitator && <a href={source} target="_blank" rel="noreferrer">Open in new tab</a>}</nav>}</header>
       {source ? <iframe className="preview-frame" key={`${generation}:${preview?.revision ?? 0}:${reload}`} src={source} title="Workspace preview" sandbox="allow-forms allow-modals allow-scripts allow-same-origin" /> : <div className="preview-empty">
-        {live ? <><span className="preview-icon live-icon"></span><h3>Preview is connecting</h3><p>Waiting for the facilitator's preview relay.</p></> : <><span className="preview-icon"></span><h3>No preview yet</h3><p>Start a development server in the workspace to show it here.</p></>}
+        {gone ? <><span className="preview-icon"></span><h3>{roomState === "ended" ? "The room has ended" : "The host is away"}</h3><p>{roomState === "ended" ? "The preview stopped with it." : "The preview comes back when they do."}</p></> : live ? <><span className="preview-icon live-icon"></span><h3>Preview is connecting</h3><p>{facilitator ? "Waiting for the workspace's server." : "Waiting for the host's browser."}</p></> : <><span className="preview-icon"></span><h3>No preview yet</h3><p>{facilitator ? "Start a server in the workspace (ask Claude, or use Bash) and it shows here." : "When the host's workspace runs a server, it shows here."}</p></>}
       </div>}
     </section>
   );
@@ -1536,6 +1544,17 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       room.roomState.set("previewGeneration", generation);
     });
   }
+  // A host page that opens has no preview yet, whatever the last one
+  // published: a page that closes (End room, a crash, a reload) can't clear
+  // the flag, and participants would frame a preview nobody serves. Once,
+  // after the page has the server's copy, as the queue does for Claude's
+  // state (QueuePanel.tsx).
+  const previewCleared = useRef(false);
+  useEffect(() => {
+    if (!facilitator || room.full || !room.controlSynced || previewCleared.current) return;
+    previewCleared.current = true;
+    if (!preview && room.roomState.get("previewLive") === true) room.roomState.set("previewLive", false);
+  }, [facilitator, preview, room.controlSynced, room.full, room.roomState]);
 
   if (room.shutOut) {
     return <RoomClosed reason={room.shutOut} roomId={roomId} />;
@@ -1560,11 +1579,17 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       {facilitator && bootStatus && view !== "room" && (
         <p className="room-banner booting" role="status">Starting Claude for the room: {bootStatus}. <button className="link" onClick={() => setView("room")}>Watch</button></p>
       )}
+      {/* A reload (or Claude exiting) leaves Claude off, and only the Room
+          view used to say so. Not in a full room: it doesn't publish
+          Claude's state, and has its own banner. */}
+      {facilitator && hostConfig && !bootStatus && !room.full && room.controlSynced && room.claudeState === "off" && view !== "room" && (
+        <p className="room-banner booting claude-off" role="status">Claude isn't running in this tab, so queued prompts and Send board wait. <button className="link" onClick={() => terminalRef.current?.startClaude()}>Start Claude</button></p>
+      )}
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
         {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} stageWhy={"why" in stageable ? stageable.why : null} sendBoard={facilitator ? sendBoard : undefined} prompts={room.promptSnapshots.length} />}
         {sendBoard.dialog}
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} terminalRef={terminalRef} onPodReady={setPodReady} onBootStatus={setBootStatus} />
-        {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
+        {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} roomState={room.state} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}
         {panel === "share" && room.state !== "ended" && <SharePanel access={access} room={room} onClose={() => setPanel(null)} />}

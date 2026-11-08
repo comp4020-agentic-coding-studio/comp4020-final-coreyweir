@@ -21,12 +21,13 @@ import { Osc133Parser } from "./osc133";
 import { createRiffHook, promptKeystrokes, riffHookSettings, RIFF_HOOK_COMMAND } from "./claudeHooks";
 import { isInterruptKey, type ClaudeEvent } from "./queueRelease";
 import { RIFF_MODEL, riffModelsUrl } from "./api";
-import { deniedWebTools, WEB_MCP_PATH, WEB_MCP_SOURCE, webMcpServers } from "./webTools";
+import { deniedWebTools, WEB_MCP_PATH, WEB_MCP_SOURCE, withWebMcp } from "./webTools";
 import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } from "./imagePaste";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
 import type { PodFiles } from "./boardForClaude";
-import { credentialFor, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
+import { credentialFor, forgetCredentials, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
+import { GITHUB_MCP_ORIGIN, mcpServers, NO_MCP, serverName, type McpSettings } from "./mcp";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
 import { SESSION_ENV_FILE, SESSION_HOME, SESSION_HOSTNAME, SESSION_USER, sessionEnvScript, sessionHelperCommands, XTERM_TERMCAP } from "./sessionSystem";
 import { createPythonFetchHandler, isPythonFetch, PYTHON_FETCH_COMMAND, pythonLaunchers, pythonSessionFiles } from "./pythonCommand";
@@ -96,7 +97,7 @@ const WASINIX_COREUTILS_NAMES = ["env", "stat", "du", "id", "timeout", "chmod", 
 // models, docs/adr/0009). Never a credential: those go through
 // credentialFor() so only a placeholder reaches the guest.
 // workspaceRoom: the room whose saved workspace this pod opens (docs/adr/0010).
-export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string; env?: Record<string, string>; workspaceRoom?: string };
+export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string; env?: Record<string, string>; workspaceRoom?: string; mcp?: McpSettings };
 export type PreviewRequest = { method?: string; path?: string; headers?: Record<string, string>; body?: Uint8Array | null };
 export type PreviewResponse = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
 /**
@@ -225,6 +226,11 @@ export class ClaudePodController {
   private modelCredential: Credential | null = null;
   private githubCredential: Credential | null = null;
   private stopServingCredentials: (() => void) | null = null;
+  /** Every credential the page answers for; MCP ones change on applyMcp. */
+  private servedCredentials: Credential[] = [];
+  /** The MCP servers' credentials, by server name (docs/adr/0012). */
+  private mcpCredentials = new Map<Credential, string>();
+  private claudeExited: Promise<void> | null = null;
   // This room's workspace, saved in the browser (docs/adr/0010); null when
   // it can't be (no OPFS) and the reason why.
   private workspace: Workspace | null = null;
@@ -416,10 +422,16 @@ export class ClaudePodController {
     const github = this.config.githubToken ? credentialFor("github", this.config.githubToken, GITHUB_ORIGINS) : null;
     this.modelCredential = model;
     this.githubCredential = github;
-    this.stopServingCredentials = serveCredentials(
-      github ? [model, github] : [model],
-      (credential) => this.onCredentialRefused(credential === github ? "github" : "model"),
-    );
+    const mcp = this.mcpConfig(this.config.mcp ?? NO_MCP);
+    this.mcpCredentials = mcp.credentials;
+    this.servedCredentials = [model, ...(github ? [github] : []), ...mcp.credentials.keys()];
+    this.stopServingCredentials = serveCredentials(this.servedCredentials, (credential) => {
+      // An MCP server's refusal is that server's news, never the GitHub
+      // reconnect flow, even when it's GitHub's MCP with the same token.
+      const server = this.mcpCredentials.get(credential);
+      if (server) this.onNotice(`The MCP server "${server}" refused its token. Check it in MCPs.`);
+      else this.onCredentialRefused(credential === github ? "github" : "model");
+    });
     if (new URL(this.config.baseUrl).hostname === "api.anthropic.com") env.ANTHROPIC_API_KEY = model.placeholder;
     else env.ANTHROPIC_AUTH_TOKEN = model.placeholder;
     if (github) {
@@ -445,8 +457,9 @@ export class ClaudePodController {
           firstStartTime: new Date().toISOString(),
           hasCompletedOnboarding: true,
           projects: { "/work/repo": { hasTrustDialogAccepted: true } },
-          // Web search and page reading that work from the browser (webTools.ts).
-          mcpServers: webMcpServers(),
+          // Riff's built-in web server and the host's MCP servers for this
+          // room, tokens as placeholders.
+          mcpServers: mcp.servers,
         }),
         "/home/user/.claude/settings.json": JSON.stringify({
           showThinkingSummaries: true,
@@ -618,7 +631,7 @@ export class ClaudePodController {
     this.fitTimers = [0, 100, 300].map((delay) => window.setTimeout(() => this.terminal?.fit(), delay));
   }
 
-  async startClaude() {
+  async startClaude(args: string[] = []) {
     if (!this.pod || !this.terminal) throw new Error("Terminal has not been attached");
     if (this.isRunning()) return;
     await this.waitForTerminalIdle();
@@ -630,7 +643,7 @@ export class ClaudePodController {
     terminal.writeln("");
     terminal.writeln(launchMessage);
     this.emitOutput(`\r\n${launchMessage}\r\n`);
-    const process = await this.pod.spawn("node", ["/opt/claude/run.cjs"], { cwd: "/work/repo" });
+    const process = await this.pod.spawn("node", ["/opt/claude/run.cjs", ...args], { cwd: "/work/repo" });
     this.process = process;
 
     const internal = terminal as unknown as TerminalInternals;
@@ -655,7 +668,10 @@ export class ClaudePodController {
     };
     process.on("output", write);
     process.on("error", write);
+    let exited = () => {};
+    this.claudeExited = new Promise((resolve) => { exited = resolve; });
     process.on("exit", () => {
+      exited();
       if (this.process !== process) return;
       this.process = null;
       this.onClaudeEvent({ event: "Exited" });
@@ -667,6 +683,75 @@ export class ClaudePodController {
     this.notifyResize();
     xterm.focus();
     this.report("Claude running");
+  }
+
+  /** Claude's mcpServers and the credentials behind their placeholders. */
+  private mcpConfig(settings: McpSettings) {
+    const credentials = new Map<Credential, string>();
+    const githubToken = this.config.githubToken;
+    // GitHub's MCP takes the host's GitHub token, as its own credential:
+    // only GitHub's MCP origin, and its refusals aren't GitHub's.
+    const github = settings.github.on && githubToken ? credentialFor("mcp", githubToken, [GITHUB_MCP_ORIGIN]) : null;
+    if (github) credentials.set(github, "github");
+    const servers = mcpServers(settings, github, (entry) => {
+      let origin: string;
+      try {
+        origin = new URL(entry.url).origin;
+      } catch {
+        return null;
+      }
+      const credential = credentialFor("mcp", entry.value, [origin]);
+      credentials.set(credential, serverName(entry.name));
+      return credential.placeholder;
+    });
+    // The one place Claude's mcpServers are made, at boot and on Apply:
+    // Riff's web server is always there, whatever the host adds.
+    return { servers: withWebMcp(servers), credentials };
+  }
+
+  /**
+   * Use these MCP settings from now on. Claude reads its MCP servers only
+   * when it starts (measured on 2.1.221: a server written into
+   * ~/.claude.json while it runs never shows in /mcp), so a running Claude
+   * is restarted with --continue, which keeps the conversation (6.5 s on
+   * dev). Returns whether it restarted Claude.
+   */
+  async applyMcp(settings: McpSettings): Promise<boolean> {
+    this.config = { ...this.config, mcp: settings };
+    if (!this.pod) return false;
+    const { servers, credentials } = this.mcpConfig(settings);
+    const old = [...this.mcpCredentials.keys()];
+    this.servedCredentials.splice(0, this.servedCredentials.length,
+      ...this.servedCredentials.filter((credential) => !this.mcpCredentials.has(credential)), ...credentials.keys());
+    this.mcpCredentials = credentials;
+    await forgetCredentials(old.map((credential) => credential.placeholder));
+    const path = "/home/user/.claude.json";
+    const volume = this.pod.volume;
+    const config = volume.existsSync(path) ? JSON.parse(String(volume.readFileSync(path, "utf8"))) as Record<string, unknown> : {};
+    config.mcpServers = servers;
+    volume.writeFileSync(path, JSON.stringify(config, null, 2));
+    if (!this.isRunning() || !this.process) return false;
+    await this.restartClaude("Restarting Claude to load the MCP servers. The conversation carries on.");
+    return true;
+  }
+
+  /** Exit Claude as /exit does, then start it again on the same conversation. */
+  private async restartClaude(note: string) {
+    const process = this.process;
+    if (!process) return;
+    const exited = this.claudeExited;
+    // Ctrl-U clears whatever is typed at Claude's prompt first.
+    process.write("\x15/exit\r");
+    const gone = await Promise.race([exited?.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10_000))]);
+    if (!gone) {
+      process.kill?.();
+      await exited;
+    }
+    this.terminalNote(`\x1b[38;5;244m${note}\x1b[0m`);
+    const transcripts = "/home/user/.claude/projects/-work-repo";
+    const volume = this.pod?.volume;
+    const conversation = Boolean(volume?.existsSync(transcripts) && volume.readdirSync(transcripts).some((name) => String(name).endsWith(".jsonl")));
+    await this.startClaude(conversation ? ["--continue"] : []);
   }
 
   /**
