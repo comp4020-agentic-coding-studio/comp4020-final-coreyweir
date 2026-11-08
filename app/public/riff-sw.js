@@ -138,10 +138,13 @@ async function tellRefused(placeholders) {
 }
 
 self.addEventListener("message", (event) => {
-  // A host tab that stops (dispose, sign-out) drops its values here too.
+  // A host tab that stops (dispose, sign-out) drops its values here too, and
+  // so does one whose value changed (GitHub reconnected): the next request
+  // asks the page again. The reply says the old value is gone.
   if (event.data?.type !== "riff-credential-forget") return;
   event.stopImmediatePropagation();
   for (const placeholder of event.data.placeholders ?? []) credentials.delete(placeholder);
+  event.ports[0]?.postMessage(true);
 });
 
 // Registered before Nodepod's handler, so it runs first. Requests without a

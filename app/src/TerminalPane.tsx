@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { WorkspaceExport } from "./WorkspaceExport";
+import { forgetPushToken, onPushTokenStored, unwrapPushToken } from "./api";
 import { Terminal } from "@xterm/xterm";
 import type { ClaudePodController, HostConfig } from "./claudePod";
 import type { ClaudeEvent } from "./queueRelease";
@@ -129,6 +130,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const [attached, setAttached] = useState(false);
   const [outputSize, setOutputSize] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // GitHub refused the host's token; connecting again in another tab swaps
+  // the new one into the running pod (no reload, Claude keeps running).
+  const [githubRefused, setGithubRefused] = useState(false);
   const [mirrorMode, setMirrorMode] = useState<MirrorMode>(savedMirrorMode);
   const channel = useTerminalChannel(roomId, token, facilitator);
   const publishPreview = usePreviewHostChannel(roomId, token, facilitator, controllerRef);
@@ -155,6 +159,22 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   useEffect(() => {
     if (facilitator) previewChangeRef.current(null, publishPreview(false));
   }, [facilitator, publishPreview]);
+
+  useEffect(() => {
+    if (!githubRefused) return;
+    return onPushTokenStored(() => {
+      void (async () => {
+        const token = await unwrapPushToken();
+        const controller = controllerRef.current;
+        if (!token || !controller) return;
+        const swapped = await controller.replaceGitHubToken(token);
+        setGithubRefused(false);
+        setError(swapped
+          ? "GitHub connected again: git uses the new token from now on, nothing restarted."
+          : "GitHub connected again. Boot Claude again to give it the new token.");
+      })().catch((failure) => setError(`GitHub connected, but Riff couldn't open the token: ${String(failure)}`));
+    });
+  }, [githubRefused]);
 
   // The relay accepted this page as host, maybe after a restart that lost
   // its snapshot: forget what was last sent, so the next tick sends one even
@@ -208,9 +228,15 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
               channel.publishData(pending, cols, rows);
             }, 16);
           },
-          (kind) => setError(kind === "github"
-            ? "GitHub refused your token (expired or revoked), so git can't reach GitHub. Connect GitHub again in host setup, then start Claude again."
-            : "Your model endpoint refused your token (expired or revoked). Check it in host setup."),
+          (kind) => {
+            if (kind === "github") {
+              // GitHub said the stored token is dead: drop it, so connecting
+              // again starts from nothing and the next boot doesn't reuse it.
+              forgetPushToken();
+              setError(null);
+              setGithubRefused(true);
+            } else setError("Your model endpoint refused your token (expired or revoked). Check it in host setup.");
+          },
         );
         controller.onClaudeEvent = (event) => claudeEventRef.current?.(event);
         controller.onNotice = setError;
@@ -263,6 +289,12 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       </div>
       <footer className="terminal-note">
         <span>{facilitator ? "Terminal output is shared with everyone in this room. Only you can type or approve actions." : "Read-only mirror of the host's terminal. Only the host types or approves actions."}</span>
+        {githubRefused && (
+          <strong>
+            GitHub refused your token (expired or revoked), so git can't reach GitHub.{" "}
+            <a href="/?github=reconnect" target="_blank" rel="noopener">Connect GitHub again</a> in a new tab: Claude keeps running here and git picks the new token up.
+          </strong>
+        )}
         {(error || channel.error) && <strong>{error ?? channel.error}</strong>}
       </footer>
     </article>

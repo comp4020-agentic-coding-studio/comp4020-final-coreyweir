@@ -235,6 +235,35 @@ function GitHubPush({ user, beforeLeaving, back }: { user: User | null | undefin
   );
 }
 
+// Opened in its own tab from a room whose GitHub token was refused, so the
+// room's tab (and the Claude running in it) stays put. Connecting here
+// stores the sealed token; the room's tab hears it (a storage event) and
+// swaps it in without a reload (TerminalPane).
+function GitHubReconnect() {
+  const user = useUser();
+  const [connected, setConnected] = useState(hasPushToken);
+  useEffect(() => {
+    const onStorage = () => setConnected(hasPushToken());
+    window.addEventListener("storage", onStorage);
+    const timer = setInterval(onStorage, 1000);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      clearInterval(timer);
+    };
+  }, []);
+  return (
+    <main className="landing">
+      <section className="entry-card">
+        <h2>Connect GitHub again</h2>
+        <p>{connected
+          ? "Connected. Your room's tab is using it already: git there can reach GitHub again, with nothing restarted. You can close this tab."
+          : "GitHub refused the token Riff had for you. Connect again here; your room keeps running in its own tab and picks the new token up by itself."}</p>
+        {!connected && <GitHubPush user={user} back="/?github=reconnect" />}
+      </section>
+    </main>
+  );
+}
+
 // The rooms list as the server keeps it, live (docs/adr/0008).
 function useRoomList() {
   const [list, setList] = useState<RoomList | null>(null);
@@ -1385,6 +1414,7 @@ export default function App() {
   if (params.has("poc")) return <main className="poc-blank" />;
   const copy = params.get("copy");
   if (copy) return <CopyView database={copy} />;
+  if (params.get("github") === "reconnect") return <GitHubReconnect />;
   const roomId = params.get("id")?.replace(/[^\w-]/g, "").slice(0, 64) || null;
   const code = params.get("room")?.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 16).toUpperCase() || null;
   if (!roomId && !code) return <Landing />;

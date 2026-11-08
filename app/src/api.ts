@@ -285,6 +285,15 @@ export function hasPushToken() {
   return localStorage.getItem(PUSH_KEY) !== null;
 }
 
+/** Calls back when another tab of this browser stores a new push token. */
+export function onPushTokenStored(callback: () => void): () => void {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === PUSH_KEY && event.newValue) callback();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => window.removeEventListener("storage", onStorage);
+}
+
 export function forgetPushToken() {
   localStorage.removeItem(PUSH_KEY);
 }
