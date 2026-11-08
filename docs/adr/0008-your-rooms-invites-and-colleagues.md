@@ -1,6 +1,7 @@
 # 8. Your rooms, invites by GitHub username, and colleagues
 
-- Status: accepted, implemented 2026-10-18 (see Implementation)
+- Status: accepted, implemented 2026-10-18 (see Implementation); amended
+  2026-11-08: a host's ended rooms and Reopen, leaving and deleting (ADR 0003)
 - Date: 2026-10-18
 
 ## Context
@@ -48,6 +49,8 @@ The landing page gets a "Your rooms" card:
 - (8 Nov) A member takes a room off their list by leaving it, and a host
   by deleting it from the server; the code or an invite brings a leaver
   back as the same member. See ADR 0003's "Leaving and deleting".
+- (8 Nov) A host's ended rooms stay on their list (the last 10, up to 30
+  days), marked Ended, with Reopen. See ADR 0003's "Reopening".
 
 ### Room state, the server half of ADR 0003
 

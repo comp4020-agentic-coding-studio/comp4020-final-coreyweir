@@ -107,6 +107,14 @@ Where what was built differs from the decision above, or adds to it:
   reply's status and bytes (`model.request status=200 times=N bytes=B`), so
   a 429 shows up. Never what was asked or answered. Refusals are logged as
   denials, like any other.
+- **The web (8 Nov), for every host, not only on these models.** WebFetch
+  works from the host's browser once Claude skips its claude.ai domain
+  check (`skipWebFetchPreflight`, `c764e16`); CORS decides which sites it
+  can read (`npm run test:webfetch-browser`, with the fake model). WebFetch hands
+  the page to Claude's small model (seen with the fake model), which on
+  these models is Lightning. Not measured: a real WebFetch or WebSearch turn on
+  Riff's models. A built-in web server for Claude is not on main yet (its
+  MCP name, `web`, is reserved, ADR 0012).
 
 ## Consequences
 

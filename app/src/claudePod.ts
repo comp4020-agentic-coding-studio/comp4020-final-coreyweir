@@ -29,6 +29,7 @@ import type { PodFiles } from "./boardForClaude";
 import { credentialFor, forgetCredentials, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
 import { GITHUB_MCP_ORIGIN, mcpServers, NO_MCP, serverName, type McpSettings } from "./mcp";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
+import { DetachableCommands, DETACH_COMMAND, detachingCommand, isDetach } from "./bashDetach";
 import { SESSION_ENV_FILE, SESSION_HOME, SESSION_HOSTNAME, SESSION_USER, sessionEnvScript, sessionHelperCommands, XTERM_TERMCAP } from "./sessionSystem";
 import { createPythonFetchHandler, isPythonFetch, PYTHON_FETCH_COMMAND, pythonLaunchers, pythonSessionFiles } from "./pythonCommand";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
@@ -255,6 +256,8 @@ export class ClaudePodController {
   private wasixAtPrompt = false;
   private wasixInterruptPending = false;
   private foregroundBridgeProcesses = new Map<number, (signal: number) => void>();
+  /** Claude's Bash commands that may return before their background jobs end (bashDetach.ts). */
+  private detachable = new DetachableCommands();
   private rawInput: { dispose: () => void } | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private fitTimers: number[] = [];
@@ -796,7 +799,16 @@ export class ClaudePodController {
       // stay in this tab; the app server never sees guest network plaintext.
       const channel = new MessageChannel();
       const certificateAuthority = createCertificateAuthority();
-      this.netGateway = attachNetGatewayBrowser(channel.port1, certificateAuthority);
+      // localhost in the session is the workspace's own servers (Nodepod's),
+      // so `curl localhost:PORT` reaches what the preview shows.
+      this.netGateway = attachNetGatewayBrowser(channel.port1, certificateAuthority, {
+        listening: (port) => [...this.previewServers.values()].some((server) => server.port === port),
+        request: async (port, init) => {
+          if (!this.pod) throw new Error("Workspace has not booted");
+          const response = await this.pod.request(port, init);
+          return { status: response.statusCode, headers: response.headers, body: new Uint8Array(response.body) };
+        },
+      });
       const session = await WasixSession.open({
         volume: this.pod!.volume,
         root: "/work/repo",
@@ -826,6 +838,7 @@ export class ClaudePodController {
         ["git", bridgeStubBytes],
         // Answered by the page itself (startBridge), not Nodepod.
         [PYTHON_FETCH_COMMAND, bridgeStubBytes],
+        [DETACH_COMMAND, bridgeStubBytes],
       ]));
       // One uutils 0.11.0 atom fetch, installed under each multicall name.
       // The shared-store write cost of repeated bytes is accepted for now;
@@ -930,18 +943,47 @@ export class ClaudePodController {
     try {
       const { session, bridge } = await this.ensureWasixSession();
       const cwd = request.cwd || session.root;
-      const result = await session.run(INTERACTIVE_BASH, this.bashArgsWithCd(cwd, request.args), {
+      const args = this.bashArgsWithCd(cwd, request.args);
+      if (args[0] === "-c" && args.length >= 2) args[args.length - 1] = detachingCommand(args[args.length - 1]);
+      // A command that started background jobs says so when it's done
+      // (bashDetach.ts): Claude gets its status then, and the exec stays
+      // running for the jobs, out of reach of this tool call's abort.
+      let detached = false;
+      let unregister = () => {};
+      let detach!: (status: number) => void;
+      const done = new Promise<{ code: number; detached: boolean }>((resolve) => {
+        detach = (status) => resolve({ code: status, detached: true });
+      });
+      const abort = new AbortController();
+      const forwardAbort = () => { if (!detached) abort.abort(); };
+      context.signal?.addEventListener("abort", forwardAbort, { once: true });
+      if (context.signal?.aborted) abort.abort();
+      const run = session.run(INTERACTIVE_BASH, args, {
           cwd,
           // Deliberately the WASIX base env, not arbitrary request.env overrides:
           // keep the bridge paths and composed tools available at shell startup.
           // Tokens already ride the base env (W5).
           env: this.wasixBaseEnv(bridge),
-          signal: context.signal,
+          signal: abort.signal,
+          onStart: (execId) => {
+            unregister = this.detachable.register(WasixSession.bridgeChannel(session.controlRoot, execId).guestRoot, detach);
+          },
           onOutput: (stream, chunk) => {
+            if (detached) return;
             if (stream === "stdout") context.writeStdout(chunk);
             else context.writeStderr(chunk);
           },
         });
+      const result = await Promise.race([run.then(({ code }) => ({ code, detached: false })), done]).finally(() => {
+        context.signal?.removeEventListener("abort", forwardAbort);
+      });
+      if (result.detached) {
+        detached = true;
+        report(`[bash] exited ${result.code}; its background jobs keep running`);
+        void run.catch(() => {}).finally(unregister);
+        return { exitCode: result.code };
+      }
+      unregister();
       // A tool timeout aborts via context.signal, which now SIGKILLs this one
       // command instead of tearing the session down. The command therefore
       // *completes*, with whatever exit code the kill produced, rather than
@@ -1093,8 +1135,9 @@ export class ClaudePodController {
     // preceding guest writes and Bash sees the tool's writes without a barrier.
     const nodepod = createBridgeHostHandler(pod, this.report, this.registerBridgeProcess);
     const pythonFetch = createPythonFetchHandler(session);
-    const handler: BridgeHostHandler = (request, output) =>
-      isPythonFetch(request) ? pythonFetch(request, output) : nodepod(request, output);
+    const handler: BridgeHostHandler = async (request, output) =>
+      isDetach(request) ? this.detachable.answer(request)
+        : isPythonFetch(request) ? pythonFetch(request, output) : nodepod(request, output);
     this.bridgeLoop = (async () => {
       try {
         await bridgeServeAll(bridge, handler);

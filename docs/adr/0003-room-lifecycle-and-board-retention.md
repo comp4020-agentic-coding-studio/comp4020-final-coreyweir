@@ -3,7 +3,9 @@
 - Status: accepted; lifecycle, keeping and End room implemented 2026-10-18;
   pruning and the size cap decided and implemented 2026-10-18; local copies,
   export and import decided and implemented 2026-10-19; workspace export
-  decided and implemented 2026-11-08 (amendments below)
+  and import, reopening, leaving and deleting decided and implemented
+  2026-11-08; the board as a picture 2026-11-09 (amendments below). Not
+  built: images out of the board document (option C)
 - Date: 2026-10-12
 
 ## Context
@@ -408,7 +410,8 @@ Option C, chosen to follow, and to be built with export, which has to
 package images anyway: the browser uploads each image once, the server
 stores it on the volume, and the board holds a reference. Server memory per
 room is then strokes and text, and the cap becomes a disk limit. Until then,
-4 MB is the price of keeping images inline (ADR 0002).
+4 MB is the price of keeping images inline (ADR 0002). (Still not built,
+9 Nov: export went ahead with the images inline in the board file.)
 
 ### The case for the options we didn't pick
 

@@ -1073,6 +1073,22 @@ function selectedText(store: ReturnType<typeof useQuickdrawStore>, selected: str
   return { why: worded.length ? `${STAGE_ONE}: ${worded.length} shapes with text are selected; select one.` : `${STAGE_ONE}: no text in the selection.` };
 }
 
+/**
+ * selectedText, kept current as the board changes: a sticky written and
+ * left with Esc stays selected, and only the store says its text arrived.
+ */
+function useSelectedText(store: ReturnType<typeof useQuickdrawStore>, selected: string[]) {
+  const [, setVersion] = useState(0);
+  const current = selectedText(store, selected);
+  const key = JSON.stringify(current);
+  const last = useRef(key);
+  last.current = key;
+  useEffect(() => store.listen(() => {
+    if (JSON.stringify(selectedText(store, selected)) !== last.current) setVersion((version) => version + 1);
+  }), [store, selected]);
+  return current;
+}
+
 function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, stageWhy, sendBoard, prompts }: {
   store: ReturnType<typeof useQuickdrawStore>;
   /** How many prompts are staged, for the phone's way down to them. */
@@ -1553,7 +1569,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
   }, [notice]);
 
   // "Stage selected text": the words of exactly one shape that has some.
-  const stageable = selectedText(store, selected);
+  const stageable = useSelectedText(store, selected);
   function stageSelected() {
     const chosen = selectedText(store, selected);
     if ("text" in chosen) addPrompt(room.doc, room.identity.name, chosen.text, chosen.id);

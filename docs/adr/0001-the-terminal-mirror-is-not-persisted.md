@@ -65,8 +65,9 @@ The durable record of what happened lives elsewhere, and is safer:
   (from crit 10) a server-side log of who sent and released what.
 - **What changed:** the host's commits, pushed to the host's own repo.
 - **The session itself:** Claude Code's own session files, in the host's
-  filesystem. Once the workspace persists to the host's OPFS (planned), a
-  host who comes back can resume from their own device. The session stays
+  filesystem. Once the workspace persists to the host's OPFS (planned;
+  built 2026-11-08, ADR 0010, transcripts included), a host who comes back
+  can resume from their own device. The session stays
   with the person whose session it was.
 
 ## Consequences
