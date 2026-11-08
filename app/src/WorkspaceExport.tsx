@@ -49,7 +49,9 @@ function Summary({ name, bytes, manifest }: { name: string; bytes: number; manif
   );
 }
 
-export function WorkspaceExport({ getController }: { getController: () => ClaudePodController | null }) {
+// ready: the workspace has booted. The controller exists from the moment
+// booting starts, so it can't be the test: an export then has no files yet.
+export function WorkspaceExport({ getController, ready }: { getController: () => ClaudePodController | null; ready: boolean }) {
   const [open, setOpen] = useState(false);
   const [transcripts, setTranscripts] = useState(true);
   const [dependencies, setDependencies] = useState(false);
@@ -58,7 +60,6 @@ export function WorkspaceExport({ getController }: { getController: () => Claude
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ name: string; bytes: number; manifest: Manifest } | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const ready = getController() !== null;
 
   useEffect(() => {
     if (!open) return;
@@ -93,7 +94,7 @@ export function WorkspaceExport({ getController }: { getController: () => Claude
 
   return (
     <>
-      <button ref={opener} disabled={!ready} title={ready ? "Download the workspace as a zip" : "Boot the workspace first"} onClick={() => setOpen(true)}>Export</button>
+      <button ref={opener} disabled={!ready} title={ready ? "Download the workspace as a zip" : "There's a workspace to export once Claude or Bash has started"} onClick={() => setOpen(true)}>Export</button>
       {/* In the body, not here: the terminal header's own styles would reach it. */}
       {open && createPortal(
         <div className="ws-export-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) close(); }}>

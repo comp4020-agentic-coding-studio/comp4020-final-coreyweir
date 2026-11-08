@@ -97,6 +97,11 @@ try {
       await host.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((b) => b.textContent === "Start Bash")?.click());
       await host.waitForFunction(() => /WASIX Bash ready/.test(document.querySelector(".terminal-heading")?.textContent ?? ""), { timeout: 180_000 });
     };
+    // While it boots there's a controller but no files yet: still off.
+    await host.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((b) => b.textContent === "Start Bash")?.click());
+    // The controller reports from inside its boot, so by then it exists.
+    await host.waitForFunction(() => /Loading Claude runtime|Downloading/.test(document.querySelector(".terminal-heading")?.textContent ?? ""), { timeout: 30_000, polling: 50 });
+    assert.equal(await (await exportButton()).evaluate((b) => b.disabled), true, say("nothing to export while the workspace boots"));
     await startBash();
     assert.equal(await (await exportButton()).evaluate((b) => b.disabled), false, say("Export is on once it has booted"));
 
@@ -254,7 +259,7 @@ try {
     await guest.waitForFunction(() => location.search.startsWith("?id="), { timeout: 15_000 });
     await guest.evaluate(() => [...document.querySelectorAll(".topbar nav button")].find((b) => b.textContent === "Room")?.click());
     await guest.waitForSelector(".terminal-pane");
-    assert.equal(await guest.$$eval(".terminal-controls button, .ws-export", (els) => els.length), 0, say("a participant has no export"));
+    assert.equal(await guest.$$eval(".terminal-controls button:not(.mirror-mode), .ws-export", (els) => els.length), 0, say("a participant has no export"));
     await guestContext.close();
 
     // ---- end the room, so a live run leaves nothing behind
