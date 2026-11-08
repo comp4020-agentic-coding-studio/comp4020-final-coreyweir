@@ -274,10 +274,18 @@ loads. With the switch on, `test:preview-origin-browser` (hostile page,
 both roles, both sizes) stays green: the bridge gives the frame nothing of
 Riff's.
 
-**Not measured:** real Vite's hot reload through the bridge (Vite 6
-started from Bash in the pod exits at once today, through its CLI or its
-API, which is a separate problem; the socket the smoke uses is the same
-path Vite's client takes); Firefox and Safari (whether they let the
+**Real Vite, measured later the same morning** (dev, Chromium, with
+the coordinator's fix for Vite exiting at once from Bash: the bridge
+handler ended every bridged process's stdin, and Vite exits on stdin's
+end): `npm run dev` (Vite 6.4.5) stays up; through the bridge the frame
+logs `[vite] connected.` and, after main.js changes, `[vite] hot updated:
+/main.js` with a marker on the window kept (no reload);
+`npm run test:preview-bridge-vite-browser`. The same run found Vite 6
+refusing every relayed request, 2a's path included ("Blocked request.
+This host (undefined) is not allowed"): neither the relay nor the bridge
+passed a Host. The host page now addresses the preview's server as
+`localhost:<port>`. With the relay, Vite's page loads but its socket
+can't connect (no hot reload), as designed. **Not measured:** Firefox and Safari (whether they let the
 cross-site frame register a worker; if not, the fallback should apply);
 a worker Chrome stops after ~30 s idle and restarts mid-session; live
 (https, `airiff.tech`, fly). Mutation: removing the `event.source` check

@@ -1322,7 +1322,12 @@ export class ClaudePodController {
 
   async requestPreview(init: PreviewRequest): Promise<PreviewResponse> {
     if (!this.pod || !this.activePreview) throw new Error("Preview is offline");
-    const response = await this.pod.request(this.activePreview.port, init);
+    // The preview's server sees itself addressed as localhost, as it would
+    // from a browser on the same machine: neither the relay nor the bridge
+    // passes the preview origin's Host on, and Vite 6 refuses a request
+    // without an allowed Host ("Blocked request. This host (undefined)").
+    const headers = { ...init.headers, host: `localhost:${this.activePreview.port}` };
+    const response = await this.pod.request(this.activePreview.port, { ...init, headers });
     return {
       status: response.statusCode,
       headers: response.headers,
