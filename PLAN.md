@@ -518,6 +518,28 @@ auto-release at the latest.
     (nodepod riff.46: the fallbacks run only under real Node).
     `test:wasix-claude-bash-browser` fails on any `node:` request (red on
     riff.45). Not yet looked at on live: the address bar itself.
+  - **Typing into the host's Bash stalls** (found by the workspace smokes,
+    above; open). Measured on dev, 8 Nov: not `$(...)` as such. With
+    typing at 0 ms a key, `$(...)`, `$((...))` and bridged commands inside
+    substitutions ran 40 rounds without a stall; a stall needs a child
+    process finishing (or a signal arriving) while keys are arriving. In
+    runs of 8 to 25 typed lines, each after a background job that ends
+    mid-typing: `(sleep 0.3) &` stalled 3 of 14 runs, a `kill -USR1 $$`
+    from one 3 of 4, `kill -WINCH $$` 1 of 3. The workspace UI smoke at `TYPE_DELAY=0`
+    stalled 4 of 6 runs on main and 2 of 6 with the session folder moved
+    out of the workspace, so moving it didn't fix this. In a stall the last
+    keystroke the session worker took is never acknowledged, the worker
+    answers no message at all for 40 s+, and Ctrl+C can't reach it; paused
+    with the debugger, its thread is blocked in `memory.atomic.wait32` under
+    a `std::sync::Mutex::lock` in the Wasmer SDK. So the stall is
+    a deadlock inside wasmer-js, between the worker's stdin write (it
+    runs the TTY on that thread) and the process finishing or being signalled
+    (hypothesis: one lock the TTY and process-exit or signal paths both
+    take). It loses the whole shell, not a keystroke. Fixing it means
+    rebuilding the wasmer-js fork with symbols to name the lock (the shipped
+    `.wasm` has no names section). A mitigation that needs no fork change,
+    not yet tried: take the TTY's stdin copy off the worker thread that
+    services messages, or type a whole line at once (the queue's Send can).
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own
