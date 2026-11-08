@@ -434,6 +434,12 @@ export class ClaudePodController {
       ...this.config.env,
       DISABLE_AUTOUPDATER: "1",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      // Claude 2.1.221 otherwise runs `npm config get prefix` at start to
+      // see how it was installed, then shows everyone "Installed via npm
+      // (deprecated) · run claude install" (Riff installs it, and that
+      // command can't run here). The probe is also the child that kept a
+      // Claude that had said goodbye alive on an MCP restart.
+      DISABLE_INSTALLATION_CHECKS: "1",
       SHELL: "bash",
       // Claude snapshots its parent PATH and restores it inside Bash. Include
       // the session's bridge stubs before that snapshot can be generated.
