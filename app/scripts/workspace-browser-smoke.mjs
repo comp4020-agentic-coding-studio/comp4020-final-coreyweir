@@ -250,7 +250,7 @@ try {
   }, room);
   const rows = await listed();
   console.log("listed", JSON.stringify(rows));
-  assert.ok(rows.some((row) => /WSUI/.test(row) && /Files: \d+ \(/.test(row)), "the room's row says this browser has its files");
+  assert.ok(rows.some((row) => /WSUI/.test(row) && /Files: [^(]+\(\d/.test(row)), "the room's row says this browser has its files");
   assert.ok(await other.$eval(".workspace-note", (n) => n.textContent.includes("Not saved: /tmp")), "the list says what is saved");
   // "Delete files" takes the workspace and leaves the board copy
   await clickIn("WSUI", "Delete files");
