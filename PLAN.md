@@ -724,7 +724,9 @@ auto-release at the latest.
   host loses hot reload and its app's sockets, and round-trips. **Next
   (2b):** a service worker on the preview origin that forwards the host's
   frame's requests to its own Nodepod by `postMessage`, so the host's
-  preview is local again.
+  preview is local again. Designed, not built (ADR 0011, "2b"): about
+  4–6 h, after measuring that Chrome lets the sandboxed cross-site frame's
+  worker control its navigations.
 - **Phone hosts and the 5-minute grace.** Android suspends background tabs,
   and how soon may vary by device and settings. Worth measuring on the
   Pixel before settling on 5 minutes; not urgent.

@@ -1,6 +1,6 @@
 # 11. The preview gets its own origin
 
-- Status: accepted (2a built; 2b next)
+- Status: accepted (2a built; 2b designed, not built)
 - Date: 2026-11-08
 
 ## Context
@@ -171,3 +171,72 @@ Participants never had either.
   preview's credentialed fetch (the smoke's host is a guest, and CORS hides
   the answer either way); the server's Origin check and the cookie's
   SameSite cover it.
+
+## 2b: designed, not built (8 Nov, night)
+
+Stopped before building, to keep 2a's guarantees intact this close to the
+deadline. Estimate: 4 to 6 hours including the smoke, with two unmeasured
+risks (below). The design, so it can be picked up:
+
+- **What the host's frame loads.** `previewFrameUrl` gives the host
+  `<preview origin>/__riff_preview__/host.html` (participants keep the
+  relay URL). That page, and `/__riff_preview__/sw.js` and `helper.js`,
+  are Riff's code, served by the node server on the preview host with
+  COEP `require-corp` and CORP `cross-origin`, with Riff's origin written
+  in, and `Service-Worker-Allowed: /` on the worker. Nothing else is added
+  to a preview host: still no app, API, cookie or socket of Riff's.
+- **Bootstrap.** `host.html` registers the worker at scope `/`, opens a
+  `MessageChannel`, and posts one end to `parent` with `targetOrigin` set
+  to Riff's origin. The host page accepts it only when `event.origin` is
+  this room's preview origin and `event.source` is its own preview frame's
+  `contentWindow`; it keeps that port and answers on it. `host.html`
+  passes the other end to the worker, then `location.replace("/")`.
+- **The port's protocol** is the relay's own: `request` in, `response`
+  out, answered by `controller.requestPreview` against the active preview
+  port only. So the frame reaches exactly what any member's relay URL
+  reaches, nothing of the host page's: no tokens, no storage, no other
+  calls. A preview that is down answers 502, as the relay does.
+- **The worker's lifetime.** Chrome stops an idle worker after about 30 s
+  and its port goes with it. On a fetch with no port, a navigation gets
+  `host.html?next=<url>` again (it reconnects and reloads to `next`); a
+  subresource asks its own client for a port (`clients.get(clientId)`),
+  which the injected `helper.js` gets from `parent` the same way, then
+  waits a few seconds before answering 503. A frame navigating before the
+  worker is active is the same case: `host.html` only moves on once
+  `navigator.serviceWorker.ready` has an active worker holding a port.
+- **HTML from the pod** gets `<script src="/__riff_preview__/helper.js">`
+  first in `<head>`. `helper.js` replaces `WebSocket` for URLs on
+  localhost names *and* the preview's own host (so Vite's first socket
+  works, and an app's `location.host` socket too), over its own port to
+  `parent`. The host page turns those into Nodepod's `nodepod-ws`
+  `BroadcastChannel` messages (`ws-connect`, `ws-send`, `ws-close`, and
+  back `ws-open`, `ws-message`, `ws-closed`, `ws-error`), forcing the port
+  to the active preview's. Those need the pod's `instanceId` and its
+  per-instance `wsBridgeToken`, which live in Nodepod's internal
+  `RequestProxy._instances`, not a public API: the riskiest part to
+  maintain.
+- **Shared worker, shared origin.** Host and participants of a room in the
+  same browser share the preview origin, and so the worker. It leaves
+  alone every request under `/room-preview/` and every request from a
+  client whose URL is under it, so a participant's frame always goes to
+  the relay. "Open in new tab" keeps the relay URL: a top-level tab is in
+  another storage partition, with no worker and no parent.
+- **Fallback.** If `host.html` can't register the worker (a browser that
+  blocks third-party workers) or no port arrives within ~8 s, the host
+  page loads the relay URL instead, as 2a does now.
+- **Not a new hole.** A Claude-written page on the preview origin can
+  unregister the worker, or register one of its own (from a relay path,
+  scoped under it); either stays on the preview origin, and the port still
+  only answers preview requests. Stripping `Service-Worker-Allowed` from
+  relayed responses would keep a pod's worker to its own path.
+
+**Unmeasured, measure first:** (1) that Chrome lets a cross-site iframe
+sandboxed `allow-scripts allow-same-origin` register a (partitioned)
+worker that then controls the frame's own navigations, and (2) whether
+Firefox and Safari allow it at all, or take the fallback. **Checks to
+build with it:** the hostile-page smoke stays green for both roles;
+`host.html` refuses to talk to a parent that isn't Riff, and the host page
+ignores messages from any other window or origin; a smoke with Vite in
+the host's workspace showing `[vite] hot updated` and an app socket on
+`location.host`, both through the bridge, for the host, while the
+participant's frame still goes through the relay.
