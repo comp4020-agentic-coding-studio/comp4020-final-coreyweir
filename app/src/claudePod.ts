@@ -85,6 +85,14 @@ const WASINIX_COREUTILS_NAMES = ["env", "stat", "du", "id", "timeout", "chmod"] 
 export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string; env?: Record<string, string> };
 export type PreviewRequest = { method?: string; path?: string; headers?: Record<string, string>; body?: Uint8Array | null };
 export type PreviewResponse = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
+/**
+ * What git says when the host hasn't connected GitHub: in Riff, the token
+ * comes from the host page, never from setting GITHUB_TOKEN (docs/adr/0007).
+ * Nodepod's git reaches GitHub only through its API with a token, public
+ * repositories included.
+ */
+const NO_GITHUB_HINT = "This room's host hasn't connected GitHub, so git can't reach GitHub, even for public repositories. The host can connect it in Riff's host setup and start Claude again.";
+
 const NODEPOD_WORKER_URL = import.meta.env.DEV
   ? `/__worker__.js?dev=${Date.now()}`
   : "/__worker__.js?riff-nodepod-fixes-v5";
@@ -351,6 +359,8 @@ export class ClaudePodController {
     private report: (status: string) => void,
     private reportPreview: (url: string | null) => void = () => {},
     private emitOutput: (data: string) => void = () => {},
+    /** An endpoint refused one of the host's tokens (riff-sw.js saw a 401). */
+    private onCredentialRefused: (kind: "model" | "github") => void = () => {},
   ) {}
 
   async boot() {
@@ -384,12 +394,17 @@ export class ClaudePodController {
     const github = this.config.githubToken ? credentialFor("github", this.config.githubToken, GITHUB_ORIGINS) : null;
     this.modelCredential = model;
     this.githubCredential = github;
-    this.stopServingCredentials = serveCredentials(github ? [model, github] : [model]);
+    this.stopServingCredentials = serveCredentials(
+      github ? [model, github] : [model],
+      (credential) => this.onCredentialRefused(credential === github ? "github" : "model"),
+    );
     if (new URL(this.config.baseUrl).hostname === "api.anthropic.com") env.ANTHROPIC_API_KEY = model.placeholder;
     else env.ANTHROPIC_AUTH_TOKEN = model.placeholder;
     if (github) {
       env.GITHUB_TOKEN = github.placeholder;
       env.GH_TOKEN = github.placeholder;
+    } else {
+      env.NODEPOD_GIT_AUTH_HINT = NO_GITHUB_HINT;
     }
 
     this.report("Booting browser workspace");
@@ -616,7 +631,7 @@ export class ClaudePodController {
       // session env for `git push` et al to work. Same pair Claude mode sets.
       ...(this.githubCredential
         ? { GITHUB_TOKEN: this.githubCredential.placeholder, GH_TOKEN: this.githubCredential.placeholder }
-        : {}),
+        : { NODEPOD_GIT_AUTH_HINT: NO_GITHUB_HINT }),
       ...bridge.pipeEnv,
       // Prepend the bridge stub dir to the WASIX runtime default PATH
       // (/usr/local/bin:/bin:/usr/bin, where `uses` coreutils land). Do NOT

@@ -429,6 +429,36 @@ auto-release at the latest.
     nano, node and npm must run; red with the old location) and
     `test:wasix-session-browser`. Also keeps the tools out of the OPFS
     workspace and its export.
+  - ~~`npx create` hangs.~~ Reproduced on dev: `npm create vite@latest
+    my-app -- --template react-ts` printed "added 1 package" and nothing for
+    150 s. Two causes, both in Nodepod (fixed in `nodepod_fork`, riff.44):
+    `npm create` regrouped the flags after the positionals, so create-vite
+    got `--template` with no value; and every Nodepod process claims a TTY
+    on stdin, so create-vite went interactive, but the WASIX bridge carries
+    no stdin, so its prompt could never be answered. Arguments now pass
+    through in order, and bridged processes see `stdin.isTTY === false`
+    (`NODEPOD_STDIN_TTY=0`). Measured after: the command above, bare
+    `npm create vite@latest` and `npx create-vite other-app` each scaffold
+    in under a second. Left: the bridge still has no stdin at all, so
+    `echo x | node script.js` and interactive `node` in the host's Bash
+    get nothing (a change to the bridge stub and protocol).
+  - ~~git failures.~~ Nodepod's git talks to GitHub's REST API, always with a
+    token, so measured on dev: with no GitHub connected even a public clone
+    fails ("authentication required. Set GITHUB_TOKEN", wrong advice in
+    Riff, and the host gate claimed public repositories still worked); with
+    a dead token, pull and fetch said only "couldn't find remote ref" and
+    "could not list remote branches"; and clone and pull skipped any file
+    they failed to fetch and reported success. Now (riff.45 and the app):
+    every failure carries GitHub's status and message, a 401 says the token
+    was refused, a missed file fails the command, no token says the host
+    connects GitHub in Riff, and `riff-sw.js` tells the host page when an
+    endpoint answers 401 to a real token, which the Workspace panel shows.
+    What failed at the crit wasn't recorded, so which of these it was is a
+    hypothesis. Checked by `test:credentials-browser` (red without the
+    service worker's notice) and nodepod's `git-shell.test.ts` (red before).
+    Left: reconnecting GitHub mid-session needs a page reload; Nodepod's git
+    ignores `.gitignore` and re-uploads every file on each push (secondary
+    rate limits on big trees).
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own

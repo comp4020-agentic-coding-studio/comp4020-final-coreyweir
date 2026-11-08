@@ -34,6 +34,11 @@ if (!echoBase) {
   mock = http.createServer((req, res) => {
     const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*, authorization", "access-control-allow-methods": "*" };
     if (req.method === "OPTIONS") { res.writeHead(204, cors); res.end(); return; }
+    if (req.url.startsWith("/refuse")) {
+      res.writeHead(401, { ...cors, "content-type": "application/json" });
+      res.end(JSON.stringify({ message: "Bad credentials" }));
+      return;
+    }
     if (req.url.startsWith("/drip")) {
       res.writeHead(200, { ...cors, "content-type": "application/octet-stream" });
       let n = 0;
@@ -72,7 +77,8 @@ try {
 
   const result = await page.evaluate(async ({ echoBase, MODEL, GITHUB }) => {
     const { ClaudePodController } = await import("/src/claudePod.ts");
-    const controller = new ClaudePodController({ baseUrl: echoBase, token: MODEL, repo: "", githubToken: GITHUB }, () => {});
+    const refused = [];
+    const controller = new ClaudePodController({ baseUrl: echoBase, token: MODEL, repo: "", githubToken: GITHUB }, () => {}, () => {}, () => {}, (kind) => refused.push(kind));
     window.__controller = controller;
     await controller.boot();
     const run = async (cmd, args) => {
@@ -97,6 +103,11 @@ try {
     const out = {};
     out.env = await node(`return { model, github, gh: process.env.GH_TOKEN }`);
     out.fetch = await node(`return auth(await fetch(base + "/headers", { headers: { authorization: "Bearer " + model } }))`);
+    // An endpoint refusing the real value reaches the host page by kind
+    // (docs/week-12.md, git auth): the host is told, not only the terminal.
+    out.refusedStatus = await node(`return (await fetch(base + "/refuse", { headers: { authorization: "Bearer " + model } })).status`);
+    for (let i = 0; i < 40 && refused.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    out.refused = [...refused];
     out.basic = await node(`return auth(await fetch(base + "/headers", { headers: { authorization: "Basic " + Buffer.from("x-access-token:" + model).toString("base64") } }))`);
     out.httpModule = await node(`const mod = require(base.startsWith("https") ? "https" : "http");
       return await new Promise((resolve, reject) => {
@@ -145,6 +156,8 @@ try {
   assert.doesNotMatch(result.bashEnv.stdout, /REAL-/, "no real token in the shell's environment");
   assert.match(result.bashEnv.stdout, /^GITHUB_TOKEN=riff-placeholder-github-/m);
   assert.equal(result.fetch, `Bearer ${MODEL}`);
+  assert.equal(result.refusedStatus, 401);
+  assert.deepEqual(result.refused, ["model"], "the host page hears that its token was refused");
   assert.equal(Buffer.from(result.basic.replace(/^Basic /, ""), "base64").toString(), `x-access-token:${MODEL}`);
   assert.equal(result.httpModule, `Bearer ${MODEL}`);
   assert.equal(JSON.parse(result.curl.stdout).headers.Authorization, `Bearer ${MODEL}`);

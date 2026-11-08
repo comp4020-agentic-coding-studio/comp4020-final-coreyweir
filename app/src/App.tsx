@@ -1124,7 +1124,7 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
       <main className="landing">
         <section className="entry-card">
           <h2>{pushLost ? "GitHub for pushing has expired" : "Connect GitHub for pushing?"}</h2>
-          <p>{pushLost ? "It ended with the GitHub session it was connected in (signing out, or 30 days unused). Connect again so Claude can push." : `This room works on ${storedConfig.repo}. Without GitHub, Claude can read public repositories but can't push.`}</p>
+          <p>{pushLost ? "It ended with the GitHub session it was connected in (signing out, or 30 days unused). Connect again so Claude can push." : `This room works on ${storedConfig.repo}. Without GitHub, git in the room can't reach GitHub at all, public repositories included.`}</p>
           <GitHubPush user={user} back={`${location.pathname}${location.search}`} />
           <button className="link" onClick={() => setWithoutGitHub(true)}>Continue without GitHub</button>
         </section>
