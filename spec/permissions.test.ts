@@ -97,6 +97,60 @@ describe("who may change what", () => {
     }
   }, 30_000);
 
+  // ADR 0004: only the host sends from the queue or turns auto on, because
+  // only the host's browser can type into Claude. A participant forging
+  // either, the way the host's page writes them (room.ts sendQueued,
+  // QueuePanel.tsx setAuto), is refused, and a fresh read shows neither.
+  it("keeps sending from the queue and the auto toggle to the host", async () => {
+    const host = await createRoom(baseUrl);
+    const guest = await joinRoom(baseUrl, host.code);
+    const hostControl = await openPart(baseUrl, host, "control");
+    try {
+      hostControl.doc.getMap("queue").set("q-spec", { id: "q-spec", author: "spec", text: "queued", rank: 1 });
+      await hostControl.saved();
+    } finally {
+      hostControl.leave();
+    }
+
+    const guestControl = await openPart(baseUrl, guest, "control");
+    try {
+      expect(guestControl.doc.getMap("queue").has("q-spec")).toBe(true);
+      guestControl.doc.transact(() => {
+        guestControl.doc.getMap("roomState").set("autoRelease", true);
+        guestControl.doc.getMap("roomState").set("lastSent", "q-spec");
+        guestControl.doc.getMap("roomState").set("lastSentBy", "auto");
+        guestControl.doc.getMap("queue").delete("q-spec");
+      });
+      await guestControl.refused();
+    } finally {
+      guestControl.leave();
+    }
+
+    const later = await openPart(baseUrl, guest, "control");
+    try {
+      expect(later.doc.getMap("queue").has("q-spec")).toBe(true);
+      expect(later.doc.getMap("roomState").get("autoRelease")).toBeUndefined();
+      expect(later.doc.getMap("roomState").has("lastSent")).toBe(false);
+    } finally {
+      later.leave();
+    }
+
+    // The host's own toggle sticks, and a participant reads it.
+    const hostAgain = await openPart(baseUrl, host, "control");
+    try {
+      hostAgain.doc.getMap("roomState").set("autoRelease", true);
+      await hostAgain.saved();
+    } finally {
+      hostAgain.leave();
+    }
+    const reader = await openPart(baseUrl, guest, "control");
+    try {
+      expect(reader.doc.getMap("roomState").get("autoRelease")).toBe(true);
+    } finally {
+      reader.leave();
+    }
+  }, 30_000);
+
   it("keeps room management to the host", async () => {
     const host = await createRoom(baseUrl);
     const guest = await joinRoom(baseUrl, host.code);
