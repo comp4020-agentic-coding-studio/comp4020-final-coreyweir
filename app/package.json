@@ -68,7 +68,7 @@
     "@hocuspocus/provider": "^4.7.0",
     "@hocuspocus/server": "^4.7.0",
     "@quickdrawjs/react": "^0.1.1",
-    "@scelar/nodepod": "file:vendor/scelar-nodepod-1.9.20-riff.45.tgz",
+    "@scelar/nodepod": "file:vendor/scelar-nodepod-1.9.20-riff.46.tgz",
     "@wasmer/sdk": "file:vendor/wasmer-sdk-0.10.0-riff.e56540d.tgz",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-serialize": "^0.14.0",

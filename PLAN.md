@@ -459,6 +459,15 @@ auto-release at the latest.
     Left: reconnecting GitHub mid-session needs a page reload; Nodepod's git
     ignores `.gitignore` and re-uploads every file on each push (secondary
     rate limits on big trees).
+  - ~~"Insecure sources" in Chrome's address bar.~~ Every Nodepod worker ran
+    the sqlite and zlib polyfills' Node fallbacks, a dynamic
+    `import("node:fs")` (and `node:module`, `node:process`). A browser has
+    no `node:` scheme, so each went out as a request for the URL `node:fs`,
+    which Chrome counts as a script from an insecure source. Measured on
+    dev: six `node:fs` script requests per Claude start, none after the fix
+    (nodepod riff.46: the fallbacks run only under real Node).
+    `test:wasix-claude-bash-browser` fails on any `node:` request (red on
+    riff.45). Not yet looked at on live: the address bar itself.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own

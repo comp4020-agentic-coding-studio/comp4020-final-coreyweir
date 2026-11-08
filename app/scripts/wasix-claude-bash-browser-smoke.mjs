@@ -20,6 +20,12 @@ try {
   page.on("pageerror", (error) => {
     if (!String(error).includes("ProcessExitSentinel: Process exited with code 0")) errors.push(String(error));
   });
+  // docs/week-12.md, "insecure sources": a browser has no node: scheme, so
+  // an import("node:fs") in a Nodepod worker goes out as a request for the
+  // URL "node:fs", and Chrome flags the site for a script from an insecure
+  // source. Nothing may ask for one.
+  const nodeSchemeRequests = [];
+  page.on("request", (request) => { if (request.url().startsWith("node:")) nodeSchemeRequests.push(request.url()); });
   await page.goto(`${baseUrl}/?poc=blank`, { waitUntil: "networkidle0" });
 
   const result = await page.evaluate(async (checkWorkerCwd) => {
@@ -272,6 +278,7 @@ try {
   assert.equal(result.wipe.code, 0, result.wipe.stderr);
   assert.equal(result.wipe.stdout.trim(), "0", "the workspace should be empty before the snapshot commands run");
 
+  assert.deepEqual(nodeSchemeRequests, [], "a worker asked the network for a node: module");
   assert.deepEqual(errors, []);
   assert.equal(result.realSnapshot.code, 0, result.realSnapshot.stderr);
   const snapshot = result.snapshot;
