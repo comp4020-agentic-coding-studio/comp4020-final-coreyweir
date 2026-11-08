@@ -473,6 +473,15 @@ auto-release at the latest.
   out: measured 19 Oct, its free models answer 403 `FreeTierError` to
   anything but OpenCode itself. Being built now, ahead of the rest of P2,
   because without it a marker with no key can't see Claude work.
+- **Send the board, or a selection, to Claude** (week-12 #5). Measured
+  8 Nov on 2.1.221: pasting an absolute image path into Claude attaches
+  the image, and the model gets an image block; images over 2000 px are
+  dropped silently, so downscale in the browser first. A host-only button
+  draws the shapes onto a canvas (quickdraw's `drawShape`/`pageBounds`),
+  writes a PNG under `/tmp/riff/` in the pod and pastes its path. About
+  2–3 h. Corey, 8 Nov: nice to have, not a priority. Participants
+  attaching a selection to a staged prompt would be a sharing decision,
+  not yet asked.
 
 ## Still open
 
