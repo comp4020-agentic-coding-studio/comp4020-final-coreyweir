@@ -246,7 +246,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       </header>
       {facilitator ? <div className="terminal-target" data-output-size={outputSize} ref={targetRef} /> : <ParticipantTerminal subscribe={channel.subscribe} mode={mirrorMode} />}
       <footer className="terminal-note">
-        <span>{facilitator ? "Terminal output is shared with everyone in this room. Only you can type or approve actions." : "Read-only mirror. The facilitator controls input and permissions."}</span>
+        <span>{facilitator ? "Terminal output is shared with everyone in this room. Only you can type or approve actions." : "Read-only mirror of the host's terminal. Only the host types or approves actions."}</span>
         {(error || channel.error) && <strong>{error ?? channel.error}</strong>}
       </footer>
     </article>
