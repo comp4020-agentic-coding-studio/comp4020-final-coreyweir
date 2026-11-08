@@ -82,6 +82,8 @@ export function useSendBoard({ store, selected, pod, ready, onStage }: {
   return {
     button: {
       label: busy ? "Writing files..." : label,
+      // For a phone's board bar, where the long one doesn't fit.
+      short: busy ? "Writing..." : "Send to Claude",
       disabled: busy || !ready,
       title: !ready ? NOT_READY : live.length ? "Write the selected shapes into Claude's files, then stage a prompt about them" : "Write the board into Claude's files, then stage a prompt about it",
       send,

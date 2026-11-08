@@ -115,3 +115,4 @@
 /* The phone's way from the board down to staging (App.tsx jumpToStaging); beside the board on wider screens, so not shown there. */
 .board-actions .to-staging{display:none}
 @media(max-width:780px){.board-actions .to-staging{display:inline-flex;align-items:center;gap:5px;margin-left:8px;padding:5px 9px;border:1px solid #d5d5cf;border-radius:3px;background:white;color:#191919;font-size:12px;white-space:nowrap}.board-actions .to-staging span{min-width:18px;height:18px;padding:0 5px;display:grid;place-items:center;border-radius:9px;background:#e7e7e2;font-size:11px}.board-actions .board-hint{display:none}.board-actions{gap:8px}.board-actions>span{min-width:0;flex:1}}
+.send-board-button .label-narrow{display:none}@media(max-width:480px){.send-board-button .label-wide{display:none}.send-board-button .label-narrow{display:inline}.board-buttons button{white-space:nowrap}}

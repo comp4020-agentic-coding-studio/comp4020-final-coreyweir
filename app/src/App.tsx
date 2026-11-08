@@ -929,7 +929,24 @@ function jumpToStaging() {
   staging?.querySelector<HTMLTextAreaElement>(".new-prompt textarea")?.focus({ preventScroll: true });
 }
 
-function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, sendBoard, prompts }: {
+const STAGE_ONE = "Select one sticky note, text box or labelled shape to stage its text";
+
+/**
+ * The text "Stage selected text" stages: one sticky note, text box, or
+ * drawn shape with a label (the shapes quickdraw gives words). Anything
+ * else, or more than one, would mean choosing whose words go.
+ */
+function selectedText(store: ReturnType<typeof useQuickdrawStore>, selected: string[]): { id: string; text: string } | { why: string } {
+  const shapes = selected.map((id) => store.get(id)).filter((record): record is ShapeRecord => record?.typeName === "shape");
+  if (shapes.length !== 1) return { why: shapes.length ? `${STAGE_ONE}, not ${shapes.length} shapes.` : `${STAGE_ONE}.` };
+  const [shape] = shapes;
+  const words = shape.type === "note" || shape.type === "text" ? shape.props.text : shape.type === "geo" ? shape.props.label : undefined;
+  if (typeof words !== "string") return { why: `${STAGE_ONE}: this one has no text.` };
+  if (!words.trim()) return { why: "This shape's text is empty." };
+  return { id: shape.id, text: words.trim() };
+}
+
+function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, stageWhy, sendBoard, prompts }: {
   store: ReturnType<typeof useQuickdrawStore>;
   /** How many prompts are staged, for the phone's way down to them. */
   prompts?: number;
@@ -938,6 +955,8 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   selected: string[];
   onSelection: (ids: string[]) => void;
   onStageSelection: () => void;
+  /** Why "Stage selected text" can't stage the selection, or null if it can. */
+  stageWhy: string | null;
   /** The host's "Send board to Claude" (SendBoard.tsx). */
   sendBoard?: ReturnType<typeof useSendBoard>;
 }) {
@@ -946,7 +965,7 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   useLookOnly(board, readOnly !== null);
   return (
     <section className="board-wrap">
-      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span className="board-hint">Draw, write, paste images, or move things around.</span><div className="board-buttons"><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}>{sendBoard.button.label}</button>}</div></>}{prompts !== undefined && <button className="to-staging" onClick={jumpToStaging}>{readOnly ? "Prompts" : "Add prompt"}{prompts > 0 && <span>{prompts}</span>} ↓</button>}</div>
+      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span className="board-hint">Draw, write, paste images, or move things around.</span><div className="board-buttons"><button className="stage-selected" disabled={stageWhy !== null} title={stageWhy ?? "Stage this shape's text as a prompt"} onClick={onStageSelection}>Stage selected text</button>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} aria-label={sendBoard.button.label} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}><span className="label-wide">{sendBoard.button.label}</span><span className="label-narrow">{sendBoard.button.short}</span></button>}</div></>}{prompts !== undefined && <button className="to-staging" onClick={jumpToStaging}>{readOnly ? "Prompts" : "Add prompt"}{prompts > 0 && <span>{prompts}</span>} ↓</button>}</div>
       {notice && <p className="board-notice" role="alert">{notice}</p>}
       {sendBoard?.error && <p className="board-notice" role="alert">{sendBoard.error}</p>}
       <Quickdraw
@@ -1364,12 +1383,11 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // "Stage selected text": the words of exactly one shape that has some.
+  const stageable = selectedText(store, selected);
   function stageSelected() {
-    const records = selected.map((id) => store.get(id)).filter((record): record is ShapeRecord => record?.typeName === "shape");
-    if (!records.length) return;
-    const textRecord = records.find((record) => record.type === "note" || record.type === "text");
-    const text = typeof textRecord?.props.text === "string" && textRecord.props.text.trim() ? textRecord.props.text.trim() : `Follow up on ${records.length === 1 ? "this board item" : `these ${records.length} board items`}.`;
-    addPrompt(room.doc, room.identity.name, text, records[0].id);
+    const chosen = selectedText(store, selected);
+    if ("text" in chosen) addPrompt(room.doc, room.identity.name, chosen.text, chosen.id);
   }
 
   const terminalRef = useRef<TerminalPaneHandle>(null);
@@ -1414,7 +1432,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
         <p className="room-banner booting" role="status">Starting Claude for the room: {bootStatus}. <button className="link" onClick={() => setView("room")}>Watch</button></p>
       )}
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
-        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} sendBoard={facilitator ? sendBoard : undefined} prompts={room.promptSnapshots.length} />}
+        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} stageWhy={"why" in stageable ? stageable.why : null} sendBoard={facilitator ? sendBoard : undefined} prompts={room.promptSnapshots.length} />}
         {sendBoard.dialog}
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} terminalRef={terminalRef} onPodReady={setPodReady} onBootStatus={setBootStatus} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}

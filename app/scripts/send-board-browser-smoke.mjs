@@ -109,7 +109,7 @@ const browser = await puppeteer.launch({
 const unwrap = (text) => text.replace(/\n/g, "");
 const screenText = (tab) => tab.$eval(".terminal-target .xterm-rows", (element) => element.innerText.replace(/\u00a0/g, " "));
 const view = (tab, name) => tab.evaluate((name) => [...document.querySelectorAll(".topbar nav button")].find((b) => b.textContent === name)?.click(), name);
-const sendButton = (tab) => tab.$eval(".send-board-button", (b) => ({ text: b.textContent, disabled: b.disabled, title: b.title, rect: b.getBoundingClientRect().toJSON() }));
+const sendButton = (tab) => tab.$eval(".send-board-button", (b) => ({ text: b.getAttribute("aria-label"), disabled: b.disabled, title: b.title, rect: b.getBoundingClientRect().toJSON() }));
 
 async function host(tab, model) {
   // The smoke boots Bash or Claude itself and checks the button before boot
@@ -263,7 +263,7 @@ try {
     // quickdraw starts on the pen: take the select tool first.
     await tab.click(".qd-dock button[data-name=select]");
     await tab.mouse.click(canvas.left + 60, canvas.top + 140);
-    await tab.waitForFunction(() => document.querySelector(".send-board-button")?.textContent === "Send selected shape to Claude", { timeout: 5000, polling: 100 })
+    await tab.waitForFunction(() => document.querySelector(".send-board-button")?.getAttribute("aria-label") === "Send selected shape to Claude", { timeout: 5000, polling: 100 })
       .catch(async (error) => {
         await tab.screenshot({ path: path.join(work, `send-board-${size.name}-${model}-select.png`) });
         throw new Error(say(`selecting the note: ${(await sendButton(tab)).text} (${error.message})`));
@@ -279,7 +279,7 @@ try {
     await view(tab, "Room");
     assert.equal(await run(tab, "ls /tmp/riff"), "board-1", say("Cancel deleted board-2 and kept board-1"));
     await view(tab, "Board");
-    await tab.waitForFunction(() => document.querySelector(".send-board-button")?.textContent === "Send selected shape to Claude", { timeout: 5000, polling: 100 });
+    await tab.waitForFunction(() => document.querySelector(".send-board-button")?.getAttribute("aria-label") === "Send selected shape to Claude", { timeout: 5000, polling: 100 });
     await tab.click(".send-board-button");
     await tab.waitForSelector("dialog.send-board[open]", { timeout: 30_000 });
     await tab.click(".send-board-go");
