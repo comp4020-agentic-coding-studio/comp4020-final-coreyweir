@@ -57,13 +57,10 @@ try {
   await host.locator(".terminal-controls button").click();
   await host.waitForSelector(".terminal-target .xterm", { timeout: 180_000 });
   const screen = () => host.$eval(".terminal-target .xterm-rows", (element) => element.textContent);
-  await until(async () => (await screen()).includes("Yes, I accept"), "the bypass-permissions dialog", 180_000);
-  await host.click(".terminal-target .xterm");
-  await host.keyboard.press("ArrowDown");
-  await sleep(300);
-  await host.keyboard.press("Enter");
+  // Straight to the prompt: Riff accepts the bypass-permissions dialog.
   const state = () => host.$eval(".claude-state", (element) => element.dataset.state).catch(() => null);
-  await until(async () => (await state()) === "idle", "Claude waiting for a prompt", 60_000);
+  await until(async () => (await state()) === "idle", "Claude waiting for a prompt", 180_000);
+  assert.doesNotMatch(await screen(), /Yes, I accept/);
 
   // A PNG of the given size, made in the page, put on a DataTransfer and
   // fired at the terminal as a paste or a drop.

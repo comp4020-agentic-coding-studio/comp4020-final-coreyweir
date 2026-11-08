@@ -108,10 +108,9 @@ try {
   );
 
   // A prompt's trip as far as the queue: the participant stages it, the
-  // host queues it, and it shows in both queues. Claude is still on its
-  // bypass-permissions dialog here, so Send waits (disabled) and the room
-  // sees "starting"; the host removes it instead. Sending, by hand and
-  // automatically, is test:queue-release-browser.
+  // host queues it, and it shows in both queues; only the host has Send.
+  // The host removes it instead. Sending, by hand and automatically, is
+  // test:queue-release-browser.
   await participant.type(".new-prompt textarea", "riff queue smoke");
   await participant.click(".new-prompt button");
   await host.waitForFunction(() => [...document.querySelectorAll(".prompt-card textarea")].some((element) => element.value === "riff queue smoke"), { timeout: 10_000 });
@@ -122,8 +121,7 @@ try {
   const queuedOn = (page) => page.waitForFunction(() => [...document.querySelectorAll(".queue-row p")].some((element) => element.textContent === "riff queue smoke"), { timeout: 10_000 });
   await Promise.all([queuedOn(host), queuedOn(participant)]);
   assert.equal(await participant.$(".send-prompt"), null);
-  assert.equal(await host.$eval(".send-prompt", (element) => element.disabled), true);
-  await participant.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "starting", { timeout: 10_000 });
+  assert.ok(await host.$(".send-prompt"));
   await host.click(".queue-row button[aria-label='Remove queued prompt']");
   const emptyOn = (page) => page.waitForFunction(() => document.querySelectorAll(".queue-row").length === 0, { timeout: 10_000 });
   await Promise.all([emptyOn(host), emptyOn(participant)]);

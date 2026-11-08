@@ -87,26 +87,18 @@ try {
   const autoOn = (page) => page.$eval(".auto-release input", (element) => element.checked);
   const queuedTexts = (page) => page.$$eval(".queue-row p", (elements) => elements.map((element) => element.textContent));
 
-  // Claude starts in the host's page. Its bypass-permissions dialog comes
-  // first; SessionStart only fires once it's accepted, and until then the
-  // room sees "starting" and Send is disabled.
+  // Claude starts in the host's page, straight to its prompt: Riff accepts
+  // the bypass-permissions dialog for the host (claudePod.ts settings).
   await openTab(host, "Room");
   await openTab(participant, "Room");
   await host.locator(".terminal-controls button").click();
   await host.waitForSelector(".terminal-target .xterm", { timeout: 180_000 });
   const screen = () => host.$eval(".terminal-target .xterm-rows", (element) => element.textContent);
-  await until(async () => (await screen()).includes("Yes, I accept"), "the bypass-permissions dialog", 180_000);
-  assert.equal(await stateOn(host), "starting");
-  await host.click(".terminal-target .xterm");
-  // Keys pressed together arrive as one chunk, which the dialog reads as
-  // Enter on "No, exit".
-  await host.keyboard.press("ArrowDown");
-  await sleep(300);
-  await host.keyboard.press("Enter");
-  await until(async () => (await stateOn(participant)) === "idle", "the participant to see Claude waiting").catch(async (error) => {
+  await until(async () => (await stateOn(participant)) === "idle", "the participant to see Claude waiting", 180_000).catch(async (error) => {
     console.log({ host: await stateOn(host), participant: await stateOn(participant), screen: (await screen()).slice(-600) });
     throw error;
   });
+  assert.doesNotMatch(await screen(), /Yes, I accept/, "no bypass-permissions dialog");
 
   // The participant stages every prompt; the host queues them in order.
   for (const text of [...Object.values(PROMPTS), "/cost"]) {

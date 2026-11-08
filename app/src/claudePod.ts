@@ -445,6 +445,12 @@ export class ClaudePodController {
           showThinkingSummaries: true,
           verbose: true,
           permissions: { defaultMode: "bypassPermissions" },
+          // The host chose this mode by hosting; without this Claude Code
+          // asks on every boot, in red on everyone's mirror, with "No,
+          // exit" as the default. The key its own dialog writes on accept
+          // (2.1.221). Not in the saved workspace (ADR 0010): written here
+          // every boot.
+          skipDangerousModePermissionPrompt: true,
           // Turn start and end reach the page through riff-hook (docs/adr/0004).
           hooks: riffHookSettings(),
         }),
