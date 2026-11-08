@@ -1,0 +1,68 @@
+/* The room's text, one step up a small scale (Corey, 8 Nov: the room's
+   7-10px text was hard to read even at 1920). Loaded after styles.css,
+   preview.css and the terminal's sheet, so it only overrides sizes:
+   7-8px -> 11px, 9px -> 12px, 10px -> 13px, section titles 14 -> 15px.
+   Colours, weights, spacing and bar heights are unchanged; xterm (12px)
+   and quickdraw aren't touched. */
+
+/* top bar */
+.room-name,.room-name span{font-size:12px}
+.room-name small{font-size:11px}
+.topbar nav button{font-size:12px}
+.share{font-size:12px}
+.participants span{font-size:10px}
+
+/* section titles and their counters */
+.section-title h2{font-size:15px}
+.section-title>span:not(.idle-dot){font-size:11px;min-width:20px;height:20px}
+.idle-dot{font-size:11px}
+
+/* board */
+.board-actions{font-size:12px}
+.board-actions button{font-size:11px}
+.board-notice{font-size:13px}
+
+/* staging */
+.new-prompt textarea{font-size:13px}
+.new-prompt button{font-size:11px}
+.prompt-card header{font-size:11px}
+.author-dot{font-size:10px;width:22px;height:22px}
+.prompt-card textarea{font-size:13px}
+.prompt-card footer{font-size:11px}
+.prompt-card footer button{font-size:11px}
+.empty{font-size:12px}
+
+/* queue */
+.queue-heading .claude-state{font-size:11px}
+.queue-heading .auto-release{font-size:12px}
+.queue-row>span{font-size:11px;width:22px;height:22px}
+.queue-row p{font-size:12px}
+.queue-row small{font-size:11px}
+.queue-row .load-prompt,.queue-row .send-prompt{font-size:11px}
+
+/* terminal chrome */
+.terminal-heading .idle-dot,.terminal-heading .live-dot{font-size:12px}
+.terminal-controls button{font-size:12px}
+.terminal-note{font-size:12px}
+.terminal-empty{font-size:13px}
+
+/* preview */
+.preview-heading span{font-size:11px}
+.preview-heading button,.preview-heading a,.preview-actions button{font-size:11px}
+.preview-empty p{font-size:13px}
+
+/* banners and the People panel */
+.room-banner{font-size:13px}
+.form-error{font-size:13px}
+.room-code{font-size:13px}
+.room-controls button,.people-panel li button{font-size:12px}
+.people-panel li{font-size:13px}
+.people-panel li small{font-size:11px}
+.people-panel .board-fate,.people-panel .board-fate button,.end-room p,.end-room button{font-size:12px}
+.people-panel .board-size,.people-panel .export-board button,.people-panel .export-board small{font-size:12px}
+.invite-box label,.invite-sent,.pending-invites button,.invite-box button{font-size:12px}
+.invite-box input{font-size:13px}
+.people-panel .local-note{font-size:11px}
+
+/* a phone's top bar has room for 10px on one line (8px today), not 12 */
+@media(max-width:480px){.room-name span,.topbar nav button,.share{font-size:10px;white-space:nowrap}}

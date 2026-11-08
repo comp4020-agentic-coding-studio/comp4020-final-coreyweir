@@ -5,6 +5,8 @@ import "./styles.css";
 import "./preview.css";
 import "./landing.css";
 import App from "./App";
+// after App, so it comes after the terminal's own sheet
+import "./room-type.css";
 import { takePushFromLocation } from "./api";
 
 // Back from a push sign-in, before anything reads the URL.
