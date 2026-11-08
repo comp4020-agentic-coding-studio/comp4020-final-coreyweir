@@ -920,8 +920,19 @@ function Staging({ prompts, canQueue, readOnly, onAdd, onQueue, onDelete }: {
   );
 }
 
-function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, sendBoard }: {
+// On a phone the staging column sits below the board, out of view: the
+// board's bar has a way down to it (hidden on wider screens, where it's
+// beside the board), focusing the new prompt when there is one.
+function jumpToStaging() {
+  const staging = document.querySelector<HTMLElement>(".staging");
+  staging?.scrollIntoView({ behavior: "smooth", block: "start" });
+  staging?.querySelector<HTMLTextAreaElement>(".new-prompt textarea")?.focus({ preventScroll: true });
+}
+
+function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, sendBoard, prompts }: {
   store: ReturnType<typeof useQuickdrawStore>;
+  /** How many prompts are staged, for the phone's way down to them. */
+  prompts?: number;
   readOnly: string | null;
   notice: string | null;
   selected: string[];
@@ -935,7 +946,7 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   useLookOnly(board, readOnly !== null);
   return (
     <section className="board-wrap">
-      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span>Draw, write, paste images, or move things around.</span><div className="board-buttons"><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}>{sendBoard.button.label}</button>}</div></>}</div>
+      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span className="board-hint">Draw, write, paste images, or move things around.</span><div className="board-buttons"><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}>{sendBoard.button.label}</button>}</div></>}{prompts !== undefined && <button className="to-staging" onClick={jumpToStaging}>{readOnly ? "Prompts" : "Add prompt"}{prompts > 0 && <span>{prompts}</span>} ↓</button>}</div>
       {notice && <p className="board-notice" role="alert">{notice}</p>}
       {sendBoard?.error && <p className="board-notice" role="alert">{sendBoard.error}</p>}
       <Quickdraw
@@ -1403,7 +1414,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
         <p className="room-banner booting" role="status">Starting Claude for the room: {bootStatus}. <button className="link" onClick={() => setView("room")}>Watch</button></p>
       )}
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
-        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} sendBoard={facilitator ? sendBoard : undefined} />}
+        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} sendBoard={facilitator ? sendBoard : undefined} prompts={room.promptSnapshots.length} />}
         {sendBoard.dialog}
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} terminalRef={terminalRef} onPodReady={setPodReady} onBootStatus={setBootStatus} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
