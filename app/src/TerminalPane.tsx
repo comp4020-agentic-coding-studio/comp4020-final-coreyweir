@@ -143,6 +143,8 @@ export function githubRefusalText(token: string | undefined) {
 
 export const TerminalPane = forwardRef<TerminalPaneHandle, {
   roomId: string;
+  /** Names the workspace export after the room, as an export from "Your rooms" is. */
+  roomCode?: string;
   token: string | null;
   facilitator: boolean;
   config: HostConfig | null;
@@ -157,7 +159,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   claudeState?: ClaudeState;
   /** Host: what booting is doing, or null when it isn't, for the other tabs. */
   onBootStatus?: (status: string | null) => void;
-}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent, onPodReady, ended = false, onBootStatus , claudeState }, ref) {
+}>(function TerminalPane({ roomId, roomCode, token, facilitator, config, onPreviewUrlChange, onClaudeEvent, onPodReady, ended = false, onBootStatus , claudeState }, ref) {
   const targetRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ClaudePodController | null>(null);
   const previewChangeRef = useRef(onPreviewUrlChange);
@@ -385,7 +387,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
     <article className="terminal-pane">
       <header className="section-title terminal-heading" data-report={report ?? undefined}>
         <div><h2>Workspace</h2><span className={facilitator && (status === "Claude running" || status === "Bash ready") || !facilitator && participantLive ? "live-dot" : "idle-dot"}>{facilitator ? status : participantStatus}</span></div>
-        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : "Start Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} ready={attached} /><McpSettingsButton roomId={roomId} getController={() => controllerRef.current} hasGithub={Boolean(config?.githubToken)} claudeState={claudeState} /></div>}
+        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : "Start Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} room={roomCode} ready={attached} /><McpSettingsButton roomId={roomId} getController={() => controllerRef.current} hasGithub={Boolean(config?.githubToken)} claudeState={claudeState} /></div>}
         {!facilitator && <div className="terminal-controls"><button className="mirror-mode" aria-pressed={mirrorMode === "actual"} title={mirrorMode === "fit" ? "Show the host's terminal at its own text size, and scroll" : "Shrink or grow the host's terminal to fit this box"} onClick={() => {
           const next = mirrorMode === "fit" ? "actual" : "fit";
           setMirrorMode(next);
