@@ -101,7 +101,9 @@ unsaved scratch workspace.
   board copy the browser cleared gets a row of its own, so none is kept
   silently. The planned signed-in page shows the
   same marker on each room. Export is the workspace zip (P2, built
-  alongside).
+  alongside); since 8 Nov the row has "Export files" beside "Export
+  board", which zips the saved workspace without booting it (ADR 0003,
+  "Export files from the landing page").
 - Only the host's browser has a workspace. Nothing about it reaches the
   server, the room, or other members.
 

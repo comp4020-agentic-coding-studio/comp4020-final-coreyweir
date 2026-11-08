@@ -397,6 +397,11 @@ auto-release at the latest.
       for reinstalling; transcripts behind an unticked box; Riff exports
       version 1 only. Checked by `npm run test:workspace-import` and
       `test:workspace-import-ui` (dev, both sizes); live still to run.
+    - ~~"Export files" on a room's row~~ built 8 Nov (ADR 0003, "Export
+      files from the landing page"), beside "Export board": the same zip
+      from the saved workspace, no pod; refused while another tab holds
+      it. Checked by `test:workspace-export-saved` and
+      `test:workspace-export-files-ui` (dev, both sizes); live still to run.
     - Left: real-git
       history (Nodepod's git isn't git, see the ADR); a transcript Claude
       Code wrote itself wasn't measured; a `chmod` from WASIX bash doesn't

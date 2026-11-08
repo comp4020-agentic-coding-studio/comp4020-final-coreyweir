@@ -573,6 +573,33 @@ the hundreds of megabytes (the zip is built in memory). **Seen, not ours:** a
 says 644), so an executable made that way exports as 644; one made through
 Nodepod's own fs keeps its mode.
 
+### Export files from the landing page (2026-11-08)
+
+Asked for by the host: a room's row in "Your rooms" has **Export board**
+(the board file, as before) and, where this browser has the room's saved
+workspace (ADR 0010; so the host's browser), **Export files**. It opens the
+same dialog with the same defaults and makes the same zip as the
+workspace's own Export, read from the saved workspace in OPFS rather than a
+running pod (`app/src/savedWorkspaceSource.ts`), so a host can take their
+files out of a room without starting it, or after it has ended.
+
+It only reads a workspace no tab has open. The room's Web Lock is taken if
+it's free and never stolen: a tab that has the workspace keeps saving into
+it, and reading sweeps blobs no manifest names yet, which would be that
+tab's save in progress. A room open in another tab is refused with "export
+them there", and that tab carries on saving. What it zips is what was last
+saved, which is everything once the room's tab has closed.
+
+**Checked:** `npm run test:workspace-export-saved` (a saved manifest and
+its blobs zip the same as the same tree read live, both option sets; a
+missing blob is reported as unreadable, not dropped; two mutations red);
+`npm run test:workspace-export-files-ui` (the page: the row's zip has the
+same file list and bytes as the in-room Export of the same workspace, with
+the defaults and with both boxes flipped, and it is refused while the
+room's tab holds the workspace, which keeps saving; dev, 1920x1080 and
+390x844, 8 Nov). The two zips' `riff-workspace.json` differ in their time
+and in naming Riff's session folder, which only a running pod has.
+
 ### Import (2026-11-08)
 
 An export can be loaded again, not only unpacked.
