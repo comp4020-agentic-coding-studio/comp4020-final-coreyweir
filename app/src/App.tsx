@@ -950,13 +950,52 @@ function Staging({ prompts, canQueue, readOnly, onAdd, onQueue, onDelete }: {
   );
 }
 
-function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, sendBoard }: {
+// On a phone the staging column sits below the board, out of view: the
+// board's bar has a way down to it (hidden on wider screens, where it's
+// beside the board), focusing the new prompt when there is one.
+function jumpToStaging() {
+  const staging = document.querySelector<HTMLElement>(".staging");
+  staging?.scrollIntoView({ behavior: "smooth", block: "start" });
+  staging?.querySelector<HTMLTextAreaElement>(".new-prompt textarea")?.focus({ preventScroll: true });
+}
+
+const STAGE_ONE = "Select one sticky note, text box or labelled shape to stage its text";
+
+/** A shape's words, if it's a kind quickdraw gives words to and they aren't blank. */
+function wordsOf(shape: ShapeRecord) {
+  const words = shape.type === "note" || shape.type === "text" ? shape.props.text : shape.type === "geo" ? shape.props.label : undefined;
+  return typeof words === "string" && words.trim() ? words.trim() : null;
+}
+
+/**
+ * The text "Stage selected text" stages: the words of the one shape in the
+ * selection that has any (a sticky note, text box, or drawn shape with a
+ * label). Arrows, strokes and images selected with it don't count, so a
+ * region around a box and its arrows still works; two shapes with words
+ * would mean choosing whose words go.
+ */
+function selectedText(store: ReturnType<typeof useQuickdrawStore>, selected: string[]): { id: string; text: string } | { why: string } {
+  const shapes = selected.map((id) => store.get(id)).filter((record): record is ShapeRecord => record?.typeName === "shape");
+  if (!shapes.length) return { why: `${STAGE_ONE}.` };
+  const worded = shapes.flatMap((shape) => {
+    const text = wordsOf(shape);
+    return text ? [{ id: shape.id, text }] : [];
+  });
+  if (worded.length === 1) return worded[0];
+  return { why: worded.length ? `${STAGE_ONE}: ${worded.length} shapes with text are selected; select one.` : `${STAGE_ONE}: no text in the selection.` };
+}
+
+function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, stageWhy, sendBoard, prompts }: {
   store: ReturnType<typeof useQuickdrawStore>;
+  /** How many prompts are staged, for the phone's way down to them. */
+  prompts?: number;
   readOnly: string | null;
   notice: string | null;
   selected: string[];
   onSelection: (ids: string[]) => void;
   onStageSelection: () => void;
+  /** Why "Stage selected text" can't stage the selection, or null if it can. */
+  stageWhy: string | null;
   /** The host's "Send board to Claude" (SendBoard.tsx). */
   sendBoard?: ReturnType<typeof useSendBoard>;
 }) {
@@ -965,7 +1004,7 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   useLookOnly(board, readOnly !== null);
   return (
     <section className="board-wrap">
-      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span>Draw, write, paste images, or move things around.</span><div className="board-buttons"><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}>{sendBoard.button.label}</button>}</div></>}</div>
+      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span className="board-hint">Draw, write, paste images, or move things around.</span><div className="board-buttons"><button className="stage-selected" disabled={stageWhy !== null} title={stageWhy ?? "Stage this shape's text as a prompt"} onClick={onStageSelection}>Stage selected text</button>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} aria-label={sendBoard.button.label} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}><span className="label-wide">{sendBoard.button.label}</span><span className="label-narrow">{sendBoard.button.short}</span></button>}</div></>}{prompts !== undefined && <button className="to-staging" onClick={jumpToStaging}>{readOnly ? "Prompts" : "Add prompt"}{prompts > 0 && <span>{prompts}</span>} ↓</button>}</div>
       {notice && <p className="board-notice" role="alert">{notice}</p>}
       {sendBoard?.error && <p className="board-notice" role="alert">{sendBoard.error}</p>}
       <Quickdraw
@@ -1384,12 +1423,11 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // "Stage selected text": the words of exactly one shape that has some.
+  const stageable = selectedText(store, selected);
   function stageSelected() {
-    const records = selected.map((id) => store.get(id)).filter((record): record is ShapeRecord => record?.typeName === "shape");
-    if (!records.length) return;
-    const textRecord = records.find((record) => record.type === "note" || record.type === "text");
-    const text = typeof textRecord?.props.text === "string" && textRecord.props.text.trim() ? textRecord.props.text.trim() : `Follow up on ${records.length === 1 ? "this board item" : `these ${records.length} board items`}.`;
-    addPrompt(room.doc, room.identity.name, text, records[0].id);
+    const chosen = selectedText(store, selected);
+    if ("text" in chosen) addPrompt(room.doc, room.identity.name, chosen.text, chosen.id);
   }
 
   const terminalRef = useRef<TerminalPaneHandle>(null);
@@ -1434,7 +1472,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
         <p className="room-banner booting" role="status">Starting Claude for the room: {bootStatus}. <button className="link" onClick={() => setView("room")}>Watch</button></p>
       )}
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
-        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} sendBoard={facilitator ? sendBoard : undefined} />}
+        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} stageWhy={"why" in stageable ? stageable.why : null} sendBoard={facilitator ? sendBoard : undefined} prompts={room.promptSnapshots.length} />}
         {sendBoard.dialog}
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} terminalRef={terminalRef} onPodReady={setPodReady} onBootStatus={setBootStatus} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
@@ -1451,7 +1489,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 // straight in; for anyone else it's the join form with the code filled in.
 // Opened from a room's link by a browser that isn't in the room yet: ask
 // for a name before going in, the last one used filled in.
-function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
+function JoinByLink({ code, keep, gone = false }: { code: string; keep?: boolean; gone?: boolean }) {
   const user = useUser();
   const [name, setName] = useState(savedName);
   const [busy, setBusy] = useState(false);
@@ -1485,6 +1523,22 @@ function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
     }
   }
 
+  // No live room with that code (ended, or the host gave it a new one):
+  // said before asking for a name. The lookup says no more than that, and
+  // neither does this.
+  if (gone) {
+    return (
+      <main className="landing closed join-link">
+        <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
+        <section className="entry-card no-room">
+          <h2>No live room <code>{code}</code></h2>
+          <p>{problem(new ApiError(404, "no_such_room"))}</p>
+          <div className="closed-actions"><button className="primary" onClick={() => location.assign(location.pathname)}>Back to start</button></div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="landing closed join-link">
       <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
@@ -1503,7 +1557,7 @@ function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
 }
 
 function RoomGate({ roomId, code }: { roomId: string | null; code: string | null }) {
-  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean; pushRevoked?: string } | { join: string; keep?: boolean } | { error: string } | null>(null);
+  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean; pushRevoked?: string } | { join: string; keep?: boolean; gone?: boolean } | { error: string } | null>(null);
   const [withoutGitHub, setWithoutGitHub] = useState(false);
   const user = useUser();
 
@@ -1532,14 +1586,14 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
       } else {
         setState(code ? { join: code, keep: found?.keep } : { error: "This browser isn't in that room. Ask the host for the code." });
       }
-    })().catch((failure) => active && setState(code && failure instanceof ApiError && failure.status === 404 ? { join: code } : { error: problem(failure) }));
+    })().catch((failure) => active && setState(code && failure instanceof ApiError && failure.status === 404 ? { join: code, gone: true } : { error: problem(failure) }));
     return () => {
       active = false;
     };
   }, [code, roomId]);
 
   if (!state) return <main className="landing"><section className="entry-card"><p>Finding the room...</p></section></main>;
-  if ("join" in state) return <JoinByLink code={state.join} keep={state.keep} />;
+  if ("join" in state) return <JoinByLink code={state.join} keep={state.keep} gone={state.gone} />;
   if ("error" in state) {
     return (
       <main className="landing">
