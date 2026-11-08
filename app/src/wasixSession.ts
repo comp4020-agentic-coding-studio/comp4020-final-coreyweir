@@ -172,7 +172,20 @@ function osc133BashRc(root: string): string {
     "__riff_osc133() { printf '\\033]133;%s\\007' \"$1\"; }",
     "PS0='\\[\\033]133;C\\007\\]'",
     "PROMPT_COMMAND='__riff_osc133 \"D;$?\"'",
-    "PS1='\\[\\033]133;A\\007\\]\\u@\\h:\\w\\$ \\[\\033]133;B\\007\\]'",
+    // Interactive bash doesn't read BASH_ENV; read it here so the terminal
+    // starts like every `bash -c` (Riff's writes /etc, sessionSystem.ts).
+    "[ -n \"$BASH_ENV\" ] && [ -r \"$BASH_ENV\" ] && . \"$BASH_ENV\"",
+    // A paste runs, as it always has here. Readline turns bracketed paste on
+    // once it knows the terminal (TERMCAP, sessionSystem.ts); then a pasted
+    // command waits on the line for an Enter the paste already contained.
+    "bind 'set enable-bracketed-paste off'",
+    // \u and \h come from libc, and bash looks the user up before this rc
+    // has written /etc/passwd; the session env names both (sessionSystem.ts).
+    // Not `read < /etc/hostname`: a stdin redirect in this rc broke the
+    // terminal's input (measured: bash exited at its first prompt in one run,
+    // ignored the first command in another). `$` rather than `\$`: the guest
+    // is uid 0, so that shows `#`, which only alarms people here.
+    "PS1='\\[\\033]133;A\\007\\]\\[\\033[1;32m\\]${USER}@${HOSTNAME}\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[0m\\]$ \\[\\033]133;B\\007\\]'",
     "",
   ].join("\n");
 }
