@@ -98,6 +98,31 @@ done
 exec cat -- "\${files[@]}"
 `;
 
+// The session's one user already has uid 0, so sudo has nothing to grant: it
+// runs the command. Habits (`sudo npm i -g`, a README's `sudo make install`)
+// then work instead of ending in "command not found". Options that keep that
+// meaning are accepted; any other (another user, a login shell, -s, -v...)
+// would pretend to do something the session can't, so it says so.
+const SUDO = `#!/bin/bash
+# Riff: you are the session's only user and already have uid 0, so sudo
+# just runs the command.
+while [ $# -gt 0 ]; do
+  case $1 in
+    -n|-E|-H|--non-interactive|--preserve-env|--set-home) shift ;;
+    -u|--user) case $2 in root|user|0|"#0") shift 2 ;; *) echo "sudo: Riff's terminal has one user ('user', already root); it can't run as '$2'" >&2; exit 1 ;; esac ;;
+    -uroot|-uuser|--user=root|--user=user) shift ;;
+    --) shift; break ;;
+    -*) echo "sudo: option $1 isn't supported in Riff's terminal (sudo here only runs the command; you're already root)" >&2; exit 1 ;;
+    *) break ;;
+  esac
+done
+if [ $# -eq 0 ]; then
+  echo "usage: sudo [-n] [-E] [-H] [-u root] [--] command [args...]" >&2
+  exit 1
+fi
+exec "$@"
+`;
+
 /** Scripts for the session's bin directory (installBinaries). */
 export function sessionHelperCommands(): Map<string, Uint8Array> {
   const encoder = new TextEncoder();
@@ -108,5 +133,6 @@ export function sessionHelperCommands(): Map<string, Uint8Array> {
     ["man", encoder.encode(MAN)],
     ["less", encoder.encode(PAGER)],
     ["more", encoder.encode(PAGER)],
+    ["sudo", encoder.encode(SUDO)],
   ]);
 }

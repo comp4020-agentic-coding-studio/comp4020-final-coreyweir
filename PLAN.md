@@ -753,16 +753,19 @@ auto-release at the latest.
   Left as they are: `ls -l` shows owners as `somebody somegroup` (the bash
   package's old uutils `ls`; GNU `ls` names `user` but shows every mode as
   `----------`, which is worse). Missing with bash's plain "command not
-  found": `sudo`, `apt`/`apt-get`, `make`, `ssh`, `wget` (curl is there),
+  found": `apt`/`apt-get`, `make`, `ssh`, `wget` (curl is there),
   `diff`, `patch`, `file`, `tput`, `ps`, `top`, `free`, `df`, `vi`/`vim`,
   `zip`/`unzip`; no /etc/os-release, and `uname` says
   `wasi riff 0.0.0 wasm32`. Any other program that reads keys from
   /dev/tty would hang the way less did. Typing ahead while a command runs
   keeps a whole line (typed with its Enter) but loses a part line: measured
   with and without the termcap entry, so it predates it (the runtime's tty,
-  hypothesis: its line buffer is dropped when readline takes the terminal). A `sudo` that runs its command
-  (the guest is uid 0 already) would be cheap, but it pretends, so it's a
-  call for Corey.
+  hypothesis: its line buffer is dropped when readline takes the terminal).
+  `sudo` (9 Nov, Corey's call: "just run the command"): the guest is uid 0
+  already, so it runs the command. `-n -E -H -u root|user --` are accepted;
+  any other user or option (`-s`, `-i`, `-v`...) is refused with a line
+  saying sudo here only runs the command. Checked by
+  `test:wasix-claude-bash-browser`.
 
 - ~~**Web search and page reading for the host's Claude**~~ (versatility;
   done 9 Nov, Corey's call). Claude Code's WebFetch fetches from the host's
