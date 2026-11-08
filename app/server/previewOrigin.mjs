@@ -48,9 +48,9 @@ export function createPreviewOrigins({ template, secret, riffOrigin }) {
   if (riffOrigin && new URL(riffOrigin).host.toLowerCase().endsWith(`.${parent}`)) {
     throw new Error("Riff's own origin can't sit under the preview domain");
   }
-  // Any single label under the parent is a preview host, so a mistyped or
-  // made-up label is refused like a wrong one, never served as Riff.
-  const host = new RegExp(`^([^.]+)\\.${escapeRegExp(parent)}$`);
+  // Any name under the parent is a preview host, so a mistyped, made-up or
+  // nested label is refused like a wrong one, never served as Riff.
+  const host = new RegExp(`^(.+)\\.${escapeRegExp(parent)}$`);
 
   function labelFor(roomId) {
     const mac = createHmac("sha256", secret).update(`riff preview origin v1\0${roomId}`).digest();

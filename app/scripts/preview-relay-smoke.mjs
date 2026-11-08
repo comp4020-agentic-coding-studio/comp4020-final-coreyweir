@@ -158,6 +158,7 @@ try {
   assert.deepEqual(await elsewhere(`http://127.0.0.1:${port}`), [404, "Previews open on their own origin"]);
   assert.deepEqual(await elsewhere(origins.originFor("other-room")), [404, "Preview not found"]);
   assert.deepEqual(await elsewhere(`http://made-up.preview.localhost:${port}`), [404, "Preview not found"]);
+  assert.deepEqual(await elsewhere(`http://${new URL(previewOrigin).hostname.replace(".preview.", ".x.preview.")}:${port}`), [404, "Preview not found"]);
   assert.equal(messages.filter((message) => message.type === "request" && message.path === "/hello").length, 0);
 
   host.send(JSON.stringify({ type: "preview-down", generation: 6 }));
