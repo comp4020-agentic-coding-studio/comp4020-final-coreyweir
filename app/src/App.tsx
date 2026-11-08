@@ -247,7 +247,7 @@ function GitHubPush({ user, beforeLeaving, back }: { user: User | null | undefin
     <div className="github-push">
       <span className="github-push-label">GitHub for pushing <small>Optional</small></span>
       {linked ? (
-        <p>Connected as <strong>@{user.login}</strong>. Claude can push with your access. <button type="button" className="link" onClick={() => { forgetPushToken(); setConnected(false); }}>Disconnect</button></p>
+        <p><span>Connected as <strong>@{user.login}</strong>. Claude can push with your access.</span> <button type="button" className="link" onClick={() => { forgetPushToken(); setConnected(false); }}>Disconnect</button></p>
       ) : (
         <>
           <p>
