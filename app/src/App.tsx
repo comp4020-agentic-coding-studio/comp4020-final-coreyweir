@@ -4,9 +4,9 @@ import { addPrompt, replaceYText, saveName, savedName, snapshotPrompts, type Pro
 import { QueuePanel, useQueueRelease } from "./QueuePanel";
 import { canSend, type ClaudeState } from "./queueRelease";
 import {
-  type Access, ApiError, createRoom, currentUser, endRoom, enterRoom, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
+  type Access, ApiError, createRoom, currentUser, endRoom, enterRoom, reopenRoom, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
   acceptInvite, addColleague, cancelInvite, declineInvite, inviteToRoom, listColleagues, removeColleague, watchRooms,
-  type Colleagues, type ListedRoom, type RoomInfo, type RoomList,
+  type Colleagues, type EndedRoom, type ListedRoom, type RoomInfo, type RoomList,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
   RIFF_MODEL_ENV, riffModelsAvailable, riffModelsUrl,
 } from "./api";
@@ -131,6 +131,8 @@ function problem(error: unknown, login?: string) {
     case "removed": return "The host removed you from that room.";
     case "bad_name": return "Names need 1 to 40 visible characters.";
     case "slow_down": return "Too many attempts from here. Wait a few minutes and try again.";
+    case "host_only":
+    case "not_a_member": return "Only the room's host can do that, and Riff no longer counts you as its host here.";
     case "others_joined": return "Someone else has been in this room, so it can't start keeping the board now: they joined when it wasn't kept.";
     default: return `Something went wrong (${error.code}).`;
   }
@@ -302,7 +304,7 @@ function minutesSince(at: number | null, now: number) {
   return Math.max(1, Math.round((now - (at ?? now)) / 60_000));
 }
 
-function hostPresence(room: ListedRoom, now: number) {
+function hostPresence(room: Exclude<ListedRoom, EndedRoom>, now: number) {
   if (room.state === "live") return room.role === "host" ? "You're hosting it" : `${room.hostName} is hosting`;
   const away = `away for ${minutesSince(room.hostLastSeen, now)} min`;
   return room.role === "host" ? `You host it · ${away}` : `Host ${away}`;
@@ -566,18 +568,38 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
     await onChanged();
   }
 
+  // Only the host's list has ended rooms; reopening goes in as host. A
+  // board the server deleted comes back from this browser's copy, if any.
+  async function reopen(room: EndedRoom) {
+    setError(null);
+    setAsking(`reopening:${room.id}`);
+    try {
+      await reopenRoom(room.id);
+      goToRoom(room.id);
+    } catch (failure) {
+      setError(problem(failure));
+      setAsking(null);
+    }
+  }
+
   return (
     <section className="your-rooms" aria-label="Your rooms">
       <h2>Your rooms</h2>
       {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
-        {rows.map(({ key, room, copy, workspace, code }) => (
+        {rows.map(({ key, room: listed, copy, workspace, code }) => {
+          // an ended room is entered only through Reopen: opening it as its
+          // host would bring it back anyway (docs/adr/0003)
+          const ended = listed?.state === "ended" ? listed : null;
+          const room = ended ? null : listed as Exclude<ListedRoom, EndedRoom> | null;
+          return (
           <li key={key} className={copy && copy.database === peeking ? "peeking" : undefined}>
             {room || copy
               ? <button className="room-link" onClick={() => room ? goToRoom(room.id) : copy && onOpen(copy)}>{code ? <>Room <code>{code}</code></> : "A room"}</button>
-              : <span className="room-link">A room you hosted</span>}
+              : <span className="room-link">{code ? <>Room <code>{code}</code></> : "A room you hosted"}</span>}
             <span className="room-state">
               {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept on server" : "board not kept on server"}</>
+                : ended ? <><i className="gone"></i>{endedNow === ended.id ? "Ended just now" : `Ended ${shortDate(ended.endedAt)}`} · {ended.boardGone ? "board deleted on server" : "board kept on server"}</>
                 : endedNow && (copy?.roomId === endedNow || workspace?.room === endedNow) ? <><i className="gone"></i>Ended just now</>
                 : <><i className="gone"></i>Not live</>}
             </span>
@@ -597,8 +619,15 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 <button className="danger" onClick={() => void act(() => deleteCopy(copy))}>Delete</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
+            ) : ended && asking === `reopen:${ended.id}` ? (
+              <span className="actions asking">
+                <span>The server deleted this board and this browser has no copy of it, so the room reopens with an empty board. Reopen it?</span>
+                <button className="danger" onClick={() => void reopen(ended)}>Reopen</button>
+                <button className="link" onClick={() => setAsking(null)}>Cancel</button>
+              </span>
             ) : (
               <RowActions label={code ? `room ${code}` : "this room"}>
+                {ended && <button className="link" disabled={asking === `reopening:${ended.id}`} onClick={() => ended.boardGone && !copy ? setAsking(`reopen:${ended.id}`) : void reopen(ended)}>{asking === `reopening:${ended.id}` ? "Reopening..." : "Reopen"}</button>}
                 {room && <button className="link" onClick={() => goToRoom(room.id)}>Enter</button>}
                 {copy && <button className="link" onClick={() => onOpen(copy)}>Open</button>}
                 {copy && <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>}
@@ -608,7 +637,8 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
               </RowActions>
             )}
           </li>
-        ))}
+          );
+        })}
       </ul>
       {workspaces.length > 0 && <p className="workspace-note"><small>{FILES_NOTE}</small></p>}
       {deletable > 1 && (asking === "all" ? (
@@ -668,7 +698,7 @@ function BoardPeek({ copy, room, onClose }: { copy: LocalCopy; room: ListedRoom 
           <small>{asOf ? `As of ${asOf}, ` : ""}from this browser's copy</small>
         </div>
         <span className="actions">
-          {room && <button className="enter" onClick={() => goToRoom(room.id)}>Enter room</button>}
+          {room && room.state !== "ended" && <button className="enter" onClick={() => goToRoom(room.id)}>Enter room</button>}
           <button className="full-page" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Full page</button>
           <button disabled={!(opened instanceof Y.Doc)} onClick={() => opened instanceof Y.Doc && downloadBoard(exportBoard({ code: copy.code ?? "board", doc: opened }))}>Export</button>
           <button className="close" aria-label="Close the board" onClick={onClose}>×</button>
@@ -1021,7 +1051,8 @@ function InviteBox({ access, members }: { access: Access; members: RoomMember[] 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const pending = list?.rooms.find((room) => room.id === access.room.id)?.invites ?? [];
+  const listed = list?.rooms.find((room) => room.id === access.room.id);
+  const pending = (listed?.state !== "ended" && listed?.invites) || [];
 
   useEffect(() => {
     if (!user) return;
