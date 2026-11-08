@@ -29,10 +29,18 @@ export function credentialFor(kind: "model" | "github", value: string, origins: 
  * `navigator.serviceWorker`'s message event, so guest code (workers, preview
  * iframes) can't ask.
  */
-export function serveCredentials(credentials: Credential[]): () => void {
+export function serveCredentials(credentials: Credential[], onRefused?: (credential: Credential) => void): () => void {
   if (!("serviceWorker" in navigator)) return () => {};
   const byPlaceholder = new Map(credentials.map((credential) => [credential.placeholder, credential]));
   const onMessage = (event: MessageEvent) => {
+    // The service worker saw the endpoint answer 401 to a real value.
+    if (event.data?.type === "riff-credential-refused") {
+      for (const placeholder of event.data.placeholders ?? []) {
+        const credential = byPlaceholder.get(placeholder);
+        if (credential) onRefused?.(credential);
+      }
+      return;
+    }
     if (event.data?.type !== "riff-credential-request") return;
     const port = event.ports[0];
     if (!port) return;

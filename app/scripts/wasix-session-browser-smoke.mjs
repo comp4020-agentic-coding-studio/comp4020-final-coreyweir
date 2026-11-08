@@ -77,7 +77,7 @@ try {
       const session = await WasixSession.open({ volume: controller.pod.volume, root: "/work/repo" });
       try {
         const interactiveBash = await session.installInteractiveBash();
-        const control = await session.run(python, ["-c", "from pathlib import Path; print(Path('/work/repo/.wasix-session/bashrc').read_text(), end='')"], { cwd: "/work/repo" });
+        const control = await session.run(python, ["-c", "from pathlib import Path; print(Path('/opt/riff/.wasix-session/bashrc').read_text(), end='')"], { cwd: "/work/repo" });
         const first = await session.run(python, ["/work/repo/session-write.py"], { cwd: "/work/repo" });
         if (first.code !== 0) {
           throw new Error(`guest mount write failed (${first.code}): ${new TextDecoder().decode(first.stderr)}`);
@@ -97,7 +97,10 @@ try {
         return {
           interactiveBash,
           controlStdout: new TextDecoder().decode(control.stdout),
-          controlLeakedToHost: controller.pod.volume.existsSync("/work/repo/.wasix-session/bashrc"),
+          controlLeakedToHost: controller.pod.volume.existsSync("/opt/riff/.wasix-session/bashrc"),
+          // Not in the workspace, where git and Claude would see it as the
+          // user's files (docs/week-12.md, "everything missing").
+          controlInWorkspace: controller.pod.volume.existsSync("/work/repo/.wasix-session"),
           firstCode: first.code,
           hostValues,
           secondCode: second.code,
@@ -115,11 +118,12 @@ try {
   }, PYTHON);
 
   assert.equal(result.firstCode, 0);
-  assert.equal(result.interactiveBash.bashrcPath, "/work/repo/.wasix-session/bashrc");
+  assert.equal(result.interactiveBash.bashrcPath, "/opt/riff/.wasix-session/bashrc");
   assert.ok(result.interactiveBash.args.includes("-i"));
   assert.match(result.controlStdout, /OSC 133/);
   assert.match(result.controlStdout, /^alias true=:$/m);
   assert.equal(result.controlLeakedToHost, true);
+  assert.equal(result.controlInWorkspace, false);
   assert.deepEqual(result.hostValues, ["work-guest\n", "home-guest\n", "tmp-guest\n"]);
   assert.equal(result.secondCode, 0);
   assert.equal(result.secondStdout, "work-guest\nhome-guest\ntmp-guest\n");

@@ -208,6 +208,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
               channel.publishData(pending, cols, rows);
             }, 16);
           },
+          (kind) => setError(kind === "github"
+            ? "GitHub refused your token (expired or revoked), so git can't reach GitHub. Connect GitHub again in host setup, then start Claude again."
+            : "Your model endpoint refused your token (expired or revoked). Check it in host setup."),
         );
         controller.onClaudeEvent = (event) => claudeEventRef.current?.(event);
         controller.onNotice = setError;
