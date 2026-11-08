@@ -34,13 +34,14 @@ README, PROCESS.md and the reflections are mine to write.
 |---|---|---|
 | [0001](docs/adr/0001-the-terminal-mirror-is-not-persisted.md) | The terminal mirror stays in server memory and is never persisted | Yes (today's behaviour) |
 | [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
-| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import. 4 MB per room, pruning from 70% of the volume | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`), size cap and pruning (`f512b5a`, `7d27daa`), 18 Oct; local copies, export and import (`4e17a8f`, `65ba779`), 19 Oct |
+| [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import. 4 MB per room, pruning from 70% of the volume | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`), size cap and pruning (`f512b5a`, `7d27daa`), 18 Oct; local copies, export and import (`4e17a8f`, `65ba779`), 19 Oct; workspace export, 8 Nov |
 | [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
 | [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes (`389ffff`, `4acb32b`; push token in the client 18 Oct) |
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
 | [0007](docs/adr/0007-credentials-stay-in-the-tab.md) | The host's tokens stay in the page; the guest holds placeholders, swapped by our service worker (P1.6) | Yes (18 Oct) |
 | [0008](docs/adr/0008-your-rooms-invites-and-colleagues.md) | Your rooms (members' and invited rooms only, live over a websocket), host-only invites by GitHub id, colleagues you keep; the room state half of 0003 | Yes (`a0bee0f`, `ef1401f`, `7e6023e`, `79a008f`, 18 Oct) |
-| [0009](docs/adr/0009-riffs-own-free-models-for-hosts.md) | Hosts can use Riff's own free models (OpenRouter), through a host-only proxy on our server; the key never leaves the server | Not yet |
+| [0009](docs/adr/0009-riffs-own-free-models-for-hosts.md) | Hosts can use Riff's own free models (OpenRouter), through a host-only proxy on our server; the key never leaves the server | Yes (`e2ad15b`, `dc88e22`) |
+| [0010](docs/adr/0010-the-hosts-workspace-persists-in-opfs.md) | The host's workspace persists in this browser (OPFS), one per room; the room's repository is cloned at boot | Yes (`16ee967`, `50bec09`, `b77233a`), 8 Nov |
 
 ## Work, in order
 
@@ -378,20 +379,69 @@ auto-release at the latest.
   fields only, images byte for byte and checked (type, magic bytes,
   2048px, decodes). Checked by `npm run test:board-file` and
   `npm run test:boards-browser` (dev and live, both sizes).
-  - Left: workspace export, a zip of OPFS (fflate) including Claude
-    transcripts from `~/.claude/projects/-work-repo/`, never credentials,
-    with the OPFS workspace below; transcripts allowed in, with warnings on
-    both export and import.
-- **OPFS workspace.**
-  - The host's filesystem survives a reload or crash, one workspace per repo.
-  - Check: reload mid-task, and unpushed edits are still there.
-- **Clone the host's repository automatically.** The host form's "Git
-  repository" field is never used to clone: today it only makes the room
-  ask for GitHub (`App.tsx`, `RoomGate`), and Claude has to be told to
-  clone. Clone it into `/work/repo` at boot with the push token (or
-  anonymously for a public repo). Goes with the OPFS workspace, which is
-  keyed by the same repository: an existing workspace is opened, not
-  re-cloned.
+  - ~~Workspace export, a zip including Claude transcripts, never
+    credentials.~~ Built 8 Nov (ADR 0003's third amendment): a host-only
+    "Export" in the workspace controls, `app/src/workspaceExport.ts`
+    (fflate), `repo/` with `.git`, transcripts by default, `node_modules`
+    and the like left out unless ticked, Riff's `.wasix-session` and any
+    token Riff holds never in, a manifest listing the commits and which
+    are unpushed. Checked by `npm run test:workspace-export`,
+    `test:workspace-export-browser` and `test:workspace-export-ui`.
+    - Checked on dev and live (8 Nov), including a pod restored from OPFS:
+      `test:workspace-export-ui` drives the page, so it runs against the
+      built app; `test:workspace-export-browser` imports source and is dev
+      only.
+    - Left: import (decided 8 Nov: later, into a new workspace only, after
+      the OPFS work; transcripts behind their own confirmation); real-git
+      history (Nodepod's git isn't git, see the ADR); a transcript Claude
+      Code wrote itself wasn't measured; a `chmod` from WASIX bash doesn't
+      reach the volume, so such a file exports as 644.
+    - Seen while testing: a smoke typing `$(...)` into WASIX bash stalled
+      the shell in about a third of runs (a command substitution forks a
+      subshell); with none, 0 stalls in 10 runs. A hypothesis, not chased:
+      not export's, but it will bite anything that types into the host's
+      terminal.
+- ~~**OPFS workspace.**~~ Decided and built 8 Nov (ADR 0010; `5deaaad`
+  ADR, `16ee967` saving, `b77233a` list and delete). One workspace per
+  *room* (its permanent id), not per repo as first planned: everything
+  under `/work` and `/home/user` (`node_modules`, `.git`, Claude's
+  transcripts), not `/tmp`, caches or what the boot rewrites. Saved
+  behind the filesystem from its change reports (`onGlobalChange`, which
+  sees the Rust store's ring), never making a writer wait; a manifest
+  written last, in alternating slots, so a crash loses the save in
+  progress and never half of one. One tab holds it (a Web Lock); a second
+  asks, then takes over, and the first says it stopped saving. Listed on
+  its board row in "Boards on this browser" (files, size, last saved,
+  what is and isn't saved), with "Delete files"; the row's Delete and
+  sign-out take it too. Checked by `npm run test:workspace-browser` (dev:
+  bash, node and git writes, a delete and a rename, an unannounced reload
+  restores an unpushed commit, bytes, mode 755 and a transcript; takeover;
+  the landing page's delete paths). Measured on dev: 10,000 small files
+  in OPFS about 10 s after they were written; boot with them restored
+  about 1.3 s. On live, `npm run test:workspace-ui-browser` (8 Nov, at
+  1600×1000 and 390×844): hosted from the landing page, Bash typed into,
+  an unpushed commit and four raw bytes back after an unannounced reload,
+  /tmp not, the second tab asking before it takes over and the first
+  then not saving.
+  - Found on the way: typing into the host's bash with no gap between
+    keys stalls its input part-way through a command in about half the
+    runs, on dev and live, with the workspace off too (the smoke types at
+    20 ms a key; `TYPE_DELAY=0` reproduces).
+  - Left: a reload mid-task with Claude itself on live, by hand, and on a
+    real phone; the "Your rooms" marker (above) once that list wants it, through
+    `listWorkspaces()`; Nodepod's `attachSharedStore` drops file modes
+    (worked around with `reapplyModes`, belongs in the fork); WASIX
+    bash's `chmod` doesn't reach the store; a crash (rather than a reload)
+    is unmeasured.
+- ~~**Clone the host's repository automatically.**~~ Built 8 Nov
+  (`50bec09`, ADR 0010): at boot, when the room names a GitHub repository
+  and `/work/repo` has no `.git`, Nodepod's `git clone` runs with the
+  push token's placeholder (ADR 0007). A restored workspace is opened,
+  never cloned or pulled again. Checked by the same smoke with
+  `CLONE_TOKEN` (clone, reload, no second clone, same log).
+  - Left: anonymous clone of a public repo (Nodepod's git needs a token,
+    so without GitHub connected the terminal says it didn't clone);
+    a clone on live.
 - **Queue release** (ADR 0004):
   - Send submits with newlines intact; an auto toggle, visible to the room.
   - Planned mechanism: a Claude Code mod. That needs the bundle upgraded

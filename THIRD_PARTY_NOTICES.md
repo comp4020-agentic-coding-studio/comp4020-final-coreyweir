@@ -20,6 +20,8 @@ BlueOak). The licenses below need more than a mention:
   adapted to run in the browser): Apache-2.0.
   The files have been modified from upstream. See
   `third_party/licenses/lemon-tls-Apache-2.0.txt`.
+- **fflate** (0.8.3, unmodified, from npm; writes the workspace export zip):
+  MIT, © Arjun Barrett. See `third_party/licenses/fflate-MIT.txt`.
 
 ## WebAssembly command binaries
 
