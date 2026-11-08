@@ -733,13 +733,25 @@ export class ClaudePodController {
     const process = this.process;
     if (!process) return;
     const exited = this.claudeExited;
-    // Ctrl-U clears whatever is typed at Claude's prompt first.
-    process.write("\x15/exit\r");
-    const gone = await Promise.race([exited?.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10_000))]);
-    if (!gone) {
-      process.kill?.();
-      await exited;
+    let gone = false;
+    void exited?.then(() => { gone = true; });
+    const until = (ms: number) => Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, ms))]);
+    // Ctrl-U clears whatever is typed at Claude's prompt first. A Claude
+    // that is still drawing itself (its hooks can say idle first) drops
+    // what's typed, so ask again every few seconds, then stop it outright.
+    for (let attempt = 0; attempt < 3 && !gone; attempt++) {
+      process.write("\x15/exit\r");
+      await until(4_000);
     }
+    if (!gone) {
+      process.kill("SIGTERM");
+      await until(4_000);
+    }
+    if (!gone) {
+      process.kill("SIGKILL");
+      await until(4_000);
+    }
+    if (!gone) throw new Error("Claude didn't stop, so the MCP servers aren't applied yet. Interrupt it, then apply again.");
     this.terminalNote(`\x1b[38;5;244m${note}\x1b[0m`);
     const transcripts = "/home/user/.claude/projects/-work-repo";
     const volume = this.pod?.volume;
