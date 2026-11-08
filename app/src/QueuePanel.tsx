@@ -79,7 +79,7 @@ export function useQueueRelease({ facilitator, roomState, synced, terminalRef, q
   return { state, unacknowledged, dispatch, send, setAuto };
 }
 
-export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostHere, canSendNow, waiting = false, onSend, onDelete, onAuto }: {
+export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostHere, ended = false, canSendNow, waiting = false, onSend, onDelete, onAuto }: {
   queued: QueuedPrompt[];
   facilitator: boolean;
   full: boolean;
@@ -87,6 +87,8 @@ export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostH
   claudeState: ClaudeState;
   /** False while the host is away: the last state they published may be stale. */
   hostHere: boolean;
+  /** The room has ended: the host isn't away, they're gone. */
+  ended?: boolean;
   canSendNow: boolean;
   /** Claude hasn't yet taken the last prompt sent. */
   waiting?: boolean;
@@ -105,7 +107,7 @@ export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostH
     <article className="queue">
       <header className="section-title queue-heading">
         <h2>Up next</h2><span>{queued.length}</span>
-        <small className={`claude-state ${hostHere ? claudeState : "off"}`} title={hostHere ? stateTitle : undefined} data-state={hostHere ? claudeState : "away"}>{hostHere ? CLAUDE_STATE_LABEL[claudeState] : "Host away"}</small>
+        <small className={`claude-state ${hostHere ? claudeState : "off"}`} title={hostHere ? stateTitle : undefined} data-state={hostHere ? claudeState : "away"}>{hostHere ? CLAUDE_STATE_LABEL[claudeState] : ended ? "Room ended" : "Host away"}</small>
         <label className="auto-release" title={facilitator ? "Send the next prompt each time Claude finishes a turn" : "Only the host can change this"}>
           <input type="checkbox" checked={auto} disabled={!editable} onChange={(event) => onAuto(event.target.checked)} />
           Auto
