@@ -28,6 +28,8 @@ try {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   await page.setViewport({ width: 620, height: 700 });
+  // Bash first: keep the new room from booting Claude by itself (autoBoot.ts).
+  await page.evaluateOnNewDocument(() => sessionStorage.removeItem("riff-auto-boot"));
   await page.goto(`${baseUrl}/?setup=host`, { waitUntil: "networkidle0" });
   const inputs = await page.$$(".entry-card input");
   await inputs[0].type("WASIX Host");

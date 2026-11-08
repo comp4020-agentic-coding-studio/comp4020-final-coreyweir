@@ -24,6 +24,7 @@ import { RIFF_MODEL } from "./api";
 import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } from "./imagePaste";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
+import type { PodFiles } from "./boardForClaude";
 import { credentialFor, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
 import { SESSION_ENV_FILE, SESSION_HOME, SESSION_HOSTNAME, SESSION_USER, sessionEnvScript, sessionHelperCommands, XTERM_TERMCAP } from "./sessionSystem";
@@ -446,6 +447,17 @@ export class ClaudePodController {
           showThinkingSummaries: true,
           verbose: true,
           permissions: { defaultMode: "bypassPermissions" },
+          // The host chose this mode by hosting; without this Claude Code
+          // asks on every boot, in red on everyone's mirror, with "No,
+          // exit" as the default. The key its own dialog writes on accept
+          // (2.1.221). Not in the saved workspace (ADR 0010): written here
+          // every boot.
+          skipDangerousModePermissionPrompt: true,
+          // WebFetch first asks claude.ai whether the domain is blocked; from
+          // the browser that request is refused by CORS, so every fetch failed
+          // with "check failed". A settings key in 2.1.221 (read through the
+          // merged settings, not ~/.claude.json).
+          skipWebFetchPreflight: true,
           // Turn start and end reach the page through riff-hook (docs/adr/0004).
           hooks: riffHookSettings(),
         }),
@@ -993,6 +1005,26 @@ export class ClaudePodController {
     this.process.write(paste);
     this.process.write(submit);
     return true;
+  }
+
+  /**
+   * The pod's files, for what the page writes in for Claude to read (the
+   * board, boardForClaude.ts). Null until the pod has booted.
+   */
+  podFiles(): PodFiles | null {
+    const volume = this.pod?.volume;
+    if (!volume) return null;
+    return {
+      readsImages: modelReadsImages(this.config.env, RIFF_MODEL),
+      exists: (path) => volume.existsSync(path),
+      write: (path, bytes) => {
+        volume.mkdirSync(path.slice(0, path.lastIndexOf("/")) || "/", { recursive: true });
+        volume.writeFileSync(path, bytes);
+      },
+      remove: (path) => {
+        if (volume.existsSync(path)) volume.removeTreeSync(path);
+      },
+    };
   }
 
   /** Something the host should know that isn't terminal output (imagePaste.ts). */

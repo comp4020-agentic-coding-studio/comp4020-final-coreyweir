@@ -63,15 +63,15 @@ async function run(hostViewport, participantViewport, label) {
   await host.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 10_000 });
   const room = await host.$eval(".room-name span", (element) => element.textContent.replace("Room ", ""));
   await openRoomTab(host);
-  await host.locator(".terminal-controls button").click();
+  // No Boot Claude to press: a new room boots Claude by itself (autoBoot.ts).
   await host.waitForSelector(".terminal-target .xterm", { timeout: 90_000 });
   await host.waitForFunction(
     () => Number(document.querySelector(".terminal-target")?.getAttribute("data-output-size")) > 200,
     { timeout: 90_000 },
   );
-  // Claude's dialog is what's compared, so it has to be on the host's screen
-  // first; the boot's own lines come before it.
-  await host.waitForFunction(() => /Yes, I accept/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""), { timeout: 90_000 });
+  // Claude's prompt is what's compared, so it has to be on the host's
+  // screen first; the boot's own lines come before it.
+  await host.waitForFunction(() => /bypass permissions on/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""), { timeout: 90_000 });
 
   const participantContext = await browser.createBrowserContext();
   const participant = await participantContext.newPage();
@@ -119,7 +119,8 @@ async function run(hostViewport, participantViewport, label) {
   }
   console.log(`${label}: host ${hostView.cols}x${hostView.rowCount}, participant ${participantView.cols}x${participantView.rowCount}`);
   console.log(`${label}: participant box ${JSON.stringify(participantView.box)} screen ${JSON.stringify(participantView.screen)}`);
-  assert.ok(hostView.rows.some((row) => /Yes, I accept/.test(row)), "the host's screen shows Claude's dialog");
+  assert.ok(hostView.rows.some((row) => /bypass permissions on/.test(row)), "the host's screen shows Claude's prompt");
+  assert.ok(!hostView.rows.some((row) => /Yes, I accept/.test(row)), "and no bypass-permissions dialog");
   assert.equal(participantView.cols, hostView.cols, "same columns");
   assert.equal(participantView.rowCount, hostView.rowCount, "same rows");
   assert.deepEqual(participantView.rows, hostView.rows, "the participant's screen matches the host's line for line");

@@ -87,6 +87,8 @@ try {
   // Not kept: ending the room deletes its board.
   const keep = await host.$(".entry-card form .check input[type=checkbox]");
   if (keep && await keep.evaluate((element) => element.checked)) await keep.click();
+  // Bash first: keep the new room from booting Claude by itself (autoBoot.ts).
+  await host.evaluateOnNewDocument(() => sessionStorage.removeItem("riff-auto-boot"));
   await host.click(".entry-card form .primary");
   await host.waitForFunction(() => location.search.startsWith("?id="), { timeout: 15_000 });
   await host.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 15_000 });

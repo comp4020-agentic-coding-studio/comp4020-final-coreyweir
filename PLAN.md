@@ -351,9 +351,23 @@ auto-release at the latest.
     server, `8066106` client, `d9a7766` log); see the ADR's Implementation
     section. Checked by `spec/rooms.test.ts` (live), `npm run test:rooms`,
     `npm run test:lifecycle-browser` (dev and live, both sizes).
-    - Left: a host reviving a not-kept room in a browser (their IndexedDB
-      copy should sync back; not measured); the 5-minute grace on a phone
-      host (Still open).
+    - ~~Left: a host reviving a not-kept room in a browser (their IndexedDB
+      copy should sync back; not measured)~~. Measured 8 Nov, with
+      Reopen: the host's ended rooms stay in their list (last 10, 30
+      days), the row says Ended and offers Reopen, only the host may
+      (`POST /api/rooms/:id/reopen`); see ADR 0003's "Reopening". Checked by
+      `spec/rooms.test.ts`, `npm run test:rooms`, `npm run
+      test:reopen-browser` (dev, both sizes). Needs live.
+    - ~~Leaving a room, and a host deleting one from the server~~ (Corey's
+      decisions, 8 Nov; `f890f56` server, `c055309` client): a row's
+      Delete only cleared this browser, so a GitHub member's room came
+      back everywhere. Leave room (People panel, row) frees the name and
+      the code or an invite brings them back; the host's Delete can also
+      delete the room from the server, ending it for everyone for good.
+      See ADR 0003's "Leaving and deleting". Checked by
+      `spec/rooms.test.ts`, `spec/models.test.ts`, `npm run test:rooms`,
+      `npm run test:leave-delete-browser` (dev, both sizes). Needs live.
+    - Left: the 5-minute grace on a phone host (Still open).
   - ~~pruning (oldest opened first, past a volume threshold) and a per-room
     size cap~~. Decided 18 Oct (ADR 0003's amendment): the proposed 16 MB
     cap got node killed for memory on live, so 4 MB per room, hard, a full
@@ -494,7 +508,7 @@ auto-release at the latest.
   through `xclip`, which Nodepod's shell can't give it).
   - Left: a real paste from the OS clipboard and a drag from the desktop
     on live, with a real model; a paste on a phone host. Sending the board
-    or a selection to Claude is in P3.
+    or a selection to Claude is in P3 (built 8 Nov).
 - ~~**Terminals the same size**~~ (crit 11; 8 Nov). The mirror already took
   the host's columns and rows, but at a fixed 12px, so a phone watching a
   desktop host saw the first 390px of a 1368px screen. Now the font follows
@@ -714,15 +728,43 @@ auto-release at the latest.
   out: measured 19 Oct, its free models answer 403 `FreeTierError` to
   anything but OpenCode itself. Being built now, ahead of the rest of P2,
   because without it a marker with no key can't see Claude work.
-- **Send the board, or a selection, to Claude** (week-12 #5). Measured
-  8 Nov on 2.1.221: pasting an absolute image path into Claude attaches
-  the image, and the model gets an image block; images over 2000 px are
-  dropped silently, so downscale in the browser first. A host-only button
-  draws the shapes onto a canvas (quickdraw's `drawShape`/`pageBounds`),
-  writes a PNG under `/tmp/riff/` in the pod and pastes its path. About
-  2–3 h. Corey, 8 Nov: nice to have, not a priority. Participants
-  attaching a selection to a staged prompt would be a sharing decision,
-  not yet asked.
+- ~~**Send the board, or a selection, to Claude**~~ (week-12 #5; built
+  8 Nov, Corey's design). A host-only button on the board, "Send board to
+  Claude" ("Send selected shape(s) to Claude" with a selection), writes
+  the files into the host's pod at once, under a new `/tmp/riff/board-N/`
+  each time: `board.json` (format `riff-board-for-claude-1`: notes' and
+  text's words, geo shapes with labels, positions and sizes rounded from
+  the sent area's top-left, arrows with the shapes their ends touch,
+  freehand strokes as a box, images by file, `inside` for what a drawn
+  shape encloses, in reading order), the pasted images as `image-N.*`
+  shrunk to 2000 px (imagePaste.ts's `fitImage`), and `board.png` from
+  quickdraw's `exportImage` within 2000 px, only when the model reads
+  images. quickdraw keeps no arrow bindings, so the ends are matched to
+  shapes by position (within 16 units, the smallest shape wins), and the
+  file says so. A modal `<dialog>` then opens on an editable prompt ("The
+  board from our room is in /tmp/riff/board-3/ (board.json describes
+  every shape; ...)" and a blank line); **Stage** stages it like a typed
+  prompt (the queue and its release decide when Claude gets it), **Cancel**
+  or Esc deletes that directory. Disabled, saying why, until the pod has
+  booted. With Riff's free models the popup says there's no picture, and
+  the prompt says the model can't look at the image files (hypothesis,
+  unmeasured: a text-only endpoint refuses a request with an image in it,
+  so Claude opening one would fail its turn). `app/src/boardForClaude.ts`
+  (no DOM), `app/src/SendBoard.tsx`, `ClaudePodController.podFiles()`.
+  Files in `/tmp` aren't in the saved workspace (ADR 0010), so a reload
+  loses them while the staged prompt stays. Participants attaching a
+  selection is a sharing decision, still not asked; they have no button.
+  - Checks: `npm run test:board-for-claude` (9 tests; red with the
+    smallest-shape rule, the selection filter, image dedupe, the stroke
+    summary, relative positions or the picture margin removed);
+    `npm run test:send-board-browser` (dev, 1920x1080 and 390x844, own
+    endpoint and free models: disabled before boot, files read back by
+    node and bash, image 2048 → 2000, board.png only with the own
+    endpoint, edited prompt staged with auto-release on and nothing
+    queued, selection alone in board-2, Esc deletes it, no button for a
+    participant; red without the delete, with `readsImages` always true,
+    and with the button for everyone).
+  - Left: live, and Claude reading the files with a real model.
 
 ## Still open
 
@@ -735,7 +777,9 @@ auto-release at the latest.
   host loses hot reload and its app's sockets, and round-trips. **Next
   (2b):** a service worker on the preview origin that forwards the host's
   frame's requests to its own Nodepod by `postMessage`, so the host's
-  preview is local again.
+  preview is local again. Designed, not built (ADR 0011, "2b"): about
+  4–6 h, after measuring that Chrome lets the sandboxed cross-site frame's
+  worker control its navigations.
 - **Phone hosts and the 5-minute grace.** Android suspends background tabs,
   and how soon may vary by device and settings. Worth measuring on the
   Pixel before settling on 5 minutes; not urgent.

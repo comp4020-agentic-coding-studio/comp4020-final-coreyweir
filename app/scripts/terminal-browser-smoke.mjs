@@ -31,6 +31,11 @@ try {
   room = await host.$eval(".room-name span", (element) => element.textContent.replace("Room ", ""));
   assert.match(room, /^[A-Z2-9]{6}$/);
 
+  // A room just created boots Claude by itself while the host is still on
+  // the Board, and says so there (autoBoot.ts).
+  await host.waitForFunction(() => /Starting Claude for the room/.test(document.querySelector(".room-banner.booting")?.textContent ?? ""), { timeout: 10_000, polling: 100 });
+  assert.equal(await host.$eval(".board-wrap", (element) => element.offsetParent !== null), true, "on the Board");
+
   const headers = await host.evaluate(() => ({ isolated: crossOriginIsolated, worker: typeof SharedArrayBuffer !== "undefined" }));
   assert.deepEqual(headers, { isolated: true, worker: true });
 
@@ -51,14 +56,16 @@ try {
   assert.equal(await host.$eval(".terminal-pane", (element) => element.offsetParent === null), true);
   assert.equal((await host.$$(".staging")).length, 0);
 
+  // Claude came up in the hidden Room tab; showing it fits it to the box.
+  await host.waitForSelector(".terminal-target .xterm", { timeout: 180_000 });
   await openTab("Room");
-  // An empty terminal says what to do, then what's happening, then gets
-  // out of the way of the screen.
-  assert.match(await host.$eval(".terminal-empty", (element) => element.textContent), /Boot Claude to start/);
-  await host.locator(".terminal-controls button").click();
-  await host.waitForFunction(() => !/Boot Claude to start/.test(document.querySelector(".terminal-empty")?.textContent ?? ""), { timeout: 10_000, polling: 100 });
-  await host.waitForSelector(".terminal-target .xterm", { timeout: 90_000 });
+  assert.equal(await host.$(".room-banner.booting"), null, "the Room tab shows the boot itself");
   await host.waitForFunction(() => !document.querySelector(".terminal-empty"), { timeout: 10_000, polling: 100 });
+  await host.waitForFunction(() => {
+    const target = document.querySelector(".terminal-target");
+    const screen = target?.querySelector(".xterm-screen");
+    return screen && screen.getBoundingClientRect().width > target.clientWidth * 0.8;
+  }, { timeout: 10_000, polling: 100 });
   await host.waitForFunction(
     () => Number(document.querySelector(".terminal-target")?.getAttribute("data-output-size")) > 200,
     { timeout: 90_000 },
@@ -108,10 +115,9 @@ try {
   );
 
   // A prompt's trip as far as the queue: the participant stages it, the
-  // host queues it, and it shows in both queues. Claude is still on its
-  // bypass-permissions dialog here, so Send waits (disabled) and the room
-  // sees "starting"; the host removes it instead. Sending, by hand and
-  // automatically, is test:queue-release-browser.
+  // host queues it, and it shows in both queues; only the host has Send.
+  // The host removes it instead. Sending, by hand and automatically, is
+  // test:queue-release-browser.
   await participant.type(".new-prompt textarea", "riff queue smoke");
   await participant.click(".new-prompt button");
   await host.waitForFunction(() => [...document.querySelectorAll(".prompt-card textarea")].some((element) => element.value === "riff queue smoke"), { timeout: 10_000 });
@@ -122,8 +128,7 @@ try {
   const queuedOn = (page) => page.waitForFunction(() => [...document.querySelectorAll(".queue-row p")].some((element) => element.textContent === "riff queue smoke"), { timeout: 10_000 });
   await Promise.all([queuedOn(host), queuedOn(participant)]);
   assert.equal(await participant.$(".send-prompt"), null);
-  assert.equal(await host.$eval(".send-prompt", (element) => element.disabled), true);
-  await participant.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "starting", { timeout: 10_000 });
+  assert.ok(await host.$(".send-prompt"));
   await host.click(".queue-row button[aria-label='Remove queued prompt']");
   const emptyOn = (page) => page.waitForFunction(() => document.querySelectorAll(".queue-row").length === 0, { timeout: 10_000 });
   await Promise.all([emptyOn(host), emptyOn(participant)]);
@@ -149,6 +154,14 @@ try {
   const terminalTop = await participant.$eval(".terminal-pane", (element) => element.getBoundingClientRect().top);
   assert.ok(terminalTop >= 0 && terminalTop < 120, `the Room tab opens with the terminal in sight (top at ${terminalTop}px)`);
   await participantContext.close();
+
+  // Only a new room boots by itself: a reload of it waits for the host.
+  await host.reload({ waitUntil: "networkidle0" });
+  await openTab("Room");
+  await host.waitForSelector(".terminal-heading");
+  assert.equal(await host.$eval(".terminal-controls button", (element) => [element.textContent, element.disabled].join()), "Boot Claude,false");
+  assert.match(await host.$eval(".terminal-empty", (element) => element.textContent), /Boot Claude to start/);
+  assert.equal(await host.$(".room-banner.booting"), null);
   assert.deepEqual(pageErrors, []);
   console.log("Tab layouts, one-click Claude rendering, live participant data, and a prompt from staging to the queue passed.");
 } finally {

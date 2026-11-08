@@ -180,6 +180,26 @@ try {
   await pasteImage(bo, 64);
   await stage(bo, "staged idea");
   await stage(bo, "queued idea");
+  // On a phone staging is below the board: the board's bar takes you down
+  // to it, with the count. Beside the board on a wide screen: no button.
+  await bo.evaluate(() => { document.querySelector(".workspace")?.scrollTo(0, 0); scrollTo(0, 0); });
+  const toStaging = await bo.$(".board-actions .to-staging");
+  const toStagingShown = await toStaging.evaluate((element) => element.checkVisibility());
+  if (viewport.width <= 780) {
+    assert.ok(toStagingShown, "a phone has a way down to staging");
+    assert.match(await toStaging.evaluate((element) => element.textContent), /Add prompt\s*2/);
+    assert.ok(await bo.$eval(".staging", (element) => element.getBoundingClientRect().top >= innerHeight), "staging starts out of view");
+    await toStaging.click();
+    await bo.waitForFunction(() => {
+      const box = document.querySelector(".new-prompt textarea").getBoundingClientRect();
+      return box.top >= 0 && box.bottom <= innerHeight && document.activeElement?.matches(".new-prompt textarea");
+    }, { timeout: 5_000, polling: 100 }).catch(async (error) => {
+      console.error(await bo.evaluate(() => ({ top: document.querySelector(".new-prompt textarea").getBoundingClientRect().top, active: document.activeElement?.outerHTML.slice(0, 80), ws: document.querySelector(".workspace").scrollTop, doc: document.scrollingElement.scrollTop })));
+      throw error;
+    });
+    await shot(bo, "to-staging");
+    console.log("phone: Add prompt takes you down to staging, ready to type");
+  } else assert.equal(toStagingShown, false, "staging is beside the board, no button");
   await hana.waitForFunction(() => document.querySelectorAll(".prompt-card").length === 2, { timeout: 10_000, polling: 100 });
   await hana.evaluate(() => [...document.querySelectorAll(".prompt-card")].find((card) => card.querySelector("textarea").value === "queued idea").querySelector("footer button").click());
   await bo.waitForFunction(() => [...document.querySelectorAll(".queue-row p")].some((element) => element.textContent.includes("queued idea")), { timeout: 10_000, polling: 100 });
@@ -207,7 +227,7 @@ try {
   const shown = () => bo.$$eval(".your-rooms li .actions button, .your-rooms li summary", (elements) => elements.filter((element) => element.checkVisibility()).map((element) => element.textContent));
   assert.deepEqual(await shown(), ["Enter", "More"]);
   await bo.click(".your-rooms li summary");
-  assert.deepEqual(await shown(), ["Enter", "More", "Open", "Export board", "Delete"]);
+  assert.deepEqual(await shown(), ["Enter", "More", "Open", "Export board", "Leave room", "Delete"]);
   await shot(bo, "row-more");
   await bo.keyboard.press("Escape");
   assert.deepEqual(await shown(), ["Enter", "More"], "Escape closes the menu");
@@ -259,7 +279,7 @@ try {
   // Deleting the copy takes this browser's place in the room with it.
   await bo.goto(baseUrl, { waitUntil: "networkidle0" });
   await clickText(bo, ".your-rooms li .actions button", /^Delete$/);
-  await waitText(bo, ".your-rooms .asking", /and its place in the room/);
+  await waitText(bo, ".your-rooms .asking", /forget that you're in this room\. If the host reopens it/);
   await shot(bo, "delete-confirm");
   await bo.click(".your-rooms .asking button.danger");
   await bo.waitForFunction(() => !document.querySelector(".your-rooms"), { timeout: 10_000, polling: 100 });

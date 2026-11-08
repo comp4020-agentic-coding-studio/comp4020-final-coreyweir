@@ -5,13 +5,19 @@ import { checkGitHubToken, throttled } from "./githubCheck";
 import { Terminal } from "@xterm/xterm";
 import type { ClaudePodController, HostConfig } from "./claudePod";
 import type { ClaudeEvent } from "./queueRelease";
+import type { PodFiles } from "./boardForClaude";
 import { useTerminalChannel, type TerminalChannelEvent } from "./terminalChannel";
 import { usePreviewHostChannel } from "./previewChannel";
 import { ACTUAL_FONT_SIZE, fitMirror, type MirrorMode } from "./mirrorFit";
 import { TERMINAL_THEME } from "./terminalTheme";
+import { takeAutoBoot } from "./autoBoot";
 import "./terminal-stream.css";
 
-export type TerminalPaneHandle = { sendPrompt: (prompt: string) => boolean };
+export type TerminalPaneHandle = {
+  sendPrompt: (prompt: string) => boolean;
+  /** The host's pod's files, null until it boots (SendBoard.tsx). */
+  podFiles: () => PodFiles | null;
+};
 
 const MIRROR_MODE_KEY = "riff-mirror-mode";
 
@@ -128,9 +134,13 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   onPreviewUrlChange: (url: string | null, generation: number) => void;
   /** What Claude is doing, from its hooks (docs/adr/0004). Host only. */
   onClaudeEvent?: (event: ClaudeEvent) => void;
+  /** Whether the host's pod has booted, so its files can be written. */
+  onPodReady?: (ready: boolean) => void;
   /** The room has ended: nothing will appear, so don't say "waiting". */
   ended?: boolean;
-}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent, ended = false }, ref) {
+  /** Host: what booting is doing, or null when it isn't, for the other tabs. */
+  onBootStatus?: (status: string | null) => void;
+}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent, onPodReady, ended = false, onBootStatus }, ref) {
   const targetRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ClaudePodController | null>(null);
   const previewChangeRef = useRef(onPreviewUrlChange);
@@ -165,7 +175,14 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       else setError(null);
       return sent;
     },
+    podFiles: () => controllerRef.current?.podFiles() ?? null,
   }), []);
+
+  const podReadyRef = useRef(onPodReady);
+  podReadyRef.current = onPodReady;
+  useEffect(() => {
+    podReadyRef.current?.(attached);
+  }, [attached]);
 
   useEffect(() => () => {
     clearTimeout(outputTimerRef.current);
@@ -176,6 +193,21 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   useEffect(() => {
     if (facilitator) previewChangeRef.current(null, publishPreview(false));
   }, [facilitator, publishPreview]);
+
+  // A room this tab has just created boots Claude by itself (autoBoot.ts).
+  // The terminal is mounted, hidden, from the start, so this runs while the
+  // host is still on the Board.
+  useEffect(() => {
+    if (!facilitator || !config || controllerRef.current || !takeAutoBoot(roomId)) return;
+    void start("claude");
+    // start is this render's; the mark is taken once
+  }, [facilitator, config, roomId]);
+
+  const bootStatusRef = useRef(onBootStatus);
+  bootStatusRef.current = onBootStatus;
+  useEffect(() => {
+    if (facilitator) bootStatusRef.current?.(starting ? status : null);
+  }, [facilitator, starting, status]);
 
   // While hosting with GitHub, ask GitHub whether it still takes the token:
   // when the host comes back to the tab (at most every 5 minutes) and every

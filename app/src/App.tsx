@@ -1,18 +1,19 @@
-import { Children, useEffect, useRef, useState } from "react";
+import { Children, useEffect, useRef, useState, type RefObject } from "react";
 import { Quickdraw, useQuickdrawStore, type QuickdrawRef, type ShapeRecord } from "@quickdrawjs/react";
 import { addPrompt, replaceYText, saveName, savedName, snapshotPrompts, type PromptSnapshot, type QueuedPrompt, type RoomMember, type SentBy, useRoom } from "./room";
 import { QueuePanel, useQueueRelease } from "./QueuePanel";
 import { canSend, type ClaudeState } from "./queueRelease";
 import {
-  type Access, ApiError, createRoom, currentUser, endRoom, enterRoom, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
+  type Access, ApiError, createRoom, currentUser, deleteRoomFromServer, endRoom, enterRoom, leaveRoom, reopenRoom, storedSecret, storedSecrets, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
   acceptInvite, addColleague, cancelInvite, declineInvite, inviteToRoom, listColleagues, removeColleague, watchRooms,
-  type Colleagues, type ListedRoom, type RoomInfo, type RoomList,
+  type Colleagues, type EndedRoom, type ListedRoom, type RoomInfo, type RoomList,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
   RIFF_MODEL_ENV, riffModelsAvailable, riffModelsUrl,
 } from "./api";
 import * as Y from "yjs";
 import { type BoardLimit, useBoardSync } from "./boardSync";
 import { TerminalPane, githubRefusalText, type TerminalPaneHandle } from "./TerminalPane";
+import { useSendBoard } from "./SendBoard";
 import { checkGitHubToken } from "./githubCheck";
 import { useLookOnly } from "./lookOnly";
 import type { HostConfig } from "./claudePod";
@@ -21,6 +22,7 @@ import {
   BoardFileError, MAX_FILE_BYTES, ROOM_LIMIT_BYTES, type BoardFile, type FilePrompt, type ParsedBoard,
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
 } from "./boardFile";
+import { markAutoBoot } from "./autoBoot";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
 import { type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
 import { ImportWorkspace, type PickedWorkspace, seedFromExport } from "./ImportWorkspace";
@@ -129,6 +131,8 @@ function problem(error: unknown, login?: string) {
     case "removed": return "The host removed you from that room.";
     case "bad_name": return "Names need 1 to 40 visible characters.";
     case "slow_down": return "Too many attempts from here. Wait a few minutes and try again.";
+    case "host_only":
+    case "not_a_member": return "Only the room's host can do that, and Riff no longer counts you as its host here.";
     case "others_joined": return "Someone else has been in this room, so it can't start keeping the board now: they joined when it wasn't kept.";
     default: return `Something went wrong (${error.code}).`;
   }
@@ -300,7 +304,7 @@ function minutesSince(at: number | null, now: number) {
   return Math.max(1, Math.round((now - (at ?? now)) / 60_000));
 }
 
-function hostPresence(room: ListedRoom, now: number) {
+function hostPresence(room: Exclude<ListedRoom, EndedRoom>, now: number) {
   if (room.state === "live") return room.role === "host" ? "You're hosting it" : `${room.hostName} is hosting`;
   const away = `away for ${minutesSince(room.hostLastSeen, now)} min`;
   return room.role === "host" ? `You host it · ${away}` : `Host ${away}`;
@@ -499,6 +503,23 @@ async function exportCopy(copy: LocalCopy) {
 // stays one line of buttons at 390px however many a room collects. A
 // native <details>: keyboard and screen readers get a disclosure for free;
 // a click outside, Escape or choosing an action closes it.
+// What a row's Delete takes, said plainly: the board copy, this browser's
+// place in the room (a guest's secret; a GitHub member keeps theirs
+// through the account), and the files. For a guest host the secret is the
+// only thing that makes them host, so it says what they lose.
+function deleteQuestion(copy: LocalCopy, listed: ListedRoom | null, files: boolean, fromServer: boolean) {
+  const secret = copy.roomId ? storedSecret(copy.roomId) : null;
+  const host = listed ? listed.role === "host" : copy.host === true;
+  const sentences = ["Delete this browser's copy of the board?"];
+  if (listed?.state === "ended" && listed.boardGone) sentences.push("The server no longer has this board, so this may be the last copy.");
+  if (fromServer) { /* the room itself goes, so there's no place to keep */ }
+  else if (secret && host) sentences.push("This browser will also forget that you host this room, so you can't go back in as host, end it or reopen it.");
+  else if (secret) sentences.push(`This browser will also forget that you're in this room. ${listed ? "To go back in, you'd join again" : "If the host reopens it, you'd have to join again"} with the code, under a different name.`);
+  else if (listed) sentences.push("The room stays in your list, because you're in it through GitHub.");
+  if (files) sentences.push("The files go too: anything not pushed to GitHub is lost.");
+  return sentences.join(" ");
+}
+
 function RowActions({ label, children }: { label: string; children: React.ReactNode }) {
   const actions = Children.toArray(children).filter(Boolean);
   const more = useRef<HTMLDetailsElement>(null);
@@ -547,6 +568,8 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
 }) {
   const now = useNow();
   const [asking, setAsking] = useState<string | null>(null);
+  // the host's "also delete the room from the server", while asking
+  const [alsoServer, setAlsoServer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const rows = roomRows(list?.rooms ?? [], copies ?? [], workspaces);
   if (!rows.length) return null;
@@ -557,11 +580,26 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
     setError(null);
     try {
       await action();
-    } catch {
-      setError("Couldn't do that in this browser's storage. Try again.");
+    } catch (failure) {
+      setError(failure instanceof ApiError ? problem(failure) : "Couldn't do that in this browser's storage. Try again.");
     }
     setAsking(null);
+    setAlsoServer(false);
     await onChanged();
+  }
+
+  // Only the host's list has ended rooms; reopening goes in as host. A
+  // board the server deleted comes back from this browser's copy, if any.
+  async function reopen(room: EndedRoom) {
+    setError(null);
+    setAsking(`reopening:${room.id}`);
+    try {
+      await reopenRoom(room.id);
+      goToRoom(room.id);
+    } catch (failure) {
+      setError(problem(failure));
+      setAsking(null);
+    }
   }
 
   return (
@@ -569,13 +607,23 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
       <h2>Your rooms</h2>
       {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
-        {rows.map(({ key, room, copy, workspace, code }) => (
+        {rows.map(({ key, room: listed, copy, workspace, code }) => {
+          // an ended room is entered only through Reopen: opening it as its
+          // host would bring it back anyway (docs/adr/0003)
+          const ended = listed?.state === "ended" ? listed : null;
+          const room = ended ? null : listed as Exclude<ListedRoom, EndedRoom> | null;
+          // the host may delete the room from the server too (docs/adr/0003)
+          const roomId = listed?.id ?? copy?.roomId ?? null;
+          const hosting = roomId && (listed ? listed.role === "host" : copy?.host === true && Boolean(storedSecret(roomId))) ? roomId : null;
+          const fromServer = hosting && (alsoServer || !copy);
+          return (
           <li key={key} className={copy && copy.database === peeking ? "peeking" : undefined}>
             {room || copy
               ? <button className="room-link" onClick={() => room ? goToRoom(room.id) : copy && onOpen(copy)}>{code ? <>Room <code>{code}</code></> : "A room"}</button>
-              : <span className="room-link">A room you hosted</span>}
+              : <span className="room-link">{code ? <>Room <code>{code}</code></> : "A room you hosted"}</span>}
             <span className="room-state">
               {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept on server" : "board not kept on server"}</>
+                : ended ? <><i className="gone"></i>{endedNow === ended.id ? "Ended just now" : `Ended ${shortDate(ended.endedAt)}`} · {ended.boardGone ? "board deleted on server" : "board kept on server"}</>
                 : endedNow && (copy?.roomId === endedNow || workspace?.room === endedNow) ? <><i className="gone"></i>Ended just now</>
                 : <><i className="gone"></i>Not live</>}
             </span>
@@ -589,35 +637,77 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 <button className="danger" onClick={() => void act(() => deleteWorkspace(workspace.room))}>Delete files</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
-            ) : copy && asking === copy.database ? (
+            ) : (copy || hosting) && asking === `delete:${key}` ? (
               <span className="actions asking">
-                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}{workspace ? ", and the files (anything not pushed is lost)" : ""}?</span>
-                <button className="danger" onClick={() => void act(() => deleteCopy(copy))}>Delete</button>
+                <span className="delete-question">
+                  <span>{copy ? deleteQuestion(copy, listed, Boolean(workspace), Boolean(fromServer)) : `Delete room ${code} from the server?`}</span>
+                  {hosting && copy && <label className="also-server"><input type="checkbox" checked={alsoServer} onChange={(event) => setAlsoServer(event.target.checked)} /><span>Also delete the room from the server</span></label>}
+                  {fromServer && <span className="server-delete-note">{serverDeleteNote(listed)}</span>}
+                </span>
+                <button className="danger" onClick={() => void act(async () => {
+                  if (fromServer) await deleteRoomFromServer(hosting);
+                  if (copy) await deleteCopy(copy);
+                  else if (workspace) await deleteWorkspace(workspace.room);
+                })}>Delete</button>
+                <button className="link" onClick={() => { setAsking(null); setAlsoServer(false); }}>Cancel</button>
+              </span>
+            ) : room && asking === `leave:${room.id}` ? (
+              <span className="actions asking">
+                <span>{LEAVE_QUESTION}</span>
+                <button className="danger" onClick={() => void act(() => leaveRoom(room.id))}>Leave</button>
+                <button className="link" onClick={() => setAsking(null)}>Cancel</button>
+              </span>
+            ) : ended && asking === `reopen:${ended.id}` ? (
+              <span className="actions asking">
+                <span>The server deleted this board and this browser has no copy of it, so the room reopens with an empty board. Reopen it?</span>
+                <button className="danger" onClick={() => void reopen(ended)}>Reopen</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
             ) : (
               <RowActions label={code ? `room ${code}` : "this room"}>
+                {ended && <button className="link" disabled={asking === `reopening:${ended.id}`} onClick={() => ended.boardGone && !copy ? setAsking(`reopen:${ended.id}`) : void reopen(ended)}>{asking === `reopening:${ended.id}` ? "Reopening..." : "Reopen"}</button>}
                 {room && <button className="link" onClick={() => goToRoom(room.id)}>Enter</button>}
                 {copy && <button className="link" onClick={() => onOpen(copy)}>Open</button>}
                 {copy && <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>}
                 {workspace && <ExportFiles workspace={workspace} code={code ?? null} secrets={hostSecrets} />}
                 {workspace && <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>}
-                {copy && <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>}
+                {room?.role === "participant" && <button className="link" onClick={() => setAsking(`leave:${room.id}`)}>Leave room</button>}
+                {(copy || hosting) && <button className="link" onClick={() => setAsking(`delete:${key}`)}>Delete</button>}
               </RowActions>
             )}
           </li>
-        ))}
+          );
+        })}
       </ul>
       {workspaces.length > 0 && <p className="workspace-note"><small>{FILES_NOTE}</small></p>}
       {deletable > 1 && (asking === "all" ? (
         <p className="delete-all asking">
-          <span>Delete all {copyCount} copies{workspaces.length ? ` and ${workspaces.length === 1 ? "the files" : `${workspaces.length} rooms' files`}` : ""} on this browser, and its place in every room?</span>
+          <span>{deleteAllQuestion(copyCount, workspaces.length, rows)}</span>
           <button className="danger" onClick={() => void act(deleteAllCopies)}>Delete all</button>
           <button className="link" onClick={() => setAsking(null)}>Cancel</button>
         </p>
       ) : <p className="delete-all"><button className="link" onClick={() => setAsking("all")}>Delete all</button></p>)}
     </section>
   );
+}
+
+// What deleting from the server does, beside this browser's own copy.
+function serverDeleteNote(listed: ListedRoom | null) {
+  const live = listed && listed.state !== "ended";
+  return `${live ? "The room ends for everyone now, and" : "The room"} is gone from the server for good: nobody can open it again, you included. Members keep any copy of the board their own browsers have.`;
+}
+
+function deleteAllQuestion(copies: number, files: number, rows: RoomRow[]) {
+  const sentences = [`Delete ${copies === 1 ? "the board copy" : `all ${copies} board copies`} on this browser?`];
+  if (files) sentences.push(`The files for ${files === 1 ? "a room" : `${files} rooms`} go too: anything not pushed to GitHub is lost.`);
+  const held = new Set(storedSecrets().map(({ roomId }) => roomId));
+  const hosted = rows.filter(({ room, copy }) => {
+    const id = room?.id ?? copy?.roomId;
+    return id && held.has(id) && (room ? room.role === "host" : copy?.host === true);
+  }).length;
+  if (hosted) sentences.push(`This browser will also forget every room it's in, including ${hosted === 1 ? "one you host" : `${hosted} you host`}: you couldn't go back in as host, end ${hosted === 1 ? "it" : "them"} or reopen ${hosted === 1 ? "it" : "them"}.`);
+  else if (held.size) sentences.push("This browser will also forget every room it's in. To go back into one, you'd join again with its code, under a different name.");
+  return sentences.join(" ");
 }
 
 // The whole board in view: quickdraw fits on mount, before the records
@@ -666,7 +756,7 @@ function BoardPeek({ copy, room, onClose }: { copy: LocalCopy; room: ListedRoom 
           <small>{asOf ? `As of ${asOf}, ` : ""}from this browser's copy</small>
         </div>
         <span className="actions">
-          {room && <button className="enter" onClick={() => goToRoom(room.id)}>Enter room</button>}
+          {room && room.state !== "ended" && <button className="enter" onClick={() => goToRoom(room.id)}>Enter room</button>}
           <button className="full-page" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Full page</button>
           <button disabled={!(opened instanceof Y.Doc)} onClick={() => opened instanceof Y.Doc && downloadBoard(exportBoard({ code: copy.code ?? "board", doc: opened }))}>Export</button>
           <button className="close" aria-label="Close the board" onClick={onClose}>×</button>
@@ -829,6 +919,8 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
               if (imported) await seedCopy(access.room.id, (doc) => applyBoardFile(doc, imported));
               // the real tokens, so none of them goes into the guest (ADR 0007)
               if (workspaceExport) await seedFromExport(access.room.id, workspaceExport, [config.token, await unwrapPushToken().catch(() => null) ?? ""]);
+              // after the seeds, so the boot finds the imported workspace
+              markAutoBoot(access.room.id);
               return access;
             });
           }}>
@@ -916,21 +1008,63 @@ function Staging({ prompts, canQueue, readOnly, onAdd, onQueue, onDelete }: {
   );
 }
 
-function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection }: {
+// On a phone the staging column sits below the board, out of view: the
+// board's bar has a way down to it (hidden on wider screens, where it's
+// beside the board), focusing the new prompt when there is one.
+function jumpToStaging() {
+  const staging = document.querySelector<HTMLElement>(".staging");
+  staging?.scrollIntoView({ behavior: "smooth", block: "start" });
+  staging?.querySelector<HTMLTextAreaElement>(".new-prompt textarea")?.focus({ preventScroll: true });
+}
+
+const STAGE_ONE = "Select one sticky note, text box or labelled shape to stage its text";
+
+/** A shape's words, if it's a kind quickdraw gives words to and they aren't blank. */
+function wordsOf(shape: ShapeRecord) {
+  const words = shape.type === "note" || shape.type === "text" ? shape.props.text : shape.type === "geo" ? shape.props.label : undefined;
+  return typeof words === "string" && words.trim() ? words.trim() : null;
+}
+
+/**
+ * The text "Stage selected text" stages: the words of the one shape in the
+ * selection that has any (a sticky note, text box, or drawn shape with a
+ * label). Arrows, strokes and images selected with it don't count, so a
+ * region around a box and its arrows still works; two shapes with words
+ * would mean choosing whose words go.
+ */
+function selectedText(store: ReturnType<typeof useQuickdrawStore>, selected: string[]): { id: string; text: string } | { why: string } {
+  const shapes = selected.map((id) => store.get(id)).filter((record): record is ShapeRecord => record?.typeName === "shape");
+  if (!shapes.length) return { why: `${STAGE_ONE}.` };
+  const worded = shapes.flatMap((shape) => {
+    const text = wordsOf(shape);
+    return text ? [{ id: shape.id, text }] : [];
+  });
+  if (worded.length === 1) return worded[0];
+  return { why: worded.length ? `${STAGE_ONE}: ${worded.length} shapes with text are selected; select one.` : `${STAGE_ONE}: no text in the selection.` };
+}
+
+function BoardView({ store, selected, readOnly, notice, onSelection, onStageSelection, stageWhy, sendBoard, prompts }: {
   store: ReturnType<typeof useQuickdrawStore>;
+  /** How many prompts are staged, for the phone's way down to them. */
+  prompts?: number;
   readOnly: string | null;
   notice: string | null;
   selected: string[];
   onSelection: (ids: string[]) => void;
   onStageSelection: () => void;
+  /** Why "Stage selected text" can't stage the selection, or null if it can. */
+  stageWhy: string | null;
+  /** The host's "Send board to Claude" (SendBoard.tsx). */
+  sendBoard?: ReturnType<typeof useSendBoard>;
 }) {
   const board = useRef<QuickdrawRef>(null);
   // read-only still pans and zooms; nothing else reaches the board
   useLookOnly(board, readOnly !== null);
   return (
     <section className="board-wrap">
-      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span>Draw, write, paste images, or move things around.</span><button disabled={!selected.length} onClick={onStageSelection}>Stage selected</button></>}</div>
+      <div className="board-actions">{readOnly ? <span>{readOnly}</span> : <><span className="board-hint">Draw, write, paste images, or move things around.</span><div className="board-buttons"><button className="stage-selected" disabled={stageWhy !== null} title={stageWhy ?? "Stage this shape's text as a prompt"} onClick={onStageSelection}>Stage selected text</button>{sendBoard && <button className="send-board-button" disabled={sendBoard.button.disabled} title={sendBoard.button.title} aria-label={sendBoard.button.label} onClick={() => void sendBoard.button.send(board.current?.editor ?? null)}><span className="label-wide">{sendBoard.button.label}</span><span className="label-narrow">{sendBoard.button.short}</span></button>}</div></>}{prompts !== undefined && <button className="to-staging" onClick={jumpToStaging}>{readOnly ? "Prompts" : "Add prompt"}{prompts > 0 && <span>{prompts}</span>} ↓</button>}</div>
       {notice && <p className="board-notice" role="alert">{notice}</p>}
+      {sendBoard?.error && <p className="board-notice" role="alert">{sendBoard.error}</p>}
       <Quickdraw
         ref={board}
         className="quickdraw-surface"
@@ -947,8 +1081,10 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   );
 }
 
-function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, hostHere, full, auto, claudeState, roomState, controlSynced, onSend, onDelete, onPreviewUrlChange }: {
+function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, hostHere, full, auto, claudeState, roomState, controlSynced, onSend, onDelete, onPreviewUrlChange, terminalRef, onPodReady, onBootStatus }: {
   roomId: string;
+  terminalRef: RefObject<TerminalPaneHandle | null>;
+  onPodReady: (ready: boolean) => void;
   ended: boolean;
   hostHere: boolean;
   // A full room's queue is read-only for the host too.
@@ -965,13 +1101,13 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, h
   onSend: (id: string, by: SentBy) => void;
   onDelete: (id: string) => void;
   onPreviewUrlChange: (url: string | null, generation: number) => void;
+  onBootStatus?: (status: string | null) => void;
 }) {
-  const terminalRef = useRef<TerminalPaneHandle>(null);
   const release = useQueueRelease({ facilitator, roomState, synced: controlSynced, terminalRef, queued, auto, full, onSend });
   return (
     <section className="crit-room" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
       {/* A participant's terminal stops asking once the room ends; a new one starts if the host revives it. Never remount the host's: it runs Claude. */}
-      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} />
+      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} onPodReady={onPodReady} onBootStatus={onBootStatus} />
       <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} ended={ended} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
     </section>
   );
@@ -1012,7 +1148,8 @@ function InviteBox({ access, members }: { access: Access; members: RoomMember[] 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const pending = list?.rooms.find((room) => room.id === access.room.id)?.invites ?? [];
+  const listed = list?.rooms.find((room) => room.id === access.room.id);
+  const pending = (listed?.state !== "ended" && listed?.invites) || [];
 
   useEffect(() => {
     if (!user) return;
@@ -1133,6 +1270,37 @@ function EndRoom({ access, code, keep }: { access: Access; code: string; keep: b
   );
 }
 
+// A member leaves by themselves (docs/adr/0008, "Leaving"): their place
+// goes on every browser; the code or an invite brings them back.
+function LeaveRoom({ roomId }: { roomId: string }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function leave() {
+    setBusy(true);
+    setError(null);
+    try {
+      await leaveRoom(roomId);
+      location.assign(location.pathname);
+    } catch (failure) {
+      setError(problem(failure));
+      setBusy(false);
+    }
+  }
+
+  if (!asking) return <div className="leave-room"><button onClick={() => setAsking(true)}>Leave room</button></div>;
+  return (
+    <div className="leave-room asking">
+      <p>{LEAVE_QUESTION}</p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <span><button className="danger" disabled={busy} onClick={() => void leave()}>{busy ? "Leaving..." : "Leave"}</button><button disabled={busy} onClick={() => setAsking(false)}>Cancel</button></span>
+    </div>
+  );
+}
+
+const LEAVE_QUESTION = "Leave this room? It goes from your rooms on every browser. To come back, you'd need the code or an invite from the host. This browser keeps its copy of the board until you delete it.";
+
 // About what the server stores for the room: both documents, as this page
 // has them. Recounted at most once a second while they change.
 function useRoomBytes(docs: Y.Doc[]) {
@@ -1207,7 +1375,7 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
       {room.limitBytes && <p className="board-size">{room.full ? "Full: it holds" : "It holds"} {megabytes(bytes)} of the {megabytes(room.limitBytes)} a room can.</p>}
       <p className="export-board"><button onClick={onExport}>Export the board</button><small>A file with the board, its images and the prompts. Anyone can start a new room from it.</small></p>
       {error && <p className="form-error" role="alert">{error}</p>}
-      {host && <EndRoom access={access} code={room.code} keep={room.keep} />}
+      {host ? <EndRoom access={access} code={room.code} keep={room.keep} /> : <LeaveRoom roomId={access.room.id} />}
     </aside>
   );
 }
@@ -1265,17 +1433,17 @@ function RoomClosed({ reason, roomId }: { reason: string; roomId?: string }) {
   const ended = reason === "room-ended" || reason === "board-pruned";
   const [copy, setCopy] = useState<LocalCopy | null>(null);
   useEffect(() => {
-    if (ended && roomId) findCopy(`room/${roomId}/shared`).then(setCopy, () => {});
-  }, [ended, roomId]);
+    if ((ended || reason === "room-deleted") && roomId) findCopy(`room/${roomId}/shared`).then(setCopy, () => {});
+  }, [ended, reason, roomId]);
   // A page of its own, with the start page's header: the participant
   // didn't choose to leave, so it says why before anything else.
   return (
     <main className="landing closed">
       <header><strong className="brand">riff</strong><span>Collaborative design crits</span></header>
       <section className="entry-card">
-        <h2>{ended ? "This room has ended" : reason === "removed" ? "The host removed you from this room" : "You're no longer in this room"}</h2>
+        <h2>{ended ? "This room has ended" : reason === "removed" ? "The host removed you from this room" : reason === "room-deleted" ? "The host deleted this room" : reason === "left" ? "You left this room" : "You're no longer in this room"}</h2>
         {ended && copy?.code && <p className="closed-room">Room <code>{copy.code}</code>{copy.hostName ? `, hosted by ${copy.hostName}` : ""}</p>}
-        <p>{reason === "board-pruned" ? "The server deleted this board to make space." : ended ? "The server doesn't keep this board." : reason === "removed" ? "You can't open it again unless they invite you back." : "The host removed you, or the room has ended."}</p>
+        <p>{reason === "board-pruned" ? "The server deleted this board to make space." : ended ? "The server doesn't keep this board." : reason === "removed" ? "You can't open it again unless they invite you back." : reason === "room-deleted" ? "It's gone from the server for good." : reason === "left" ? "To go back in, join with the code, or ask the host to invite you." : "The host removed you, or the room has ended."}</p>
         {copy && <p>This browser kept its own copy of the board, which you can still look at and export.</p>}
         <div className="closed-actions">
           {copy && <button className="primary" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Open this browser's copy</button>}
@@ -1289,6 +1457,7 @@ function RoomClosed({ reason, roomId }: { reason: string; roomId?: string }) {
 function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfig | null }) {
   const roomId = access.room.id;
   const facilitator = access.member.host;
+  const [bootStatus, setBootStatus] = useState<string | null>(null);
   const [view, setView] = useState<View>(() => {
     const requested = new URLSearchParams(location.search).get("view");
     return requested === "room" || requested === "preview" ? requested : "board";
@@ -1343,13 +1512,22 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // "Stage selected text": the words of exactly one shape that has some.
+  const stageable = selectedText(store, selected);
   function stageSelected() {
-    const records = selected.map((id) => store.get(id)).filter((record): record is ShapeRecord => record?.typeName === "shape");
-    if (!records.length) return;
-    const textRecord = records.find((record) => record.type === "note" || record.type === "text");
-    const text = typeof textRecord?.props.text === "string" && textRecord.props.text.trim() ? textRecord.props.text.trim() : `Follow up on ${records.length === 1 ? "this board item" : `these ${records.length} board items`}.`;
-    addPrompt(room.doc, room.identity.name, text, records[0].id);
+    const chosen = selectedText(store, selected);
+    if ("text" in chosen) addPrompt(room.doc, room.identity.name, chosen.text, chosen.id);
   }
+
+  const terminalRef = useRef<TerminalPaneHandle>(null);
+  const [podReady, setPodReady] = useState(false);
+  const sendBoard = useSendBoard({
+    store,
+    selected,
+    pod: () => terminalRef.current?.podFiles() ?? null,
+    ready: podReady,
+    onStage: (text) => addPrompt(room.doc, room.identity.name, text),
+  });
 
   function handlePreviewUrlChange(url: string | null, generation: number) {
     setPreview((current) => url ? { url, revision: (current?.revision ?? 0) + 1 } : null);
@@ -1378,9 +1556,14 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       </header>
 
       {room.full ? <FullBanner limitBytes={room.limitBytes} onExport={exportRoom} /> : <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} onExport={exportRoom} />}
+      {/* Claude booting while the host is on another tab (autoBoot.ts) */}
+      {facilitator && bootStatus && view !== "room" && (
+        <p className="room-banner booting" role="status">Starting Claude for the room: {bootStatus}. <button className="link" onClick={() => setView("room")}>Watch</button></p>
+      )}
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
-        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} />}
-        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} />
+        {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} stageWhy={"why" in stageable ? stageable.why : null} sendBoard={facilitator ? sendBoard : undefined} prompts={room.promptSnapshots.length} />}
+        {sendBoard.dialog}
+        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} terminalRef={terminalRef} onPodReady={setPodReady} onBootStatus={setBootStatus} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}
@@ -1395,7 +1578,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 // straight in; for anyone else it's the join form with the code filled in.
 // Opened from a room's link by a browser that isn't in the room yet: ask
 // for a name before going in, the last one used filled in.
-function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
+function JoinByLink({ code, keep, gone = false }: { code: string; keep?: boolean; gone?: boolean }) {
   const user = useUser();
   const [name, setName] = useState(savedName);
   const [busy, setBusy] = useState(false);
@@ -1429,6 +1612,22 @@ function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
     }
   }
 
+  // No live room with that code (ended, or the host gave it a new one):
+  // said before asking for a name. The lookup says no more than that, and
+  // neither does this.
+  if (gone) {
+    return (
+      <main className="landing closed join-link">
+        <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
+        <section className="entry-card no-room">
+          <h2>No live room <code>{code}</code></h2>
+          <p>{problem(new ApiError(404, "no_such_room"))}</p>
+          <div className="closed-actions"><button className="primary" onClick={() => location.assign(location.pathname)}>Back to start</button></div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="landing closed join-link">
       <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
@@ -1447,7 +1646,7 @@ function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
 }
 
 function RoomGate({ roomId, code }: { roomId: string | null; code: string | null }) {
-  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean; pushRevoked?: string } | { join: string; keep?: boolean } | { error: string } | null>(null);
+  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean; pushRevoked?: string } | { join: string; keep?: boolean; gone?: boolean } | { error: string } | null>(null);
   const [withoutGitHub, setWithoutGitHub] = useState(false);
   const user = useUser();
 
@@ -1476,14 +1675,14 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
       } else {
         setState(code ? { join: code, keep: found?.keep } : { error: "This browser isn't in that room. Ask the host for the code." });
       }
-    })().catch((failure) => active && setState(code && failure instanceof ApiError && failure.status === 404 ? { join: code } : { error: problem(failure) }));
+    })().catch((failure) => active && setState(code && failure instanceof ApiError && failure.status === 404 ? { join: code, gone: true } : { error: problem(failure) }));
     return () => {
       active = false;
     };
   }, [code, roomId]);
 
   if (!state) return <main className="landing"><section className="entry-card"><p>Finding the room...</p></section></main>;
-  if ("join" in state) return <JoinByLink code={state.join} keep={state.keep} />;
+  if ("join" in state) return <JoinByLink code={state.join} keep={state.keep} gone={state.gone} />;
   if ("error" in state) {
     return (
       <main className="landing">

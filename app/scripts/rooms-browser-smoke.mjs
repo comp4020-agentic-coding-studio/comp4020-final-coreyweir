@@ -148,6 +148,24 @@ try {
   assert.equal(await host.$(".people-panel .invite-box"), null, "invites live in Share, not People");
   console.log("accepted: name taken, asked for another, in the room as Octo (@octocat), invite gone from the host's panel");
 
+  // Three people, five colours: whoever joins takes one nobody present
+  // has (colours.ts), and keeps it across a reload.
+  const colours = () => host.$$eval(".participants span", (spans) => spans.map((span) => getComputedStyle(span).backgroundColor));
+  await host.waitForFunction(() => {
+    const shown = [...document.querySelectorAll(".participants span")].map((span) => getComputedStyle(span).backgroundColor);
+    return shown.length === 3 && !shown.includes("rgb(153, 153, 153)");
+  }, { timeout: 10_000, polling: 100 });
+  const before = await colours();
+  assert.equal(new Set(before).size, 3, `three people, three colours: ${before.join(", ")}`);
+  const octoColour = () => octocat.evaluate((id) => localStorage.getItem(`riff-colour:${id}`), roomId);
+  const octoBefore = await octoColour();
+  await octocat.reload({ waitUntil: "networkidle0" });
+  await octocat.waitForSelector(".new-prompt textarea");
+  assert.equal(await octoColour(), octoBefore, "a reload keeps the colour");
+  await host.waitForFunction((count) => document.querySelectorAll(".participants span").length === count, { timeout: 10_000, polling: 100 }, 3);
+  assert.deepEqual(new Set(await colours()), new Set(before), "the same three colours after a reload");
+  console.log(`colours: three people, three colours (${before.join(", ")}), kept across a reload`);
+
   // Colleagues: private, added by username, removed again.
   const octocatLanding = await octocat.browserContext().newPage();
   await octocatLanding.goto(baseUrl, { waitUntil: "networkidle0" });
@@ -193,8 +211,9 @@ try {
     boards: Boolean(document.querySelector(".your-rooms")),
     databases: (await indexedDB.databases()).filter((database) => database.name.startsWith("room/")).length,
     secrets: Object.keys(localStorage).filter((key) => key.startsWith("riff-member:")).length,
+    colours: Object.keys(localStorage).filter((key) => key.startsWith("riff-colour:")).length,
   }));
-  assert.deepEqual(kept, { boards: false, databases: 0, secrets: 0 });
+  assert.deepEqual(kept, { boards: false, databases: 0, secrets: 0, colours: 0 });
   // The open room tab let go of its copy cleanly: an edit there now
   // doesn't throw from a closed database (copies.ts openCopy).
   // A background tab takes no typing in headless Chrome ("Target closed").

@@ -145,11 +145,12 @@ export function createTerminalRelay({ authorize, onRefused } = {}) {
     },
     // The room ended: its audience is told and let go. The host's socket
     // stays; their page is leaving, and a reconnect would revive the room.
-    endRoom(roomName) {
+    // Deleting it (`everyone`) lets the host's socket go too.
+    endRoom(roomName, { reason = "room-ended", everyone = false } = {}) {
       for (const client of rooms.get(roomName)?.clients ?? []) {
-        if (client === rooms.get(roomName).host) continue;
-        send(client, { type: "error", code: "room-ended" });
-        hangUp(client, 4410, "room-ended");
+        if (!everyone && client === rooms.get(roomName).host) continue;
+        send(client, { type: "error", code: reason });
+        hangUp(client, 4410, reason);
       }
     },
     handleUpgrade(request, socket, head, roomName) {

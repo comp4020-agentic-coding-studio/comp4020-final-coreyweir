@@ -14,6 +14,8 @@ try {
   page.on("console", (message) => browserMessages.push(`[${message.type()}] ${message.text()}`));
   page.on("pageerror", (error) => browserMessages.push(`[pageerror] ${error.stack ?? error.message}`));
   await page.setViewport({ width: 900, height: 900 });
+  // Bash first: keep the new room from booting Claude by itself (autoBoot.ts).
+  await page.evaluateOnNewDocument(() => sessionStorage.removeItem("riff-auto-boot"));
   await page.goto(`${baseUrl}/?setup=host`, { waitUntil: "networkidle0" });
   const inputs = await page.$$(".entry-card input");
   await inputs[0].type("WASIX Mixed Interrupt");

@@ -104,9 +104,15 @@ export function migrate(db) {
   // Columns added after the table first shipped. CREATE TABLE IF NOT EXISTS
   // leaves an existing table as it was, so the live database gets them here.
   const columns = new Set(db.prepare("PRAGMA table_info(rooms)").all().map((column) => column.name));
-  for (const column of ["full_at", "last_opened", "pruned_at"]) {
+  // deleted_at: the host deleted the room (ADR 0003, "Leaving and
+  // deleting"); the row stays for the log, its board and members don't.
+  for (const column of ["full_at", "last_opened", "pruned_at", "deleted_at"]) {
     if (!columns.has(column)) db.exec(`ALTER TABLE rooms ADD COLUMN ${column} INTEGER`);
   }
+  // left_at: the member left by themselves, rather than the host removing
+  // them, so the code or an invite brings them back.
+  const memberColumns = new Set(db.prepare("PRAGMA table_info(room_members)").all().map((column) => column.name));
+  if (!memberColumns.has("left_at")) db.exec("ALTER TABLE room_members ADD COLUMN left_at INTEGER");
 }
 
 export const randomToken = (bytes = 32) => randomBytes(bytes).toString("base64url");
@@ -154,11 +160,11 @@ export function createStore(db) {
     hostLeft: q("UPDATE rooms SET state = 'away', host_last_seen = ? WHERE id = ? AND state = 'live'"),
     endRoom: q("UPDATE rooms SET state = 'ended', ended_at = ? WHERE id = ? AND state <> 'ended'"),
     // A pruned board comes back from the host's own copy.
-    reviveRoom: q("UPDATE rooms SET state = 'away', host_last_seen = ?, ended_at = NULL, pruned_at = NULL WHERE id = ? AND state = 'ended'"),
+    reviveRoom: q("UPDATE rooms SET state = 'away', host_last_seen = ?, ended_at = NULL, pruned_at = NULL WHERE id = ? AND state = 'ended' AND deleted_at IS NULL"),
     markFull: q("UPDATE rooms SET full_at = ? WHERE id = ? AND full_at IS NULL"),
     touchOpened: q("UPDATE rooms SET last_opened = ? WHERE id = ?"),
     // Ended boards the server still keeps, opened longest ago first.
-    prunable: q(`SELECT id, code FROM rooms WHERE state = 'ended' AND keep = 1 AND pruned_at IS NULL
+    prunable: q(`SELECT id, code FROM rooms WHERE state = 'ended' AND keep = 1 AND pruned_at IS NULL AND deleted_at IS NULL
                  ORDER BY COALESCE(last_opened, ended_at, created_at), created_at`),
     // The board is gone, so it isn't full any more either.
     markPruned: q("UPDATE rooms SET pruned_at = ?, full_at = NULL WHERE id = ? AND pruned_at IS NULL"),
@@ -170,6 +176,11 @@ export function createStore(db) {
     // The rooms a signed-in user is in, newest first.
     roomsOfUser: q(`SELECT r.*, m.id AS member_id, m.is_host FROM room_members m JOIN rooms r ON r.id = m.room_id
                     WHERE m.user_id = ? AND m.removed_at IS NULL AND r.state <> 'ended' ORDER BY r.created_at DESC`),
+    // The ended rooms a signed-in user hosted, most recently ended first:
+    // only their host can reopen them (docs/adr/0003, "Reopening").
+    endedRoomsHostedBy: q(`SELECT r.* FROM room_members m JOIN rooms r ON r.id = m.room_id
+                           WHERE m.user_id = ? AND m.is_host AND m.removed_at IS NULL AND r.state = 'ended'
+                           AND r.ended_at >= ? ORDER BY r.ended_at DESC LIMIT ?`),
     insertInvite: q(`INSERT INTO invites (room_id, github_id, login, invited_by, created_at) VALUES (?, ?, ?, ?, ?)
                      ON CONFLICT (room_id, github_id) DO UPDATE SET login = excluded.login`),
     invite: q("SELECT * FROM invites WHERE room_id = ? AND github_id = ?"),
@@ -206,6 +217,13 @@ export function createStore(db) {
     memberByUser: q("SELECT * FROM room_members WHERE room_id = ? AND user_id = ?"),
     memberByNameKey: q("SELECT id FROM room_members WHERE room_id = ? AND name_key = ?"),
     removeMember: q("UPDATE room_members SET removed_at = ? WHERE id = ? AND removed_at IS NULL"),
+    // Leaving is a removal that frees the name (the row keeps it, for the
+    // log) and lets the same person back in by code or invite.
+    leaveMember: q(`UPDATE room_members SET removed_at = ?1, left_at = ?1, name_key = name_key || char(0) || 'left:' || id
+                    WHERE id = ?2 AND removed_at IS NULL AND is_host = 0`),
+    rejoinMember: q("UPDATE room_members SET removed_at = NULL, left_at = NULL, name = ?, name_key = ? WHERE id = ?"),
+    removeAllMembers: q("UPDATE room_members SET removed_at = ? WHERE room_id = ? AND removed_at IS NULL"),
+    markDeleted: q("UPDATE rooms SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL"),
     touchMember: q("UPDATE room_members SET last_seen = ? WHERE id = ?"),
     members: q(`SELECT m.id, m.name, m.is_host, m.removed_at, u.login FROM room_members m
                 LEFT JOIN users u ON u.id = m.user_id WHERE m.room_id = ? ORDER BY m.id`),

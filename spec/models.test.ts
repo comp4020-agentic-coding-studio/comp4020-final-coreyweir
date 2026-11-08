@@ -73,4 +73,11 @@ describe("Riff's own models", () => {
     expect((await api(baseUrl, `/api/rooms/${host.roomId}/end`, { method: "POST", secret: host.secret, body: {} })).status).toBe(200);
     expect((await models(host.modelKey)).status).toBe(403);
   }, 30_000);
+
+  it("refuses the key of a room its host deleted", async () => {
+    const host = await createRoom(baseUrl);
+    expect((await models(host.modelKey)).status).toBe(200);
+    expect((await api(baseUrl, `/api/rooms/${host.roomId}`, { method: "DELETE", secret: host.secret })).status).toBe(204);
+    expect((await models(host.modelKey)).status).toBe(401);
+  });
 });
