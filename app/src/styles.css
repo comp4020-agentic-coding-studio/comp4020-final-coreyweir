@@ -125,3 +125,8 @@
 /* The workspace export dialog at the MCP dialog's sizes (its hints were 9px beside 13px text), and Download in reach if a long summary makes it scroll on a short phone. */
 .ws-export h2{font-size:16px}.ws-export .ws-export-option small,.ws-export .ws-export-quiet,.ws-export-summary{font-size:12px}.ws-export small code,.ws-export .ws-export-quiet code,.ws-export-summary code{font-size:11px}.ws-export-actions button{font-size:13px}
 .ws-export>.ws-export-actions{position:sticky;bottom:-20px;margin:0 -20px -20px;padding:12px 20px 20px;border-top:1px solid #eeeeea;background:white}
+/* "Staged" on Stage selected text for a moment after it stages (App.tsx BoardView): drawn over the label, so the button keeps its width and nothing moves. */
+.board-actions .stage-selected{position:relative}.board-actions .stage-selected[data-staged]{color:transparent}.board-actions .stage-selected[data-staged]::after{content:"Staged ✓";position:absolute;inset:0;display:grid;place-items:center;color:white;white-space:nowrap}
+.stage-status{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* Add prompt keeps its height when its count appears (the first staged prompt), so the bar doesn't jump. */
+@media(max-width:780px){.board-actions .to-staging{min-height:30px}}

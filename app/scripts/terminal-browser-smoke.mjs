@@ -70,6 +70,12 @@ try {
     () => Number(document.querySelector(".terminal-target")?.getAttribute("data-output-size")) > 200,
     { timeout: 90_000 },
   );
+  // No "Installed via npm (deprecated)" for the room: claudePod sets
+  // DISABLE_INSTALLATION_CHECKS. Claude shows it once its install check
+  // (an npm probe) answers, some seconds after its prompt, so watch a while.
+  await host.waitForFunction(() => /bypass permissions on/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""), { timeout: 90_000, polling: 200 });
+  const deprecation = await host.waitForFunction(() => /Installed via npm/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""), { timeout: 15_000, polling: 200 }).then(() => true, () => false);
+  assert.equal(deprecation, false, "Claude's npm deprecation notice stays out of the shared terminal");
 
   const participantContext = await browser.createBrowserContext();
   const participant = await participantContext.newPage();
