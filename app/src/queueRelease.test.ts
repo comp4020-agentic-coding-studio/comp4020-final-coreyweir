@@ -2,7 +2,7 @@
 // npm run test:queue-release
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease.ts";
+import { acknowledgesSend, isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease.ts";
 import { parseHookInput, promptKeystrokes, riffHookSettings } from "./claudeHooks.ts";
 
 const run = (events: ClaudeEvent[], from: ClaudeState = "off") => events.reduce(nextClaudeState, from);
@@ -52,6 +52,14 @@ test("auto sends only when on, idle, not full and something is queued", () => {
   for (const state of ["off", "starting", "working", "paused"] as const) {
     assert.equal(shouldAutoSend({ auto: true, state, queued: 1, full: false }), false, state);
   }
+});
+
+test("the next send waits for Claude to acknowledge the last one", () => {
+  assert.equal(acknowledgesSend({ event: "UserPromptSubmit", prompt: "x" }), true);
+  assert.equal(acknowledgesSend({ event: "Interrupt" }), true);
+  assert.equal(acknowledgesSend({ event: "Stop", stopHookActive: false }), false);
+  assert.equal(acknowledgesSend({ event: "Sent" }), false);
+  assert.equal(shouldAutoSend({ auto: true, state: "idle", queued: 1, full: false, unacknowledged: true }), false);
 });
 
 test("hook input is read from Claude Code's JSON", () => {

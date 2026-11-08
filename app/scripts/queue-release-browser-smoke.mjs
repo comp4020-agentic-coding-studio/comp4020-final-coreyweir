@@ -45,6 +45,8 @@ const PROMPTS = {
   autoSecond: "Auto, second:\nsent when the first turn ended.",
   autoLater: "Auto, later: queued while auto was on and Claude idle.",
   afterCommand: "After a slash command, once the host resumed auto.",
+  rapidFirst: "Rapid, first:\nclicked in the same moment as the next.",
+  rapidSecond: "Rapid, second: waits for Claude to take the first.",
   slow: "A slow one, so Claude is busy.",
   followUp: "A follow-up sent\nwhile Claude was busy.",
 };
@@ -188,10 +190,26 @@ try {
   await host.click(".auto-release input");
   await until(() => fake.count(PROMPTS.afterCommand) === 1, "the prompt after the slash command to reach the model");
 
-  // Auto off; a Send while Claude is busy goes in as a follow-up.
+  // Auto off. Two Sends in the same moment: typed back to back, Claude
+  // merges, duplicates or drops them (measured), so the second waits until
+  // Claude has taken the first, and the host sends it then.
   await host.click(".auto-release input");
   await until(async () => !(await autoOn(participant)), "the participant to see auto off", 10_000);
-  await until(async () => (await stateOn(host)) === "idle", "Claude idle before the slow prompt");
+  await until(async () => (await stateOn(host)) === "idle", "Claude idle before the rapid sends");
+  await queue(PROMPTS.rapidFirst);
+  await queue(PROMPTS.rapidSecond);
+  await host.evaluate(() => {
+    const buttons = [...document.querySelectorAll(".queue-row .send-prompt")];
+    for (const button of buttons) button.click();
+  });
+  await until(() => fake.count(PROMPTS.rapidFirst) === 1, "the first rapid prompt to reach the model");
+  assert.deepEqual(await queuedTexts(host), [PROMPTS.rapidSecond], "the second click didn't send");
+  await until(() => host.$eval(".queue-row .send-prompt", (button) => !button.disabled), "Send enabled again", 10_000);
+  await host.click(".queue-row .send-prompt");
+  await until(() => fake.count(PROMPTS.rapidSecond) === 1, "the second rapid prompt to reach the model");
+  await until(async () => (await stateOn(host)) === "idle", "Claude idle after the rapid sends");
+
+  // A Send while Claude is busy goes in as a follow-up.
   await queue(PROMPTS.slow);
   await queue(PROMPTS.followUp);
   const sendFirst = () => host.evaluate(() => document.querySelector(".queue-row .send-prompt").click());

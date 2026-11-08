@@ -123,6 +123,20 @@ was needed.
   the next prompt would be typed into. A finished turn or `/clear`
   (which fires `SessionStart`) resumes. Turning auto on while paused
   counts as idle: the host is saying Claude is at its prompt again.
+- **One send at a time.** Measured: a second prompt typed before Claude
+  has processed the first one's Enter is merged into it, duplicated or
+  lost, idle or busy (sends 1-20 ms apart; none from 50 ms on; with or
+  without the Ctrl+S). No delay is safe on every machine, so Riff types
+  the next prompt only once Claude has acknowledged the last with its
+  `UserPromptSubmit` hook: at once when idle, and at the end of the turn
+  for a follow-up typed while Claude works (so one follow-up per busy
+  turn). Until then Send is disabled ("Waiting for Claude to take the last
+  prompt") and auto waits. An interrupt, an API error, Claude exiting or a
+  new session also end the wait; a slash command never starts one.
+  Separate from the WASIX bash input stall found on 8 Nov: Send writes to
+  Claude's node process, not bash, and 20 sends one acknowledgement apart
+  (up to 13 KB, with `$(...)`, quotes, Unicode) all arrived; Claude
+  itself turns a tab into spaces and trims trailing whitespace.
 - **Auto** (`useQueueRelease` in `app/src/QueuePanel.tsx`): whenever auto
   is on, Claude is idle and something is queued, the first prompt goes.
   A send marks Claude working at once, before its hook says so, so a
@@ -151,11 +165,14 @@ was needed.
     participant at 390×844. The participant stages six prompts and the host
     queues them; one by Send, two by turning auto on while idle, one queued
     while auto is on, a `/cost` after which auto pauses until the host
-    turns it on again, and a Send while Claude works. Every prompt reaches
+    turns it on again, two Sends clicked in the same moment (the second
+    waits and is sent once Claude has the first), and a Send while
+    Claude works. Every prompt reaches
     the model exactly once, newlines intact, one turn each. The
     participant sees the state and the toggle and has no Send. Mutations:
     flattening newlines (as Load did), dropping the immediate "working"
-    on send, and not pausing after a slash command each turn it red. It can't see a prompt whose turn failed
+    on send, not pausing after a slash command, and not waiting for the
+    acknowledgement each turn it red. It can't see a prompt whose turn failed
     before the model call, or what a slow real model would change.
   - `npm run test:queue-release`: the state machine, hook input and
     keystrokes.

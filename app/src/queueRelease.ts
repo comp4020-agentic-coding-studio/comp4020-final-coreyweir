@@ -72,8 +72,34 @@ export function canSend(state: ClaudeState) {
   return state === "idle" || state === "working" || state === "paused";
 }
 
-export function shouldAutoSend({ auto, state, queued, full }: { auto: boolean; state: ClaudeState; queued: number; full: boolean }) {
-  return auto && state === "idle" && queued > 0 && !full;
+export function shouldAutoSend({ auto, state, queued, full, unacknowledged = false }: { auto: boolean; state: ClaudeState; queued: number; full: boolean; unacknowledged?: boolean }) {
+  return auto && state === "idle" && queued > 0 && !full && !unacknowledged;
+}
+
+/**
+ * Whether Claude has taken the last prompt Riff typed, so the next may be
+ * typed. Measured on 2.1.221: a second prompt typed before Claude has
+ * processed the first one's Enter gets merged into it, duplicated, or lost,
+ * idle or busy (two sends 1-20 ms apart; from 50 ms none were). No delay is
+ * safe on every machine, so sends wait for Claude's own acknowledgement:
+ * its UserPromptSubmit hook, which fires at once when Claude is idle, and
+ * for a follow-up typed while it works, when that turn ends. Anything that
+ * ends the wait without one (Claude exiting, an interrupt, an API error, a
+ * new session) also lets the next go. A slash command fires no hook, so it
+ * never waits (isSlashCommand).
+ */
+export function acknowledgesSend(event: ClaudeEvent) {
+  switch (event.event) {
+    case "UserPromptSubmit":
+    case "StopFailure":
+    case "Interrupt":
+    case "Exited":
+    case "Started":
+    case "SessionStart":
+      return true;
+    default:
+      return false;
+  }
 }
 
 export const CLAUDE_STATE_LABEL: Record<ClaudeState, string> = {

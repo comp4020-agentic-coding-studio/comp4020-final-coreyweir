@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type * as Y from "yjs";
 import type { QueuedPrompt, SentBy } from "./room";
 import type { TerminalPaneHandle } from "./TerminalPane";
-import { canSend, CLAUDE_STATE_LABEL, isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease";
+import { acknowledgesSend, canSend, CLAUDE_STATE_LABEL, isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease";
 
 /**
  * The host's side: follows Claude's events, publishes Claude's state to the
@@ -25,13 +25,22 @@ export function useQueueRelease({ facilitator, roomState, terminalRef, queued, a
 }) {
   const stateRef = useRef<ClaudeState>("off");
   const [state, setState] = useState<ClaudeState>("off");
+  // A prompt Riff typed that Claude hasn't acknowledged yet; the next send
+  // waits for it (acknowledgesSend in queueRelease.ts).
+  const unacknowledgedRef = useRef(false);
+  const [unacknowledged, setUnacknowledged] = useState(false);
+  const setPending = useCallback((pending: boolean) => {
+    unacknowledgedRef.current = pending;
+    setUnacknowledged(pending);
+  }, []);
 
   const dispatch = useCallback((event: ClaudeEvent) => {
+    if (acknowledgesSend(event) && unacknowledgedRef.current) setPending(false);
     const next = nextClaudeState(stateRef.current, event);
     if (next === stateRef.current) return;
     stateRef.current = next;
     setState(next);
-  }, []);
+  }, [setPending]);
 
   // What the room sees. A reloaded host page starts at "off" and says so,
   // so the room never shows a state left behind by the last page.
@@ -41,28 +50,30 @@ export function useQueueRelease({ facilitator, roomState, terminalRef, queued, a
   }, [facilitator, full, roomState, state]);
 
   const send = useCallback((prompt: QueuedPrompt, by: SentBy) => {
-    if (!canSend(stateRef.current)) return false;
+    if (!canSend(stateRef.current) || unacknowledgedRef.current) return false;
     if (!terminalRef.current?.sendPrompt(prompt.text)) return false;
-    dispatch({ event: isSlashCommand(prompt.text) ? "SentCommand" : "Sent" });
+    const command = isSlashCommand(prompt.text);
+    dispatch({ event: command ? "SentCommand" : "Sent" });
+    if (!command) setPending(true);
     onSend(prompt.id, by);
     return true;
-  }, [dispatch, onSend, terminalRef]);
+  }, [dispatch, onSend, setPending, terminalRef]);
 
   const next = queued[0];
   useEffect(() => {
     if (!facilitator || !next) return;
-    if (shouldAutoSend({ auto, state: stateRef.current, queued: queued.length, full })) send(next, "auto");
-  }, [auto, facilitator, full, next, queued.length, send, state]);
+    if (shouldAutoSend({ auto, state: stateRef.current, queued: queued.length, full, unacknowledged: unacknowledgedRef.current })) send(next, "auto");
+  }, [auto, facilitator, full, next, queued.length, send, state, unacknowledged]);
 
   const setAuto = useCallback((on: boolean) => {
     if (on) dispatch({ event: "AutoOn" });
     roomState.set("autoRelease", on);
   }, [dispatch, roomState]);
 
-  return { state, dispatch, send, setAuto };
+  return { state, unacknowledged, dispatch, send, setAuto };
 }
 
-export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostHere, canSendNow, onSend, onDelete, onAuto }: {
+export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostHere, canSendNow, waiting = false, onSend, onDelete, onAuto }: {
   queued: QueuedPrompt[];
   facilitator: boolean;
   full: boolean;
@@ -71,12 +82,16 @@ export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostH
   /** False while the host is away: the last state they published may be stale. */
   hostHere: boolean;
   canSendNow: boolean;
+  /** Claude hasn't yet taken the last prompt sent. */
+  waiting?: boolean;
   onSend: (prompt: QueuedPrompt) => void;
   onDelete: (id: string) => void;
   onAuto: (on: boolean) => void;
 }) {
   const editable = facilitator && !full;
-  const sendTitle = canSendNow
+  const sendTitle = waiting
+    ? "Waiting for Claude to take the last prompt"
+    : canSendNow
     ? claudeState === "working" ? "Claude is working: this goes in as a follow-up" : "Send to Claude"
     : claudeState === "starting" ? "Claude is still starting" : "Start Claude first";
   const stateTitle = claudeState === "paused" ? "A turn was interrupted or failed, or a slash command ran: auto waits until Claude finishes a turn, or the host turns auto on again" : undefined;
@@ -96,7 +111,7 @@ export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostH
             <span>{index + 1}</span>
             <p>{prompt.text}</p>
             <small>{prompt.author}</small>
-            {editable && <button className="send-prompt" disabled={!canSendNow} title={sendTitle} onClick={() => onSend(prompt)}>Send</button>}
+            {editable && <button className="send-prompt" disabled={!canSendNow || waiting} title={sendTitle} onClick={() => onSend(prompt)}>Send</button>}
             {editable && <button onClick={() => onDelete(prompt.id)} aria-label="Remove queued prompt">&times;</button>}
           </div>
         ))}
