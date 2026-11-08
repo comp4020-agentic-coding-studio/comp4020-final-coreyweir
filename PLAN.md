@@ -683,6 +683,33 @@ auto-release at the latest.
   `git --version` that never answered, before any Python ran; a third
   "Start Bash" not ready in 120 s), so whether they're related is open.
 
+- ~~**Web search and page reading for the host's Claude**~~ (versatility;
+  done 9 Nov, Corey's call). Claude Code's WebFetch fetches from the host's
+  browser, so CORS refuses most sites (measured: example.com and Wikipedia
+  fail, raw.githubusercontent.com works), and its WebSearch is a provider
+  server tool. Rejected: Claude Code's remote-session web routes (an own
+  endpoint like the course's LiteLLM wouldn't serve them) and provider
+  server tools (Anthropic's `web_fetch`, OpenRouter's): the room would have
+  no evidence a fetch happened. Built: `app/public/claude/web-mcp.mjs`, a
+  dependency-free JavaScript port of Corey's duckduckgo-jina-mcp, written
+  into the pod at boot and started by Claude Code as a user-scoped stdio
+  MCP server (`~/.claude.json`, `app/src/webTools.ts`). `search` reads
+  DuckDuckGo's HTML results through Jina Reader and `fetch` reads a page
+  through it (12,000 characters); Jina allows any origin, so both work from
+  the browser, and each shows in the terminal as a tool call. The URL or
+  query goes to Jina (and DuckDuckGo); Jina's free tier is about 20
+  requests a minute per IP, the host's. On Riff's models WebSearch is
+  denied (ADR 0009). Checks: `npm run test:web-mcp` (8 tests: parsing,
+  adverts, redirect links, errors, the cut, MCP replies, stdio framing,
+  who loses WebSearch; red with the y.js advert rule or the deny removed);
+  `npm run test:web-mcp-browser` (fake API, real Jina: tools offered,
+  WebSearch not, real results and example.com come back through r.jina.ai
+  from the browser; red with no tools listed, no deny, redirects
+  unresolved, or fetching without Jina). Claude Code connects MCP servers
+  in the background: a prompt sent in the first second or so after Claude
+  starts may not be offered the tools. Left: live, and whether Nemotron
+  picks these tools over WebFetch on its own (unmeasured).
+
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own
   OpenRouter key behind a host-only proxy on our server. OpenCode Zen is
