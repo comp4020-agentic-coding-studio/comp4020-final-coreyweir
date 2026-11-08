@@ -16,6 +16,8 @@
 // 3. The participant's Preview shows the page.
 // 4. The same through Claude's own background task (run_in_background).
 // 5. curl on a port nothing listens on is refused, not sent to the machine.
+// First: a command's stderr (`ls /nope`) reaches Claude, as it does natively
+// where stdout and stderr share the file the Bash tool reads.
 // With PYTHON=1 (downloads 115 MB once per profile): `python3 -m
 // http.server` fails saying why and what to use instead.
 //
@@ -103,6 +105,14 @@ try {
     await frame.waitForFunction((text) => document.querySelector("h1")?.textContent === text, { timeout: 60_000, polling: 100 }, text);
   };
 
+  // Error text reaches Claude: natively stderr shares the file Claude reads.
+  const mixed = await run("bash: echo to-stderr >&2; echo to-stdout");
+  assert.match(mixed, /to-stderr/, `stderr reaches Claude: ${mixed}`);
+  assert.match(mixed, /to-stdout/, mixed);
+  const failed = await run("bash: ls /nope");
+  assert.match(failed, /nope.*No such file or directory/, `a failed command's error reaches Claude: ${failed}`);
+  console.log(`stderr reaches Claude's Bash tool: ${JSON.stringify(failed)}`);
+
   const started = Date.now();
   const first = await run(`bash: ${server(8000, "Hello Riff")} &`);
   const startMs = Date.now() - started;
@@ -122,9 +132,7 @@ try {
   assert.match(refused, /status=7/, `curl on a port nothing listens on: ${refused}`);
 
   if (process.env.PYTHON === "1") {
-    // Claude's Bash tool doesn't pass stderr on here (a separate finding),
-    // so the message is read back through stdout.
-    const python = await run("bash: python3 -m http.server 8002 2>&1; echo status=$?");
+    const python = await run("bash: python3 -m http.server 8002; echo status=$?");
     assert.match(python, /can't be reached/, python);
     assert.match(python, /npx serve/, python);
     assert.match(python, /status=1/, python);

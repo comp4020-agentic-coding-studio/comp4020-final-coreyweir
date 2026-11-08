@@ -24,7 +24,7 @@ export const CLAUDE_TAR_ENTRY = "package/claude";
  * tarball lets us verify without buffering 82 MB, and it also catches a patch
  * that silently stopped matching after an upstream rename.
  */
-export const CLAUDE_BUNDLE_SHA256 = "9dd6baed2f2144fc7c78bc835d0a1792e47e87b4bfe89249dbf00ddcf27c5bd8";
+export const CLAUDE_BUNDLE_SHA256 = "5bf11122a0cdd92bde5dd3f84390ec844917f5605c8acef937a3cd6af8b6d7bb";
 
 const CACHE_NAME = "riff-claude-bundle-v1";
 const BUN_JS_MARKER = "// @bun";
@@ -380,6 +380,23 @@ export function patchClaudeSource(code: string): string {
       bashOutputMode,
       'G=await m.getEnvironmentOverrides(e,u),U=!0/*NODEPOD_BASH_PIPE_OUTPUT_PATCHED*/,F=r$("local_bash")',
     );
+  }
+
+  // Claude's Bash tool reads only the command's stdout: natively stdout and
+  // stderr are the same file descriptor, so error text lands in the file it
+  // rereads. With the pipes above they are separate, and the tool dropped
+  // every error message (`ls /nope` answered just "Exit code 2"). For the
+  // spawns that would natively have shared the file (no onStdout listener),
+  // the stderr pipe is now read into the command's stdout, interleaved as it
+  // arrives, as the shared descriptor would have it.
+  const bashOutputFile = 'U=!0/*NODEPOD_BASH_PIPE_OUTPUT_PATCHED*/,F=r$("local_bash"),W=new rC(F,i??null,!U)';
+  const bashStderrPipe = "this.#n=e.stderr?new tgs(e.stderr,n,!0):null";
+  if (code.includes(bashOutputFile) && code.includes(bashStderrPipe)) {
+    code = code.replace(
+      bashOutputFile,
+      'U=!0/*NODEPOD_BASH_PIPE_OUTPUT_PATCHED*/,F=r$("local_bash"),W=Object.assign(new rC(F,i??null,!U),{riffStderrToStdout:!c})/*NODEPOD_BASH_STDERR_PATCHED*/',
+    );
+    code = code.replace(bashStderrPipe, "this.#n=e.stderr?new tgs(e.stderr,n,!n.riffStderrToStdout):null");
   }
 
   // The first WASIX bash start (fetching and compiling its package) can take
