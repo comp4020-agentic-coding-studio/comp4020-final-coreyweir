@@ -18,6 +18,7 @@
 // 5. curl on a port nothing listens on is refused, not sent to the machine.
 // First: a command's stderr (`ls /nope`) reaches Claude, as it does natively
 // where stdout and stderr share the file the Bash tool reads.
+// Then `npx serve` (NPX=0 skips it; needs the npm registry).
 // With PYTHON=1 (downloads 115 MB once per profile): `python3 -m
 // http.server` fails saying why and what to use instead.
 //
@@ -130,6 +131,16 @@ try {
 
   const refused = await run("bash: curl -sS localhost:8009/; echo status=$?");
   assert.match(refused, /status=7/, `curl on a port nothing listens on: ${refused}`);
+
+  // `npx serve` (installs from the registry): its update check awaits an
+  // https request at top level, which used to spin Nodepod's wait loop
+  // until the host's tab ran out of memory and crashed (live, 2026-11-09).
+  if (process.env.NPX !== "0") {
+    const npx = await run("bash&: npx serve -l 8003");
+    console.log(`npx serve: ${JSON.stringify(npx.slice(0, 80))}`);
+    await until(async () => /<!DOCTYPE html|<html/i.test(await run("bash: curl -sS localhost:8003/ | head -c 300")), "curl to reach npx serve", 120_000);
+    console.log("npx serve from Claude's Bash: the tab survives and curl reaches it");
+  }
 
   if (process.env.PYTHON === "1") {
     const python = await run("bash: python3 -m http.server 8002; echo status=$?");
