@@ -81,9 +81,21 @@ async function expectButton(tab, say, enabled, why) {
 
 async function stageAndCheck(tab, say, want) {
   const before = (await staged(tab)).length;
+  const bar = () => tab.$$eval(".board-buttons button", (buttons) => buttons.map((b) => b.getBoundingClientRect().toJSON()));
+  const layout = await bar();
   await tab.click(".stage-selected");
   await tab.waitForFunction((count) => document.querySelectorAll(".staging .prompt-card").length === count + 1, { timeout: 10_000, polling: 100 }, before);
   assert.ok((await staged(tab)).includes(want), say(`staged "${want}": ${JSON.stringify(await staged(tab))}`));
+  // Said where they clicked, briefly, without moving the bar.
+  const said = await tab.evaluate(() => ({
+    shown: document.querySelector(".stage-selected")?.hasAttribute("data-staged"),
+    after: getComputedStyle(document.querySelector(".stage-selected"), "::after").content,
+    status: document.querySelector(".stage-status")?.textContent,
+  }));
+  assert.deepEqual(said, { shown: true, after: '"Staged ✓"', status: "Staged as a prompt." }, say(`it says it staged: ${JSON.stringify(said)}`));
+  assert.deepEqual(await bar(), layout, say("the bar doesn't move"));
+  if (process.env.SHOTS) await tab.screenshot({ path: path.join(process.env.SHOTS, `staged-${Date.now()}.png`) });
+  await tab.waitForFunction(() => !document.querySelector(".stage-selected")?.hasAttribute("data-staged") && document.querySelector(".stage-status")?.textContent === "", { timeout: 5000, polling: 100 });
 }
 
 const pageErrors = [];
