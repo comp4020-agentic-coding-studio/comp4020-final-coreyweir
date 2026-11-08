@@ -100,7 +100,7 @@ try {
   );
   await participantContext.close();
   assert.deepEqual(pageErrors, []);
-  console.log("A host with no key: Riff's free model answered through /api/model, and a participant saw it.");
+  console.log("A host with no key: Riff's free models answered through /api/model, and a participant saw it.");
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

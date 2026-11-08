@@ -1,6 +1,6 @@
 # 9. Hosts can use Riff's own free models, through the server
 
-- Status: accepted, not yet implemented
+- Status: accepted, implemented (19 Oct, `e2ad15b` server, `dc88e22` client; see Implementation)
 - Date: 2026-10-19
 
 ## Context
@@ -77,6 +77,26 @@ Option 1.
 - The host form offers "Riff's free models" (the default when the server
   has a key) or "Your own endpoint" (the base URL and token fields it has
   now).
+
+## Implementation
+
+Where what was built differs from the decision above, or adds to it:
+
+- **Two models, not one.** Claude Code makes small background calls (titles,
+  summaries) on its "Haiku" model, which by default is a paid Anthropic
+  model the key refuses. So every alias Claude Code reads points at a free
+  model (`app/src/api.ts`, `RIFF_MODEL_ENV`): the main model, Opus and
+  Sonnet are Nemotron 3 Ultra
+  (`nvidia/nemotron-3-ultra-550b-a55b:free`, with `[1m]` for its context),
+  and Haiku and the small-fast model are Nemotron 3.5 Lightning
+  (`nvidia/nemotron-3.5-lightning:free`). The host form therefore names
+  NVIDIA's Nemotron 3 family, Ultra for Claude's main model and Lightning
+  for its background tasks (wording settled 8 Nov, after the form had named
+  Ultra alone under a plural heading).
+- **Text only.** Both read text only (OpenRouter's model list; an image
+  in a request is answered 404, measured 8 Nov), so on Riff's models an
+  image pasted into the host's terminal isn't given to Claude and the
+  terminal says so (`app/src/imagePaste.ts`).
 - **Log:** model requests are tallied per host every 10 seconds, with the
   reply's status and bytes (`model.request status=200 times=N bytes=B`), so
   a 429 shows up. Never what was asked or answered. Refusals are logged as

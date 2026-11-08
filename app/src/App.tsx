@@ -782,7 +782,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
             {riffModels && (
               <fieldset className="model-choice">
                 <legend>Model</legend>
-                <label className="check"><input type="radio" name="models" checked={config.models === "riff"} onChange={() => setConfig((current) => ({ ...current, models: "riff" }))} /><span>Riff's free models<small>No key needed. Nemotron 3 Ultra through Riff's OpenRouter account, shared by every room, so it can be slow or busy.</small></span></label>
+                <label className="check"><input type="radio" name="models" checked={config.models === "riff"} onChange={() => setConfig((current) => ({ ...current, models: "riff" }))} /><span>Riff's free models<small>No key needed. NVIDIA's Nemotron 3 family through Riff's OpenRouter account: 3 Ultra for Claude's main model, 3.5 Lightning for its quick background tasks. Shared by every room, so they can be slow or busy.</small></span></label>
                 <label className="check"><input type="radio" name="models" checked={config.models === "own"} onChange={() => setConfig((current) => ({ ...current, models: "own" }))} /><span>Your own endpoint<small>An Anthropic-compatible API and its token.</small></span></label>
               </fieldset>
             )}

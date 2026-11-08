@@ -27,7 +27,7 @@ test("a paste with only an image is taken; one that also has text is left to xte
   assert.deepEqual(imagesIn(null), []);
 });
 
-test("Riff's free model is the one that can't read images", () => {
+test("Riff's free models are the ones that can't read images", () => {
   assert.equal(modelReadsImages({ ANTHROPIC_MODEL: "free" }, "free"), false);
   assert.equal(modelReadsImages({ ANTHROPIC_MODEL: "claude-sonnet" }, "free"), true);
   assert.equal(modelReadsImages(undefined, "free"), true);
