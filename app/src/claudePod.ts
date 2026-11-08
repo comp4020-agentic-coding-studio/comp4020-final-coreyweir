@@ -24,6 +24,7 @@ import { RIFF_MODEL } from "./api";
 import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } from "./imagePaste";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
+import type { PodFiles } from "./boardForClaude";
 import { credentialFor, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
 import { createPythonFetchHandler, isPythonFetch, PYTHON_FETCH_COMMAND, pythonLaunchers, pythonSessionFiles } from "./pythonCommand";
@@ -984,6 +985,26 @@ export class ClaudePodController {
     this.process.write(paste);
     this.process.write(submit);
     return true;
+  }
+
+  /**
+   * The pod's files, for what the page writes in for Claude to read (the
+   * board, boardForClaude.ts). Null until the pod has booted.
+   */
+  podFiles(): PodFiles | null {
+    const volume = this.pod?.volume;
+    if (!volume) return null;
+    return {
+      readsImages: modelReadsImages(this.config.env, RIFF_MODEL),
+      exists: (path) => volume.existsSync(path),
+      write: (path, bytes) => {
+        volume.mkdirSync(path.slice(0, path.lastIndexOf("/")) || "/", { recursive: true });
+        volume.writeFileSync(path, bytes);
+      },
+      remove: (path) => {
+        if (volume.existsSync(path)) volume.removeTreeSync(path);
+      },
+    };
   }
 
   /** Something the host should know that isn't terminal output (imagePaste.ts). */
