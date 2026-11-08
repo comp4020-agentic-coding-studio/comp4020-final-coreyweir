@@ -115,7 +115,7 @@ async function forward(request, placeholders) {
   const headers = new Headers();
   for (const [name, value] of request.headers) headers.set(name, substitute(value, swaps));
   const method = request.method.toUpperCase();
-  return fetch(request.url, {
+  const response = await fetch(request.url, {
     method,
     headers,
     body: method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer(),
@@ -125,6 +125,16 @@ async function forward(request, placeholders) {
     referrerPolicy: "no-referrer",
     signal: request.signal,
   });
+  // The endpoint refused the real value (expired or revoked). Tell the host's
+  // page, which owns it, so the host hears it from Riff and not only as a
+  // failing command in the terminal. Only the placeholder goes out.
+  if (response.status === 401) void tellRefused(placeholders);
+  return response;
+}
+
+async function tellRefused(placeholders) {
+  const pages = (await self.clients.matchAll({ type: "window", includeUncontrolled: true })).filter(isRiffPage);
+  for (const page of pages) page.postMessage({ type: "riff-credential-refused", placeholders });
 }
 
 self.addEventListener("message", (event) => {

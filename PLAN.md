@@ -538,6 +538,82 @@ auto-release at the latest.
   ride on the same row ("Files: …", Delete files); files whose board copy
   has gone get a row of their own. `test:workspace-browser` reads them
   from the merged list.
+- **Week-12 bugs** (`docs/week-12.md`), one at a time:
+  - ~~"Everything missing" (curl, jq, pnpm all gone at once).~~ The session's
+    tools, bridge stubs and bridge pipe lived in `/work/repo/.wasix-session`,
+    inside the user's workspace. Measured on dev: `git status` listed all 22
+    files (~57 MB of binaries for a `git add -A`), and emptying the workspace
+    (`rm -rf` before a clone, `git clean`, a scaffolder clearing the
+    directory) left every tool "command not found" and `node`/`git` unable
+    to open the bridge pipe. That is the only thing curl, jq and pnpm have in
+    common, so it is the likely cause; what emptied it at the crit wasn't
+    recorded. Now the control directory is its own mount, `/opt/riff`, and
+    a failed session start says why on the command's stderr. Checked by
+    `test:wasix-claude-bash-browser` (wipes the workspace, then git, jq, rg,
+    nano, node and npm must run; red with the old location) and
+    `test:wasix-session-browser`. Also keeps the tools out of the OPFS
+    workspace and its export.
+  - ~~`npx create` hangs.~~ Reproduced on dev: `npm create vite@latest
+    my-app -- --template react-ts` printed "added 1 package" and nothing for
+    150 s. Two causes, both in Nodepod (fixed in `nodepod_fork`, riff.44):
+    `npm create` regrouped the flags after the positionals, so create-vite
+    got `--template` with no value; and every Nodepod process claims a TTY
+    on stdin, so create-vite went interactive, but the WASIX bridge carries
+    no stdin, so its prompt could never be answered. Arguments now pass
+    through in order, and bridged processes see `stdin.isTTY === false`
+    (`NODEPOD_STDIN_TTY=0`). Measured after: the command above, bare
+    `npm create vite@latest` and `npx create-vite other-app` each scaffold
+    in under a second. Left: the bridge still has no stdin at all, so
+    `echo x | node script.js` and interactive `node` in the host's Bash
+    get nothing (a change to the bridge stub and protocol).
+  - ~~git failures.~~ Nodepod's git talks to GitHub's REST API, always with a
+    token, so measured on dev: with no GitHub connected even a public clone
+    fails ("authentication required. Set GITHUB_TOKEN", wrong advice in
+    Riff, and the host gate claimed public repositories still worked); with
+    a dead token, pull and fetch said only "couldn't find remote ref" and
+    "could not list remote branches"; and clone and pull skipped any file
+    they failed to fetch and reported success. Now (riff.45 and the app):
+    every failure carries GitHub's status and message, a 401 says the token
+    was refused, a missed file fails the command, no token says the host
+    connects GitHub in Riff, and `riff-sw.js` tells the host page when an
+    endpoint answers 401 to a real token, which the Workspace panel shows.
+    What failed at the crit wasn't recorded, so which of these it was is a
+    hypothesis. Checked by `test:credentials-browser` (red without the
+    service worker's notice) and nodepod's `git-shell.test.ts` (red before).
+    Left: reconnecting GitHub mid-session needs a page reload; Nodepod's git
+    ignores `.gitignore` and re-uploads every file on each push (secondary
+    rate limits on big trees).
+  - ~~"Insecure sources" in Chrome's address bar.~~ Every Nodepod worker ran
+    the sqlite and zlib polyfills' Node fallbacks, a dynamic
+    `import("node:fs")` (and `node:module`, `node:process`). A browser has
+    no `node:` scheme, so each went out as a request for the URL `node:fs`,
+    which Chrome counts as a script from an insecure source. Measured on
+    dev: six `node:fs` script requests per Claude start, none after the fix
+    (nodepod riff.46: the fallbacks run only under real Node).
+    `test:wasix-claude-bash-browser` fails on any `node:` request (red on
+    riff.45). Not yet looked at on live: the address bar itself.
+  - **Typing into the host's Bash stalls** (found by the workspace smokes,
+    above; open). Measured on dev, 8 Nov: not `$(...)` as such. With
+    typing at 0 ms a key, `$(...)`, `$((...))` and bridged commands inside
+    substitutions ran 40 rounds without a stall; a stall needs a child
+    process finishing (or a signal arriving) while keys are arriving. In
+    runs of 8 to 25 typed lines, each after a background job that ends
+    mid-typing: `(sleep 0.3) &` stalled 3 of 14 runs, a `kill -USR1 $$`
+    from one 3 of 4, `kill -WINCH $$` 1 of 3. The workspace UI smoke at `TYPE_DELAY=0`
+    stalled 4 of 6 runs on main and 2 of 6 with the session folder moved
+    out of the workspace, so moving it didn't fix this. In a stall the last
+    keystroke the session worker took is never acknowledged, the worker
+    answers no message at all for 40 s+, and Ctrl+C can't reach it; paused
+    with the debugger, its thread is blocked in `memory.atomic.wait32` under
+    a `std::sync::Mutex::lock` in the Wasmer SDK. So the stall is
+    a deadlock inside wasmer-js, between the worker's stdin write (it
+    runs the TTY on that thread) and the process finishing or being signalled
+    (hypothesis: one lock the TTY and process-exit or signal paths both
+    take). It loses the whole shell, not a keystroke. Fixing it means
+    rebuilding the wasmer-js fork with symbols to name the lock (the shipped
+    `.wasm` has no names section). A mitigation that needs no fork change,
+    not yet tried: take the TTY's stdin copy off the worker thread that
+    services messages, or type a whole line at once (the queue's Send can).
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own

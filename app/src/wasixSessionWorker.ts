@@ -8,6 +8,7 @@ export const BRIDGE_RESP_DIRECTORY_PATH = "/.wasix-session/bridge";
 
 type SessionConfigWire = {
   root: string;
+  controlRoot: string;
   sharedSystemPaths: string[];
   networkGatewayUrl?: string;
   networkGatewayPort?: MessagePort;
@@ -271,10 +272,12 @@ async function open(message: OpenMessage): Promise<void> {
     : new Runtime({ networkGateway: message.config.networkGatewayUrl });
   if (message.cols !== undefined && message.rows !== undefined) nextRuntime.setTtySize(message.cols, message.rows);
   const nextMounts: Record<string, Directory> = {};
-  for (const path of new Set([message.config.root, ...message.config.sharedSystemPaths])) {
+  for (const path of new Set([message.config.root, message.config.controlRoot, ...message.config.sharedSystemPaths])) {
     nextMounts[path] = Directory.openSharedStore(message.storePointer, message.storeBytes, path);
   }
-  const nextDirectory = nextMounts[message.config.root];
+  // The bridge pipes live in the control mount, outside the workspace, so
+  // nothing that cleans the workspace can take them away.
+  const nextDirectory = nextMounts[message.config.controlRoot];
   directory = nextDirectory;
   mounts = nextMounts;
   runtime = nextRuntime;

@@ -6,6 +6,7 @@ import type { ClaudeEvent } from "./queueRelease";
 import { useTerminalChannel, type TerminalChannelEvent } from "./terminalChannel";
 import { usePreviewHostChannel } from "./previewChannel";
 import { ACTUAL_FONT_SIZE, fitMirror, type MirrorMode } from "./mirrorFit";
+import { TERMINAL_THEME } from "./terminalTheme";
 import "./terminal-stream.css";
 
 export type TerminalPaneHandle = { sendPrompt: (prompt: string) => boolean };
@@ -43,7 +44,8 @@ function ParticipantTerminal({ subscribe, mode }: { subscribe: (listener: (event
       fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
       fontSize: ACTUAL_FONT_SIZE,
       lineHeight: 1.1,
-      theme: { background: "#171816", foreground: "#e7e8df", cursor: "#171816" },
+      // the mirror takes no input, so its cursor is drawn in the background
+      theme: { ...TERMINAL_THEME, cursor: TERMINAL_THEME.background },
     });
     terminal.open(box);
     let frame = 0;
@@ -124,6 +126,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const outputTimerRef = useRef(0);
   const [status, setStatus] = useState(facilitator ? "Not started" : "Waiting for host");
   const [starting, setStarting] = useState(false);
+  const [attached, setAttached] = useState(false);
   const [outputSize, setOutputSize] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mirrorMode, setMirrorMode] = useState<MirrorMode>(savedMirrorMode);
@@ -205,12 +208,16 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
               channel.publishData(pending, cols, rows);
             }, 16);
           },
+          (kind) => setError(kind === "github"
+            ? "GitHub refused your token (expired or revoked), so git can't reach GitHub. Connect GitHub again in host setup, then start Claude again."
+            : "Your model endpoint refused your token (expired or revoked). Check it in host setup."),
         );
         controller.onClaudeEvent = (event) => claudeEventRef.current?.(event);
         controller.onNotice = setError;
         controllerRef.current = controller;
         await controller.boot();
         controller.attach(targetRef.current);
+        setAttached(true);
       }
       lastCheckpointAtRef.current = Date.now();
       if (mode === "claude") await controller.startClaude();
@@ -220,6 +227,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       setStatus("Could not start");
       await controllerRef.current?.dispose();
       controllerRef.current = null;
+      setAttached(false);
     } finally {
       setStarting(false);
     }
@@ -231,7 +239,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
     <article className="terminal-pane">
       <header className="section-title terminal-heading">
         <div><h2>Workspace</h2><span className={facilitator && (status === "Claude running" || status === "WASIX Bash ready") || !facilitator && participantLive ? "live-dot" : "idle-dot"}>{facilitator ? status : participantStatus}</span></div>
-        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : controllerRef.current ? "Start Claude" : "Boot Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} /></div>}
+        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : controllerRef.current ? "Start Claude" : "Boot Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} ready={attached} /></div>}
         {!facilitator && <div className="terminal-controls"><button className="mirror-mode" aria-pressed={mirrorMode === "actual"} title={mirrorMode === "fit" ? "Show the host's terminal at its own text size, and scroll" : "Shrink or grow the host's terminal to fit this box"} onClick={() => {
           const next = mirrorMode === "fit" ? "actual" : "fit";
           setMirrorMode(next);
@@ -242,9 +250,19 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
           }
         }}>{mirrorMode === "fit" ? "Actual size" : "Fit to box"}</button></div>}
       </header>
-      {facilitator ? <div className="terminal-target" data-output-size={outputSize} ref={targetRef} /> : <ParticipantTerminal subscribe={channel.subscribe} mode={mirrorMode} />}
+      <div className="terminal-stage">
+        {facilitator ? <div className="terminal-target" data-output-size={outputSize} ref={targetRef} /> : <ParticipantTerminal subscribe={channel.subscribe} mode={mirrorMode} />}
+        {/* Until there's a screen, say what's happening where people look. */}
+        {(facilitator ? !attached : !participantLive) && (
+          <p className="terminal-empty" role="status">
+            {facilitator
+              ? starting ? status : "Boot Claude to start Claude Code in this tab. Everyone in the room sees this terminal."
+              : channel.hostConnected ? "Nothing on the host's terminal yet. It appears here when they start Claude." : "Waiting for the host. Their terminal appears here."}
+          </p>
+        )}
+      </div>
       <footer className="terminal-note">
-        <span>{facilitator ? "Terminal output is shared with everyone in this room. Only you can type or approve actions." : "Read-only mirror. The facilitator controls input and permissions."}</span>
+        <span>{facilitator ? "Terminal output is shared with everyone in this room. Only you can type or approve actions." : "Read-only mirror of the host's terminal. Only the host types or approves actions."}</span>
         {(error || channel.error) && <strong>{error ?? channel.error}</strong>}
       </footer>
     </article>

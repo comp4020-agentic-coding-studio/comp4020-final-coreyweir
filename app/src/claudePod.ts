@@ -10,9 +10,11 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { honourClipboardWrites } from "./terminalClipboard";
+import { TERMINAL_THEME } from "./terminalTheme";
+import { wrapNote } from "./terminalWrap";
 import { createRiffWasmerProvider, type WasmerCommandProvider } from "./wasmerCommandProvider";
 import { loadClaudeBundle } from "./claudeBundle";
-import { SIGINT, WASIX_SESSION_CONTROL_DIR, WasixSession, type WasixSessionCommand } from "./wasixSession";
+import { SIGINT, WASIX_SESSION_CONTROL_DIR, WASIX_SESSION_CONTROL_ROOT, WasixSession, type WasixSessionCommand } from "./wasixSession";
 import { attachNetGatewayBrowser, type NetGatewayBrowserHandle } from "./netGatewayBrowser";
 import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
@@ -93,6 +95,14 @@ const WASINIX_COREUTILS_NAMES = ["env", "stat", "du", "id", "timeout", "chmod"] 
 export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string; env?: Record<string, string>; workspaceRoom?: string };
 export type PreviewRequest = { method?: string; path?: string; headers?: Record<string, string>; body?: Uint8Array | null };
 export type PreviewResponse = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
+/**
+ * What git says when the host hasn't connected GitHub: in Riff, the token
+ * comes from the host page, never from setting GITHUB_TOKEN (docs/adr/0007).
+ * Nodepod's git reaches GitHub only through its API with a token, public
+ * repositories included.
+ */
+const NO_GITHUB_HINT = "This room's host hasn't connected GitHub, so git can't reach GitHub, even for public repositories. The host can connect it in Riff's host setup and start Claude again.";
+
 const NODEPOD_WORKER_URL = import.meta.env.DEV
   ? `/__worker__.js?dev=${Date.now()}`
   : "/__worker__.js?riff-nodepod-fixes-v5";
@@ -170,7 +180,11 @@ export function createBridgeHostHandler(
     const argv = request.argv.length > 1 ? request.argv.slice(1) : [];
     const commandName = request.argv[0] ?? "";
     report(`[bridge] pid=${request.pid} ${commandName} ${argv.join(" ")}`);
-    const process = await pod.spawn(commandName, argv, { cwd, env: envFromBridge(request) });
+    // The bridge carries no stdin, so a bridged process can never be
+    // answered. Without a TTY on stdin, prompting CLIs (create-vite and the
+    // like) take their non-interactive path or stop with an error, instead
+    // of waiting forever (docs/week-12.md, "npx create hangs").
+    const process = await pod.spawn(commandName, argv, { cwd, env: { ...envFromBridge(request), NODEPOD_STDIN_TTY: "0" } });
     const encoder = new TextEncoder();
     process.on("output", (chunk: string) => {
       void output.writeStdout(encoder.encode(chunk));
@@ -362,6 +376,8 @@ export class ClaudePodController {
     private report: (status: string) => void,
     private reportPreview: (url: string | null) => void = () => {},
     private emitOutput: (data: string) => void = () => {},
+    /** An endpoint refused one of the host's tokens (riff-sw.js saw a 401). */
+    private onCredentialRefused: (kind: "model" | "github") => void = () => {},
   ) {}
 
   async boot() {
@@ -382,7 +398,7 @@ export class ClaudePodController {
       SHELL: "bash",
       // Claude snapshots its parent PATH and restores it inside Bash. Include
       // the session's bridge stubs before that snapshot can be generated.
-      PATH: `/work/repo/${WASIX_SESSION_CONTROL_DIR}/bin:/usr/local/bin:/usr/bin:/bin:/node_modules/.bin`,
+      PATH: `${WASIX_SESSION_CONTROL_ROOT}/${WASIX_SESSION_CONTROL_DIR}/bin:/usr/local/bin:/usr/bin:/bin:/node_modules/.bin`,
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       FORCE_COLOR: "1",
@@ -395,12 +411,17 @@ export class ClaudePodController {
     const github = this.config.githubToken ? credentialFor("github", this.config.githubToken, GITHUB_ORIGINS) : null;
     this.modelCredential = model;
     this.githubCredential = github;
-    this.stopServingCredentials = serveCredentials(github ? [model, github] : [model]);
+    this.stopServingCredentials = serveCredentials(
+      github ? [model, github] : [model],
+      (credential) => this.onCredentialRefused(credential === github ? "github" : "model"),
+    );
     if (new URL(this.config.baseUrl).hostname === "api.anthropic.com") env.ANTHROPIC_API_KEY = model.placeholder;
     else env.ANTHROPIC_AUTH_TOKEN = model.placeholder;
     if (github) {
       env.GITHUB_TOKEN = github.placeholder;
       env.GH_TOKEN = github.placeholder;
+    } else {
+      env.NODEPOD_GIT_AUTH_HINT = NO_GITHUB_HINT;
     }
 
     this.report("Booting browser workspace");
@@ -512,6 +533,8 @@ export class ClaudePodController {
 
   /** A line in the host's terminal and everyone's mirror of it. */
   private terminalNote(text: string, line = true) {
+    // whole notes wrap at words; streamed output (a clone's progress) as is
+    if (line && this.terminal) text = wrapNote(text, this.terminal.xterm.cols);
     const data = `${text.replace(/(^|[^\r])\n/g, "$1\r\n")}${line ? "\r\n" : ""}`;
     this.terminal?.xterm.write(data);
     this.emitOutput(data);
@@ -524,6 +547,7 @@ export class ClaudePodController {
         Terminal,
         FitAddon,
         SerializeAddon,
+        theme: TERMINAL_THEME,
         fontSize: 12,
         fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
         prompt: (cwd) => `\x1b[38;5;244mnodepod:${cwd}$\x1b[0m `,
@@ -699,13 +723,13 @@ export class ClaudePodController {
       TMPDIR: "/tmp",
       // curl verifies the browser-generated leaf presented by the in-tab TLS
       // server. The subsequent browser fetch performs real-origin TLS checks.
-      CURL_CA_BUNDLE: "/work/repo/.wasix-session/ca.pem",
+      CURL_CA_BUNDLE: `${WASIX_SESSION_CONTROL_ROOT}/${WASIX_SESSION_CONTROL_DIR}/ca.pem`,
       // Bridged processes inherit the guest env verbatim (ProcessContext
       // env is replace-not-merge), so the GitHub placeholder must ride the
       // session env for `git push` et al to work. Same pair Claude mode sets.
       ...(this.githubCredential
         ? { GITHUB_TOKEN: this.githubCredential.placeholder, GH_TOKEN: this.githubCredential.placeholder }
-        : {}),
+        : { NODEPOD_GIT_AUTH_HINT: NO_GITHUB_HINT }),
       ...bridge.pipeEnv,
       // Prepend the bridge stub dir to the WASIX runtime default PATH
       // (/usr/local/bin:/bin:/usr/bin, where `uses` coreutils land). Do NOT
@@ -744,9 +768,9 @@ export class ClaudePodController {
     request: ExternalCommandRequest,
     context: ExternalCommandContext,
   ): Promise<{ exitCode: number }> => {
-    const { session, bridge } = await this.ensureWasixSession();
     const report = (message: string) => this.report(message);
     try {
+      const { session, bridge } = await this.ensureWasixSession();
       const cwd = request.cwd || session.root;
       const result = await session.run(INTERACTIVE_BASH, this.bashArgsWithCd(cwd, request.args), {
           cwd,
@@ -779,6 +803,10 @@ export class ClaudePodController {
         return { exitCode: 130 };
       }
       report(`[bash] failed: ${String(error)}`);
+      // Say why on the command's own stderr, so Claude and whoever reads the
+      // terminal see it, not a silent exit 1. A failed session start is
+      // retried by the next command (ensureWasixSession forgets it).
+      context.writeStderr(new TextEncoder().encode(`riff: bash could not run: ${error instanceof Error ? error.message : String(error)}\n`));
       return { exitCode: 1 };
     }
   };
@@ -844,7 +872,7 @@ export class ClaudePodController {
       env: this.wasixBaseEnv(bridge),
       onStart: (execId) => {
         this.wasixShellExecId = execId;
-        this.wasixShellBridgeRoot = WasixSession.bridgeChannel(session.root, execId).guestRoot;
+        this.wasixShellBridgeRoot = WasixSession.bridgeChannel(session.controlRoot, execId).guestRoot;
       },
       onReady: (write) => {
         this.writeWasixStdin = write;
