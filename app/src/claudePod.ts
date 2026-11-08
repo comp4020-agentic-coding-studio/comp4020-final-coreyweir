@@ -181,7 +181,7 @@ export function envFromBridge(request: BridgeRequest): Record<string, string> {
  */
 export function stdinNotice(command: string, kind: string | undefined): string | null {
   const name = command.slice(command.lastIndexOf("/") + 1) || "this command";
-  if (kind === "tty") return `riff: ${name} wanted keyboard input, which Riff can't pass to it from Bash yet, so it got none.`;
+  if (kind === "tty") return `riff: ${name} is waiting for keyboard input, which Riff can't pass to it from Bash yet.`;
   return null;
 }
 
@@ -210,12 +210,11 @@ export function createBridgeHostHandler(
       cwd,
       env: { ...env, NODEPOD_STDIN_TTY: "0", ...(notice ? { NODEPOD_STDIN_NOTICE: notice } : {}) },
     });
-    // No stdin crosses the bridge yet, so end the process's input now: a
-    // reader gets end of input instead of waiting forever (it used to hang
-    // even under `< /dev/null`). If the guest offered input (the terminal, a
-    // pipe, a file), Nodepod prints the notice when the program starts
-    // reading.
-    process.end();
+    // No stdin crosses the bridge yet, but the process's input is left open,
+    // not ended: Vite (and other servers) exit as soon as stdin ends (Vite's
+    // `process.stdin.on("end")` unless CI=true), so ending it killed every
+    // `npm run dev`. A reader waits instead, and from the terminal Nodepod
+    // prints the notice when it starts reading.
     const encoder = new TextEncoder();
     process.on("output", (chunk: string) => {
       void output.writeStdout(encoder.encode(chunk));

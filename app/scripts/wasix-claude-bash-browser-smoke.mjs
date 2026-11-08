@@ -223,11 +223,11 @@ try {
             identity: 'whoami && id && hostname && echo ~',
             helpers: 'which node; man ls 2>&1; echo "man=$?"; clear | od -An -c | tr -s " "; echo a | less',
             sudo: 'sudo -v && sudo -n -E -u root -- whoami; sudo -u bob true; echo "bob=$?"',
-            // No stdin crosses the bridge: a bridged reader gets end of input
-            // at once (it used to hang, even under < /dev/null). Only a
-            // terminal reader is told why (wasix-terminal smoke).
-            stdinEof: \`node -e "process.stdin.on('data',()=>{}).on('end',()=>console.log('eof'))" < /dev/null; echo "exit=$?"\`,
-            stdinPipe: \`echo hi | node -e "process.stdin.on('data',d=>console.log('got',String(d))).on('end',()=>console.log('end'))"; echo "exit=$?"\`,
+            // No stdin crosses the bridge, and a bridged process's stdin is
+            // left open: Vite exits the moment stdin ends (its
+            // process.stdin.on("end") unless CI=true), so ending it killed
+            // every dev server Claude started. This is Vite's listener.
+            stdinOpen: \`node -e "process.stdin.on('end',()=>{console.log('ended');process.exit(1)});setTimeout(()=>{console.log('open');process.exit(0)},1000)"\`,
             stdinUnread: \`echo hi | node -e "console.log('no read')"\`,
           };
           for (const [name, command] of Object.entries(commands)) {
@@ -366,10 +366,7 @@ try {
   assert.equal(snapshot.commands.sudo.stdout, "user\nbob=1\n");
   assert.match(snapshot.commands.sudo.stderr, /can't run as 'bob'/);
   const stdinCheck = (name) => JSON.stringify(snapshot.commands[name]);
-  assert.equal(snapshot.commands.stdinEof.stdout, "eof\nexit=0\n", stdinCheck("stdinEof"));
-  assert.doesNotMatch(snapshot.commands.stdinEof.stderr, /riff:/, stdinCheck("stdinEof"));
-  assert.equal(snapshot.commands.stdinPipe.stdout, "end\nexit=0\n", stdinCheck("stdinPipe"));
-  assert.doesNotMatch(snapshot.commands.stdinPipe.stderr, /riff:/, stdinCheck("stdinPipe"));
+  assert.equal(snapshot.commands.stdinOpen.stdout, "open\n", stdinCheck("stdinOpen"));
   assert.equal(snapshot.commands.stdinUnread.stdout, "no read\n", stdinCheck("stdinUnread"));
   assert.doesNotMatch(snapshot.commands.stdinUnread.stderr, /riff:/, stdinCheck("stdinUnread"));
   console.log(`Claude-bash E2E: both $SHELL forms intercepted; tools/bridge/token/exit-code verified; first output at ${firstTickTime} ms of ${result.stream.exitedAt} ms.`);
