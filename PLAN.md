@@ -802,6 +802,14 @@ auto-release at the latest.
   a built-in: `web` is written at boot, a host's Apply keeps it, and a host
   server named `web` doesn't replace it (`test:mcp-browser` checks it's in
   the config at boot and connected in `/mcp` after Apply). Left: live.
+  Search refused on live (9 Nov): Jina was refusing html.duckduckgo.com and
+  lite.duckduckgo.com to anonymous callers for hours (HTTP 403
+  `AbuseAlleviationError`, others' abuse). Bing through Jina answered, but
+  often a different question (Walmart in Redmond for "COMP4020 ANU"), so
+  there's no reliable free fallback; the tool now says plainly that search
+  is unavailable, why and until when, and to fetch a known page instead.
+  Measured on dev with Riff's real model while refused: it fetched the
+  y-protocols spec from GitHub and answered.
 
 - ~~**MCP servers for the host's Claude**~~ (ADR 0012; Corey, 9 Nov). An
   "MCPs" button in the host's terminal controls: GitHub's MCP server (read

@@ -95,18 +95,36 @@ async function getText(url, timeout, fetchImpl) {
   return { status: response.status, text: await response.text() };
 }
 
+export const SEARCH_UNAVAILABLE =
+  "Web search is unavailable right now. Don't retry the search: read a page you know with fetch instead " +
+  "(the project's docs, its GitHub repository, its npm or PyPI page), or ask the user for a link.";
+
+/**
+ * Measured 9 Nov: Jina refused html.duckduckgo.com outright for hours (HTTP
+ * 403, "AbuseAlleviationError: Anonymous access to domain ... blocked until
+ * <time> due to previous abuse", someone else's), and lite.duckduckgo.com
+ * too. Bing through Jina answered, but often a different question (Walmart
+ * in Redmond for "COMP4020 ANU"), so it isn't a fallback. So a refusal is
+ * normal, and the error says so plainly, with what to do instead, rather
+ * than leave Claude retrying.
+ */
 export async function search({ query, max_results: maxResults = 10 } = {}, fetchImpl = globalThis.fetch) {
   if (!query || typeof query !== "string") return { results: [], error: "query is required" };
+  const unavailable = (why) => ({ results: [], error: `${SEARCH_UNAVAILABLE} (${why}.)` });
   let reply;
   try {
     reply = await getText(searchUrl(query), SEARCH_TIMEOUT_MS, fetchImpl);
   } catch (error) {
-    return { results: [], error: String(error?.message ?? error) };
+    return unavailable(`Jina Reader didn't answer: ${String(error?.message ?? error)}`);
   }
-  if (reply.status !== 200) return { results: [], error: `Jina returned HTTP ${reply.status}: ${reply.text.slice(0, 200)}` };
-  if (isBlocked(reply.text)) return { results: [], error: "DuckDuckGo results were blocked or unavailable via Jina. Try again later." };
+  if (reply.status !== 200) {
+    const until = /blocked until ([^(]+?) GMT/.exec(reply.text)?.[1];
+    if (/AbuseAlleviationError/.test(reply.text)) return unavailable(`Jina Reader is refusing DuckDuckGo${until ? ` until ${until} UTC` : " for now"}, because of others' abuse`);
+    return unavailable(`Jina Reader answered HTTP ${reply.status}${reply.status === 429 ? ", too many requests" : ""}`);
+  }
+  if (isBlocked(reply.text)) return unavailable("DuckDuckGo answered with a bot check");
   const results = parseResults(reply.text, Math.max(1, Math.min(Number(maxResults) || 10, 30)));
-  if (!results.length) return { results: [], error: "No search results parsed from Jina response." };
+  if (!results.length) return { results: [], error: "No results for that query. Try other words once; if that finds nothing too, fetch a page you know instead." };
   return { results };
 }
 
@@ -134,12 +152,12 @@ export async function fetchPage({ url } = {}, fetchImpl = globalThis.fetch) {
 export const SERVER_NAME = "web";
 export const INSTRUCTIONS =
   "Web access from this browser workspace. Claude Code's WebFetch runs in the host's browser, where most sites refuse it (CORS), " +
-  "so read pages with this server's fetch and search the web with its search. Both go through Jina Reader (r.jina.ai); searches read DuckDuckGo.";
+  "so read pages with this server's fetch and search the web with its search. Both go through Jina Reader (r.jina.ai); searches read DuckDuckGo. If search says it's unavailable, don't retry it: fetch a page you know.";
 
 export const TOOLS = [
   {
     name: "search",
-    description: "Search the web (DuckDuckGo, read through Jina Reader). Returns titles, links and snippets. Use instead of WebSearch.",
+    description: "Search the web (DuckDuckGo, read through Jina Reader). Returns titles, links and snippets. Use instead of WebSearch. If it says search is unavailable, don't retry: fetch a page you know.",
     inputSchema: {
       type: "object",
       properties: {
