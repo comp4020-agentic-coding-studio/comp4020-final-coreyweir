@@ -16,7 +16,7 @@ import os from "node:os";
 
 export const SLOW_MS = 4_000;
 
-function lanAddress() {
+export function lanAddress() {
   for (const entries of Object.values(os.networkInterfaces())) {
     for (const entry of entries ?? []) if (entry.family === "IPv4" && !entry.internal) return entry.address;
   }
@@ -117,7 +117,7 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
       const toolText = Array.isArray(lastUser?.content)
         ? lastUser.content.filter((block) => block?.type === "tool_result").map((block) => typeof block.content === "string" ? block.content : (block.content ?? []).map((part) => part?.text ?? "").join("")).join("\n")
         : "";
-      if (isTurn) turns.push({ at: Date.now(), blocks, images: imageBlocks(lastUser?.content), toolResult: Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result"), toolText });
+      if (isTurn) turns.push({ at: Date.now(), blocks, images: imageBlocks(lastUser?.content), toolResult: Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result"), toolText, messages: (body.messages ?? []).length });
       if (isTurn && blocks.some((text) => text.includes("fail"))) {
         res.writeHead(400, { ...cors, "content-type": "application/json" });
         res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "the fake API refuses prompts containing fail" } }));

@@ -25,9 +25,11 @@ import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } fro
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
 import type { PodFiles } from "./boardForClaude";
-import { credentialFor, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
+import { credentialFor, forgetCredentials, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
+import { GITHUB_MCP_ORIGIN, mcpServers, NO_MCP, serverName, type McpSettings } from "./mcp";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
 import { DetachableCommands, DETACH_COMMAND, detachingCommand, isDetach } from "./bashDetach";
+import { SESSION_ENV_FILE, SESSION_HOME, SESSION_HOSTNAME, SESSION_USER, sessionEnvScript, sessionHelperCommands, XTERM_TERMCAP } from "./sessionSystem";
 import { createPythonFetchHandler, isPythonFetch, PYTHON_FETCH_COMMAND, pythonLaunchers, pythonSessionFiles } from "./pythonCommand";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
 import bridgeStubUrl from "./assets/wasmer/bridge-stub.wasm?url";
@@ -89,13 +91,13 @@ const WASINIX_BINARIES = [
  * `wasmer/coreutils@1.0.25` so `env` is no longer the old-libc uutils 0.0.7
  * atom. sha256 7534fb8088b1fb508878cab3cd37dcb22db4076e0579255b914b8b22d9b71296.
  */
-const WASINIX_COREUTILS_NAMES = ["env", "stat", "du", "id", "timeout", "chmod"] as const;
+const WASINIX_COREUTILS_NAMES = ["env", "stat", "du", "id", "timeout", "chmod", "whoami", "groups"] as const;
 
 // env: extra variables for Claude Code (model choice for Riff's own
 // models, docs/adr/0009). Never a credential: those go through
 // credentialFor() so only a placeholder reaches the guest.
 // workspaceRoom: the room whose saved workspace this pod opens (docs/adr/0010).
-export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string; env?: Record<string, string>; workspaceRoom?: string };
+export type HostConfig = { baseUrl: string; token: string; repo: string; githubToken?: string; env?: Record<string, string>; workspaceRoom?: string; mcp?: McpSettings };
 export type PreviewRequest = { method?: string; path?: string; headers?: Record<string, string>; body?: Uint8Array | null };
 export type PreviewResponse = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
 /**
@@ -224,6 +226,11 @@ export class ClaudePodController {
   private modelCredential: Credential | null = null;
   private githubCredential: Credential | null = null;
   private stopServingCredentials: (() => void) | null = null;
+  /** Every credential the page answers for; MCP ones change on applyMcp. */
+  private servedCredentials: Credential[] = [];
+  /** The MCP servers' credentials, by server name (docs/adr/0012). */
+  private mcpCredentials = new Map<Credential, string>();
+  private claudeExited: Promise<void> | null = null;
   // This room's workspace, saved in the browser (docs/adr/0010); null when
   // it can't be (no OPFS) and the reason why.
   private workspace: Workspace | null = null;
@@ -416,10 +423,16 @@ export class ClaudePodController {
     const github = this.config.githubToken ? credentialFor("github", this.config.githubToken, GITHUB_ORIGINS) : null;
     this.modelCredential = model;
     this.githubCredential = github;
-    this.stopServingCredentials = serveCredentials(
-      github ? [model, github] : [model],
-      (credential) => this.onCredentialRefused(credential === github ? "github" : "model"),
-    );
+    const mcp = this.mcpConfig(this.config.mcp ?? NO_MCP);
+    this.mcpCredentials = mcp.credentials;
+    this.servedCredentials = [model, ...(github ? [github] : []), ...mcp.credentials.keys()];
+    this.stopServingCredentials = serveCredentials(this.servedCredentials, (credential) => {
+      // An MCP server's refusal is that server's news, never the GitHub
+      // reconnect flow, even when it's GitHub's MCP with the same token.
+      const server = this.mcpCredentials.get(credential);
+      if (server) this.onNotice(`The MCP server "${server}" refused its token. Check it in MCPs.`);
+      else this.onCredentialRefused(credential === github ? "github" : "model");
+    });
     if (new URL(this.config.baseUrl).hostname === "api.anthropic.com") env.ANTHROPIC_API_KEY = model.placeholder;
     else env.ANTHROPIC_AUTH_TOKEN = model.placeholder;
     if (github) {
@@ -444,6 +457,8 @@ export class ClaudePodController {
           firstStartTime: new Date().toISOString(),
           hasCompletedOnboarding: true,
           projects: { "/work/repo": { hasTrustDialogAccepted: true } },
+          // The host's MCP servers for this room, tokens as placeholders.
+          mcpServers: this.claudeMcpServers({}, mcp.servers),
         }),
         "/home/user/.claude/settings.json": JSON.stringify({
           showThinkingSummaries: true,
@@ -615,7 +630,7 @@ export class ClaudePodController {
     this.fitTimers = [0, 100, 300].map((delay) => window.setTimeout(() => this.terminal?.fit(), delay));
   }
 
-  async startClaude() {
+  async startClaude(args: string[] = []) {
     if (!this.pod || !this.terminal) throw new Error("Terminal has not been attached");
     if (this.isRunning()) return;
     await this.waitForTerminalIdle();
@@ -627,7 +642,7 @@ export class ClaudePodController {
     terminal.writeln("");
     terminal.writeln(launchMessage);
     this.emitOutput(`\r\n${launchMessage}\r\n`);
-    const process = await this.pod.spawn("node", ["/opt/claude/run.cjs"], { cwd: "/work/repo" });
+    const process = await this.pod.spawn("node", ["/opt/claude/run.cjs", ...args], { cwd: "/work/repo" });
     this.process = process;
 
     const internal = terminal as unknown as TerminalInternals;
@@ -652,7 +667,10 @@ export class ClaudePodController {
     };
     process.on("output", write);
     process.on("error", write);
+    let exited = () => {};
+    this.claudeExited = new Promise((resolve) => { exited = resolve; });
     process.on("exit", () => {
+      exited();
       if (this.process !== process) return;
       this.process = null;
       this.onClaudeEvent({ event: "Exited" });
@@ -664,6 +682,100 @@ export class ClaudePodController {
     this.notifyResize();
     xterm.focus();
     this.report("Claude running");
+  }
+
+  private hostMcpNames = new Set<string>();
+
+  /**
+   * The one place Claude's whole `mcpServers` is put together: what's
+   * already there and the host didn't set (built-in servers such as `web`)
+   * stays and wins over a host server of the same name, the host's previous
+   * servers go, and the host's current ones (`mcpServers()` in mcp.ts) are
+   * added.
+   */
+  private claudeMcpServers(current: Record<string, unknown>, host: Record<string, unknown>) {
+    const builtIn = Object.fromEntries(Object.entries(current).filter(([name]) => !this.hostMcpNames.has(name)));
+    this.hostMcpNames = new Set(Object.keys(host).filter((name) => !(name in builtIn)));
+    return { ...host, ...builtIn };
+  }
+
+  /** Claude's mcpServers and the credentials behind their placeholders. */
+  private mcpConfig(settings: McpSettings) {
+    const credentials = new Map<Credential, string>();
+    const githubToken = this.config.githubToken;
+    // GitHub's MCP takes the host's GitHub token, as its own credential:
+    // only GitHub's MCP origin, and its refusals aren't GitHub's.
+    const github = settings.github.on && githubToken ? credentialFor("mcp", githubToken, [GITHUB_MCP_ORIGIN]) : null;
+    if (github) credentials.set(github, "github");
+    const servers = mcpServers(settings, github, (entry) => {
+      let origin: string;
+      try {
+        origin = new URL(entry.url).origin;
+      } catch {
+        return null;
+      }
+      const credential = credentialFor("mcp", entry.value, [origin]);
+      credentials.set(credential, serverName(entry.name));
+      return credential.placeholder;
+    });
+    return { servers, credentials };
+  }
+
+  /**
+   * Use these MCP settings from now on. Claude reads its MCP servers only
+   * when it starts (measured on 2.1.221: a server written into
+   * ~/.claude.json while it runs never shows in /mcp), so a running Claude
+   * is restarted with --continue, which keeps the conversation (6.5 s on
+   * dev). Returns whether it restarted Claude.
+   */
+  async applyMcp(settings: McpSettings): Promise<boolean> {
+    this.config = { ...this.config, mcp: settings };
+    if (!this.pod) return false;
+    const { servers, credentials } = this.mcpConfig(settings);
+    const old = [...this.mcpCredentials.keys()];
+    this.servedCredentials.splice(0, this.servedCredentials.length,
+      ...this.servedCredentials.filter((credential) => !this.mcpCredentials.has(credential)), ...credentials.keys());
+    this.mcpCredentials = credentials;
+    await forgetCredentials(old.map((credential) => credential.placeholder));
+    const path = "/home/user/.claude.json";
+    const volume = this.pod.volume;
+    const config = volume.existsSync(path) ? JSON.parse(String(volume.readFileSync(path, "utf8"))) as Record<string, unknown> : {};
+    config.mcpServers = this.claudeMcpServers((config.mcpServers ?? {}) as Record<string, unknown>, servers);
+    volume.writeFileSync(path, JSON.stringify(config, null, 2));
+    if (!this.isRunning() || !this.process) return false;
+    await this.restartClaude("Restarting Claude to load the MCP servers. The conversation carries on.");
+    return true;
+  }
+
+  /** Exit Claude as /exit does, then start it again on the same conversation. */
+  private async restartClaude(note: string) {
+    const process = this.process;
+    if (!process) return;
+    const exited = this.claudeExited;
+    let gone = false;
+    void exited?.then(() => { gone = true; });
+    const until = (ms: number) => Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, ms))]);
+    // Ctrl-U clears whatever is typed at Claude's prompt first. A Claude
+    // that is still drawing itself (its hooks can say idle first) drops
+    // what's typed, so ask again every few seconds, then stop it outright.
+    for (let attempt = 0; attempt < 3 && !gone; attempt++) {
+      process.write("\x15/exit\r");
+      await until(4_000);
+    }
+    if (!gone) {
+      process.kill("SIGTERM");
+      await until(4_000);
+    }
+    if (!gone) {
+      process.kill("SIGKILL");
+      await until(4_000);
+    }
+    if (!gone) throw new Error("Claude didn't stop, so the MCP servers aren't applied yet. Interrupt it, then apply again.");
+    this.terminalNote(`\x1b[38;5;244m${note}\x1b[0m`);
+    const transcripts = "/home/user/.claude/projects/-work-repo";
+    const volume = this.pod?.volume;
+    const conversation = Boolean(volume?.existsSync(transcripts) && volume.readdirSync(transcripts).some((name) => String(name).endsWith(".jsonl")));
+    await this.startClaude(conversation ? ["--continue"] : []);
   }
 
   /**
@@ -703,6 +815,7 @@ export class ClaudePodController {
       // The store dropped file modes on its way in (workspace.ts).
       this.workspace?.reapplyModes();
       await session.installSessionFile("ca.pem", new TextEncoder().encode(certificateAuthority.pem));
+      await session.installSessionFile(SESSION_ENV_FILE, sessionEnvScript());
       const bridgeStubBytes = await fetchBytes(bridgeStubUrl);
       // Every name here but PYTHON_FETCH_COMMAND resolves host-side via createBridgeHostHandler →
       // pod.spawn; these are all native Nodepod commands like npm/git
@@ -738,6 +851,7 @@ export class ClaudePodController {
         const bytes = await fetchBytes(binary.url);
         await session.installBinaries(new Map([[binary.name, bytes]]));
       }
+      await session.installBinaries(sessionHelperCommands());
       // python/python3 launchers; the package itself comes on first use.
       await session.installBinaries(pythonLaunchers());
       for (const [path, data] of pythonSessionFiles()) await session.installSessionFile(path, data);
@@ -763,13 +877,19 @@ export class ClaudePodController {
   private wasixBaseEnv(bridge: { pipeEnv: Record<string, string>; pathEntry: string }): Record<string, string> {
     return {
       TERM: "xterm-256color",
+      TERMCAP: XTERM_TERMCAP,
       COLORTERM: "truecolor",
-      HOME: "/home/user",
-      USER: "user",
+      HOME: SESSION_HOME,
+      USER: SESSION_USER,
+      // Bash keeps an inherited HOSTNAME; the prompt shows it.
+      HOSTNAME: SESSION_HOSTNAME,
       TMPDIR: "/tmp",
       // curl verifies the browser-generated leaf presented by the in-tab TLS
       // server. The subsequent browser fetch performs real-origin TLS checks.
       CURL_CA_BUNDLE: `${WASIX_SESSION_CONTROL_ROOT}/${WASIX_SESSION_CONTROL_DIR}/ca.pem`,
+      // Every non-interactive bash sources it: it writes this run's /etc
+      // (sessionSystem.ts). The terminal's rc sources it too.
+      BASH_ENV: `${WASIX_SESSION_CONTROL_ROOT}/${WASIX_SESSION_CONTROL_DIR}/${SESSION_ENV_FILE}`,
       // Bridged processes inherit the guest env verbatim (ProcessContext
       // env is replace-not-merge), so the GitHub placeholder must ride the
       // session env for `git push` et al to work. Same pair Claude mode sets.

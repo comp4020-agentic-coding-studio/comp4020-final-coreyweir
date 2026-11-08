@@ -37,4 +37,8 @@
 @media(max-width:480px){
   .copy-view>.site-bar,.copy-view>.copy-bar{padding-left:12px;padding-right:12px}
   .copy-bar small{display:none}
+  /* the title on its line, the three buttons on the next */
+  .copy-view>.copy-bar{flex-wrap:wrap;row-gap:8px}
+  .copy-bar>div{flex:1 0 100%}
+  .copy-bar .copy-actions{margin-left:0;flex-wrap:wrap}
 }

@@ -79,6 +79,15 @@ export function useQueueRelease({ facilitator, roomState, synced, terminalRef, q
   return { state, unacknowledged, dispatch, send, setAuto };
 }
 
+// What an empty queue says: true now, whatever went before (a queue that
+// has sent everything is as empty as one never used), and to whom it's
+// shown: the host is the one who queues, a participant is told who does.
+export function emptyQueue(facilitator: boolean, editable: boolean, auto: boolean) {
+  if (facilitator && !editable) return "Nothing queued.";
+  if (facilitator) return auto ? "Nothing queued. Auto is on: the next prompt you queue from staging goes to Claude when it's free." : "Nothing queued. Queue a prompt from staging.";
+  return auto ? "Nothing queued. Auto is on: the next prompt the host queues goes to Claude when it's free." : "Nothing queued. The host queues prompts from staging.";
+}
+
 export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostHere, ended = false, canSendNow, waiting = false, onSend, onDelete, onAuto }: {
   queued: QueuedPrompt[];
   facilitator: boolean;
@@ -123,7 +132,7 @@ export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostH
             {editable && <button onClick={() => onDelete(prompt.id)} aria-label="Remove queued prompt">&times;</button>}
           </div>
         ))}
-        {!queued.length && <p className="empty">{auto ? "Auto is on: the next prompt the host queues goes to Claude when it's free." : "The host hasn't queued anything yet."}</p>}
+        {!queued.length && <p className="empty">{emptyQueue(facilitator, editable, auto)}</p>}
       </div>
     </article>
   );

@@ -89,12 +89,12 @@ async function bootPage() {
     button.click();
   });
   await page.waitForFunction(
-    () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
+    () => document.querySelector(".terminal-heading")?.textContent?.includes("Bash ready"),
     { timeout: 180_000 },
   );
   await page.locator(".terminal-target textarea").click();
   await page.waitForFunction(
-    () => /I have no name!@wasmer:\/work\/repo#/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""),
+    () => /user@riff:\/work\/repo\$/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""),
     { timeout: 30_000 },
   );
   return { page, pageErrors };

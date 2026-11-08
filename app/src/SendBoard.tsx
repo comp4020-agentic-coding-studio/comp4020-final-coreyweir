@@ -9,7 +9,7 @@ import { fitImage } from "./imagePaste";
 
 type Sent = { dir: string; text: string; notice: string | null; files: string[] };
 
-const NOT_READY = "Boot Claude in the Room view first: the board goes into its files.";
+const NOT_READY = "Start Claude first (Room view): the board goes into its files.";
 
 /**
  * The button's state and the popup for a host. `pod` reads the host's pod

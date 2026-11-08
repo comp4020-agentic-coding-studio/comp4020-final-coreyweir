@@ -13,6 +13,8 @@
     "test:image-paste": "node --test src/imagePaste.test.ts",
     "test:terminal-wrap": "node --test src/terminalWrap.test.ts",
     "test:colours": "node --test src/colours.test.ts",
+    "test:mcp": "node --test src/mcp.test.ts",
+    "test:mcp-browser": "node scripts/mcp-browser-smoke.mjs",
     "test:wasix-bridge-unit": "node --test src/wasixBridge.test.ts",
     "test:collaboration": "node --test --test-force-exit scripts/collaboration-store.test.mjs",
     "test:terminal-relay": "node scripts/terminal-relay-smoke.mjs",
@@ -92,6 +94,7 @@
     "test:image-paste-browser": "node scripts/image-paste-browser-smoke.mjs",
     "test:webfetch-browser": "node scripts/webfetch-browser-smoke.mjs",
     "test:claude-serve-browser": "node scripts/claude-serve-browser-smoke.mjs",
+    "test:terminal-status-browser": "node scripts/terminal-status-browser-smoke.mjs",
     "test:github-reconnect-browser": "node scripts/github-reconnect-browser-smoke.mjs",
     "test:auth-callback": "node --test --test-force-exit scripts/auth-callback.test.mjs",
     "test:github-check": "node --test src/githubCheck.test.ts"

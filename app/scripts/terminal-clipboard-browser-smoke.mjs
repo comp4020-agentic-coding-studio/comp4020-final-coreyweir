@@ -58,7 +58,7 @@ try {
   const room = await host.$eval(".room-name span", (element) => element.textContent.replace("Room ", ""));
   await openRoomTab(host);
   await host.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((element) => element.textContent === "Start Bash")?.click());
-  await host.waitForFunction(() => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"), { timeout: 120_000 }).catch(async (error) => {
+  await host.waitForFunction(() => document.querySelector(".terminal-heading")?.textContent?.includes("Bash ready"), { timeout: 120_000 }).catch(async (error) => {
     const state = await host.evaluate(() => ({ heading: document.querySelector(".terminal-heading")?.textContent, note: document.querySelector(".terminal-note")?.textContent }));
     throw new Error(`WASIX Bash did not become ready: ${JSON.stringify(state)}`, { cause: error });
   });

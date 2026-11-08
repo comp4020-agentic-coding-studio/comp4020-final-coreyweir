@@ -109,7 +109,7 @@ try {
   // The dev server, started from the host's shell like anyone would.
   await openTab(host, "Room");
   await host.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((b) => b.textContent === "Start Bash")?.click());
-  await host.waitForFunction(() => /WASIX Bash ready/.test(document.querySelector(".terminal-heading")?.textContent ?? ""), { timeout: 180_000 });
+  await host.waitForFunction(() => /Bash ready/.test(document.querySelector(".terminal-heading")?.textContent ?? ""), { timeout: 180_000 });
   await host.waitForFunction(() => [...document.querySelectorAll(".terminal-target .xterm-rows > div")].some((row) => row.textContent.includes("#")), { timeout: 60_000, polling: 100 });
   await host.click(".terminal-target .xterm");
   await host.keyboard.sendCharacter(command);

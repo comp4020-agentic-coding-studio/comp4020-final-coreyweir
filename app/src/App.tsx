@@ -6,7 +6,7 @@ import { canSend, type ClaudeState } from "./queueRelease";
 import {
   type Access, ApiError, createRoom, currentUser, deleteRoomFromServer, endRoom, enterRoom, leaveRoom, reopenRoom, storedSecret, storedSecrets, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
   acceptInvite, addColleague, cancelInvite, declineInvite, inviteToRoom, listColleagues, removeColleague, watchRooms,
-  type Colleagues, type EndedRoom, type ListedRoom, type RoomInfo, type RoomList,
+  type Colleagues, type EndedRoom, type ListedRoom, type RoomInfo, type RoomList, type RoomState,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
   RIFF_MODEL_ENV, riffModelsAvailable, riffModelsUrl,
 } from "./api";
@@ -22,6 +22,7 @@ import {
   BoardFileError, MAX_FILE_BYTES, ROOM_LIMIT_BYTES, type BoardFile, type FilePrompt, type ParsedBoard,
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
 } from "./boardFile";
+import { EMPTY_PICTURE, EmptyBoard, boardHasShapes, boardPicture, boardPictureName } from "./boardPicture";
 import { markAutoBoot } from "./autoBoot";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
 import { type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
@@ -87,6 +88,8 @@ function boardFate(keep: boolean) {
 }
 
 function megabytes(bytes: number) {
+  // a board with a few notes would read "0 MB", as if it held nothing
+  if (bytes > 0 && bytes < 0.005 * 1024 * 1024) return "under 0.01 MB";
   return `${(bytes / 1024 / 1024).toFixed(bytes < 1024 * 1024 ? 2 : 1).replace(/\.0+$/, "")} MB`;
 }
 
@@ -97,13 +100,22 @@ function countdown(until: number, now: number) {
 
 // Export (docs/adr/0003, second amendment): the file is the whole board,
 // its images as they are, and the prompts.
-function downloadBoard(file: BoardFile) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(file)], { type: "application/json" }));
+function download(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = boardFileName(file.room.code, new Date(file.exportedAt));
+  link.download = name;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+function downloadBoard(file: BoardFile) {
+  download(new Blob([JSON.stringify(file)], { type: "application/json" }), boardFileName(file.room.code, new Date(file.exportedAt)));
+}
+
+// The board as a picture (boardPicture.ts), from the room's document.
+async function downloadPicture(code: string | null, doc: Y.Doc) {
+  download(await boardPicture(doc), boardPictureName(code ?? "board"));
 }
 
 // Only hosts have files: what the landing list says they are.
@@ -489,10 +501,11 @@ function copyDetail(copy: LocalCopy, listed: boolean) {
   return [role, `copy on this browser${copy.lastOpened ? `, ${shortDate(copy.lastOpened)}` : ""}`].filter(Boolean).join(" · ");
 }
 
-async function exportCopy(copy: LocalCopy) {
+async function exportCopy(copy: LocalCopy, as: "json" | "png" = "json") {
   const { doc, destroy } = await loadCopy(copy);
   try {
-    downloadBoard(exportBoard({ code: copy.code ?? "board", doc }));
+    if (as === "png") await downloadPicture(copy.code, doc);
+    else downloadBoard(exportBoard({ code: copy.code ?? "board", doc }));
   } finally {
     destroy();
   }
@@ -581,7 +594,7 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
     try {
       await action();
     } catch (failure) {
-      setError(failure instanceof ApiError ? problem(failure) : "Couldn't do that in this browser's storage. Try again.");
+      setError(failure instanceof ApiError ? problem(failure) : failure instanceof EmptyBoard ? failure.message : "Couldn't do that in this browser's storage. Try again.");
     }
     setAsking(null);
     setAlsoServer(false);
@@ -668,7 +681,8 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 {ended && <button className="link" disabled={asking === `reopening:${ended.id}`} onClick={() => ended.boardGone && !copy ? setAsking(`reopen:${ended.id}`) : void reopen(ended)}>{asking === `reopening:${ended.id}` ? "Reopening..." : "Reopen"}</button>}
                 {room && <button className="link" onClick={() => goToRoom(room.id)}>Enter</button>}
                 {copy && <button className="link" onClick={() => onOpen(copy)}>Open</button>}
-                {copy && <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>}
+                {copy && <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board (JSON)</button>}
+                {copy && <button className="link" onClick={() => void act(() => exportCopy(copy, "png"))}>Export board (PNG)</button>}
                 {workspace && <ExportFiles workspace={workspace} code={code ?? null} secrets={hostSecrets} />}
                 {workspace && <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>}
                 {room?.role === "participant" && <button className="link" onClick={() => setAsking(`leave:${room.id}`)}>Leave room</button>}
@@ -728,6 +742,21 @@ function PeekBoard({ doc }: { doc: Y.Doc }) {
   );
 }
 
+// "Export board (PNG)" for a copy's board, which doesn't change while it's
+// open: off, saying why, when there's nothing on it.
+function PictureButton({ className, code, doc }: { className: string; code: string | null; doc: Y.Doc | null }) {
+  const [state, setState] = useState<"idle" | "busy" | "failed">("idle");
+  const empty = doc !== null && !boardHasShapes(doc);
+  return (
+    <button className={className} disabled={!doc || empty || state === "busy"} title={empty ? EMPTY_PICTURE : undefined}
+      onClick={() => {
+        if (!doc) return;
+        setState("busy");
+        downloadPicture(code, doc).then(() => setState("idle"), () => setState("failed"));
+      }}>{state === "failed" ? "Couldn't make the PNG: try again" : "Export board (PNG)"}</button>
+  );
+}
+
 // A wide screen's look at a board, in place of the hero, with the forms
 // still beside it. From this browser's copy, so it's as of the last time
 // this browser had the room open.
@@ -758,7 +787,8 @@ function BoardPeek({ copy, room, onClose }: { copy: LocalCopy; room: ListedRoom 
         <span className="actions">
           {room && room.state !== "ended" && <button className="enter" onClick={() => goToRoom(room.id)}>Enter room</button>}
           <button className="full-page" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Full page</button>
-          <button disabled={!(opened instanceof Y.Doc)} onClick={() => opened instanceof Y.Doc && downloadBoard(exportBoard({ code: copy.code ?? "board", doc: opened }))}>Export</button>
+          <button className="export-json" disabled={!(opened instanceof Y.Doc)} onClick={() => opened instanceof Y.Doc && downloadBoard(exportBoard({ code: copy.code ?? "board", doc: opened }))}>Export board (JSON)</button>
+          <PictureButton className="export-png" code={copy.code} doc={opened instanceof Y.Doc ? opened : null} />
           <button className="close" aria-label="Close the board" onClick={onClose}>×</button>
         </span>
       </header>
@@ -1002,7 +1032,7 @@ function Staging({ prompts, canQueue, readOnly, onAdd, onQueue, onDelete }: {
       </form>}
       <div className="prompt-list">
         {staged.map((prompt) => <PromptCard key={prompt.id} prompt={prompt} canQueue={canQueue} readOnly={readOnly} onQueue={() => onQueue(prompt)} onDelete={() => onDelete(prompt.id)} />)}
-        {!staged.length && <p className="empty">Ideas staged from the board will appear here.</p>}
+        {!staged.length && <p className="empty">{readOnly ? "Nothing staged." : "Nothing staged yet. Type a prompt above, or select something with text on the board and choose Stage selected text."}</p>}
       </div>
     </aside>
   );
@@ -1123,22 +1153,28 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, h
   return (
     <section className="crit-room" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
       {/* A participant's terminal stops asking once the room ends; a new one starts if the host revives it. Never remount the host's: it runs Claude. */}
-      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} onPodReady={onPodReady} onBootStatus={onBootStatus} />
+      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} claudeState={facilitator ? release.state : undefined} ended={ended} onPodReady={onPodReady} onBootStatus={onBootStatus} />
       <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} ended={ended} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
     </section>
   );
 }
 
-function PreviewView({ roomId, previewKey, previewOrigin, live, generation, facilitator, preview }: {
+function PreviewView({ roomId, previewKey, previewOrigin, live: published, roomState, generation, facilitator, preview }: {
   roomId: string;
   previewKey: string;
   previewOrigin: string;
   live: boolean;
+  roomState: RoomState;
   generation: number;
   facilitator: boolean;
   preview: { url: string; revision: number } | null;
 }) {
   const [reload, setReload] = useState(0);
+  // The flag is the host's page's to clear, and a page that closes (End
+  // room, a crash) can't. Away or ended, the relay has no host to ask, so
+  // a participant's frame would only show the relay's refusal.
+  const gone = !facilitator && roomState !== "live";
+  const live = published && !gone;
   // Both roles load the room's preview origin (docs/adr/0011), so the frame
   // may keep its own storage (allow-same-origin) without reaching Riff's.
   const source = live && generation > 0 ? previewFrameUrl(previewOrigin, roomId, previewKey, generation) : null;
@@ -1146,7 +1182,7 @@ function PreviewView({ roomId, previewKey, previewOrigin, live, generation, faci
     <section className="preview-pane">
       <header className="preview-heading"><div><h2>Preview</h2><span className={live ? "live" : "offline"}><i></i>{live ? "Live" : "Not live"}</span></div>{source && <nav className="preview-actions"><button onClick={() => setReload((value) => value + 1)}>Refresh</button>{facilitator && <a href={source} target="_blank" rel="noreferrer">Open in new tab</a>}</nav>}</header>
       {source ? <iframe className="preview-frame" key={`${generation}:${preview?.revision ?? 0}:${reload}`} src={source} title="Workspace preview" sandbox="allow-forms allow-modals allow-scripts allow-same-origin" /> : <div className="preview-empty">
-        {live ? <><span className="preview-icon live-icon"></span><h3>Preview is connecting</h3><p>Waiting for the facilitator's preview relay.</p></> : <><span className="preview-icon"></span><h3>No preview yet</h3><p>Start a development server in the workspace to show it here.</p></>}
+        {gone ? <><span className="preview-icon"></span><h3>{roomState === "ended" ? "The room has ended" : "The host is away"}</h3><p>{roomState === "ended" ? "The preview stopped with it." : "The preview comes back when they do."}</p></> : live ? <><span className="preview-icon live-icon"></span><h3>Preview is connecting</h3><p>{facilitator ? "Waiting for the workspace's server." : "Waiting for the host's browser."}</p></> : <><span className="preview-icon"></span><h3>No preview yet</h3><p>{facilitator ? "Start a server in the workspace (ask Claude, or use Bash) and it shows here." : "When the host's workspace runs a server, it shows here."}</p></>}
       </div>}
     </section>
   );
@@ -1354,7 +1390,7 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
     try {
       await action();
     } catch (failure) {
-      setError(problem(failure));
+      setError(failure instanceof EmptyBoard ? failure.message : problem(failure));
     }
   }
 
@@ -1389,7 +1425,11 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
         {host && <button onClick={() => changeKeep(!room.keep)}>{room.keep ? "Stop keeping it" : "Keep it"}</button>}
       </div>
       {room.limitBytes && <p className="board-size">{room.full ? "Full: it holds" : "It holds"} {megabytes(bytes)} of the {megabytes(room.limitBytes)} a room can.</p>}
-      <p className="export-board"><button onClick={onExport}>Export the board</button><small>A file with the board, its images and the prompts. Anyone can start a new room from it.</small></p>
+      <p className="export-board">
+        <button className="export-json" onClick={onExport}>Export board (JSON)</button>
+        <button className="export-png" onClick={() => void act(() => downloadPicture(room.code, room.doc))}>Export board (PNG)</button>
+        <small>The JSON file has the board, its images and the prompts: anyone can start a new room from it. The PNG is a picture of the board.</small>
+      </p>
       {error && <p className="form-error" role="alert">{error}</p>}
       {host ? <EndRoom access={access} code={room.code} keep={room.keep} /> : <LeaveRoom roomId={access.room.id} />}
     </aside>
@@ -1552,6 +1592,17 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       room.roomState.set("previewGeneration", generation);
     });
   }
+  // A host page that opens has no preview yet, whatever the last one
+  // published: a page that closes (End room, a crash, a reload) can't clear
+  // the flag, and participants would frame a preview nobody serves. Once,
+  // after the page has the server's copy, as the queue does for Claude's
+  // state (QueuePanel.tsx).
+  const previewCleared = useRef(false);
+  useEffect(() => {
+    if (!facilitator || room.full || !room.controlSynced || previewCleared.current) return;
+    previewCleared.current = true;
+    if (!preview && room.roomState.get("previewLive") === true) room.roomState.set("previewLive", false);
+  }, [facilitator, preview, room.controlSynced, room.full, room.roomState]);
 
   if (room.shutOut) {
     return <RoomClosed reason={room.shutOut} roomId={roomId} />;
@@ -1576,11 +1627,17 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       {facilitator && bootStatus && view !== "room" && (
         <p className="room-banner booting" role="status">Starting Claude for the room: {bootStatus}. <button className="link" onClick={() => setView("room")}>Watch</button></p>
       )}
+      {/* A reload (or Claude exiting) leaves Claude off, and only the Room
+          view used to say so. Not in a full room: it doesn't publish
+          Claude's state, and has its own banner. */}
+      {facilitator && hostConfig && !bootStatus && !room.full && room.controlSynced && room.claudeState === "off" && view !== "room" && (
+        <p className="room-banner booting claude-off" role="status">Claude isn't running in this tab, so queued prompts and Send board wait. <button className="link" onClick={() => terminalRef.current?.startClaude()}>Start Claude</button></p>
+      )}
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
         {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} stageWhy={"why" in stageable ? stageable.why : null} sendBoard={facilitator ? sendBoard : undefined} prompts={room.promptSnapshots.length} />}
         {sendBoard.dialog}
         <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} terminalRef={terminalRef} onPodReady={setPodReady} onBootStatus={setBootStatus} />
-        {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
+        {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} roomState={room.state} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}
         {panel === "share" && room.state !== "ended" && <SharePanel access={access} room={room} onClose={() => setPanel(null)} />}
@@ -1784,7 +1841,8 @@ function CopyBoard({ copy, doc }: { copy: LocalCopy; doc: Y.Doc }) {
         </div>
         <span className="copy-actions">
           {prompts.length > 0 && <button className={`prompts-toggle${showPrompts ? " active" : ""}`} aria-pressed={showPrompts} onClick={() => setShowPrompts((open) => !open)}>Prompts <span>{prompts.length}</span></button>}
-          <button className="copy-export" onClick={() => downloadBoard(exportBoard({ code: copy.code ?? "board", doc }))}>Export</button>
+          <button className="copy-export" onClick={() => downloadBoard(exportBoard({ code: copy.code ?? "board", doc }))}>Export board (JSON)</button>
+          <PictureButton className="copy-export-png" code={copy.code} doc={doc} />
         </span>
       </div>
       <main className={`copy-board${showPrompts ? " with-prompts" : ""}`} aria-label={`Board of ${name}`}>

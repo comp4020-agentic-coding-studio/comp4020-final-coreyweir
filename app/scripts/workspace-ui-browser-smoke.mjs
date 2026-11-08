@@ -95,7 +95,7 @@ async function startBash(tab) {
   });
   assert.ok(clicked, "Start Bash");
   await tab.waitForFunction(
-    () => document.querySelector(".terminal-heading span")?.textContent === "WASIX Bash ready",
+    () => document.querySelector(".terminal-heading span")?.textContent === "Bash ready",
     { timeout: 240_000, polling: 200 },
   );
   await tab.waitForFunction(() => /\$ $|# $/m.test(document.querySelector(".terminal-target .xterm-rows")?.innerText.replace(/\u00a0/g, " ").trimEnd() + " "), { timeout: 30_000, polling: 100 });

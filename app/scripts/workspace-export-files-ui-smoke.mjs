@@ -7,7 +7,7 @@
 // never pushed, an uncommitted change, a few bytes no editor keeps, a
 // transcript, a node_modules) and exports it with the workspace's own Export
 // dialog. Once OPFS holds that work (read from its manifest, not a sleep), a
-// second tab opens the landing page: the room's row has "Export board" and
+// second tab opens the landing page: the room's row has "Export board (JSON)" and
 // "Export files", and Export files refuses while the room's tab holds the
 // workspace (it never takes it over). The room's tab goes back to the
 // landing page; Export files then downloads a zip with the same file list
@@ -138,7 +138,7 @@ try {
     await roomButton(host);
     await host.waitForSelector(".terminal-controls button", { timeout: 20_000 });
     await host.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((b) => b.textContent === "Start Bash")?.click());
-    await host.waitForFunction(() => document.querySelector(".terminal-heading span")?.textContent === "WASIX Bash ready", { timeout: 240_000, polling: 200 });
+    await host.waitForFunction(() => document.querySelector(".terminal-heading span")?.textContent === "Bash ready", { timeout: 240_000, polling: 200 });
     await host.waitForFunction(() => /\$ $|# $/m.test(document.querySelector(".terminal-target .xterm-rows")?.innerText.replace(/\u00a0/g, " ").trimEnd() + " "), { timeout: 30_000, polling: 100 });
     await run(host, "git init -q && git config user.email host@example.com && git config user.name Host");
     await run(host, "echo committed > notes.txt && printf '\\000\\001\\376\\377' > bytes.bin && git add notes.txt bytes.bin && git commit -q -m 'never pushed'");
@@ -167,7 +167,7 @@ try {
       return landing.evaluateHandle((code) => [...document.querySelectorAll(".your-rooms li")].find((li) => li.textContent.includes(code)), code);
     };
     const buttons = await (await row()).evaluate((li) => [...li.querySelectorAll(".actions button")].map((b) => b.textContent));
-    assert.ok(buttons.includes("Export board") && buttons.includes("Export files"), say(`the row has both exports: ${buttons}`));
+    assert.ok(buttons.includes("Export board (JSON)") && buttons.includes("Export board (PNG)") && buttons.includes("Export files"), say(`the row has both exports: ${buttons}`));
     const clickFiles = async () => (await row()).evaluate((li) => [...li.querySelectorAll(".actions button")].find((b) => b.textContent === "Export files").click());
 
     // while the room's tab holds the workspace: refused, and that tab keeps saving
