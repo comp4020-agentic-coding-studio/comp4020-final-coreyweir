@@ -110,7 +110,7 @@ try {
   await openTab(host, "Room");
   await host.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((b) => b.textContent === "Start Bash")?.click());
   await host.waitForFunction(() => /Bash ready/.test(document.querySelector(".terminal-heading")?.textContent ?? ""), { timeout: 180_000 });
-  await host.waitForFunction(() => [...document.querySelectorAll(".terminal-target .xterm-rows > div")].some((row) => row.textContent.includes("#")), { timeout: 60_000, polling: 100 });
+  await host.waitForFunction(() => [...document.querySelectorAll(".terminal-target .xterm-rows > div")].some((row) => /[#$] *$/.test(row.textContent)), { timeout: 60_000, polling: 100 });
   await host.click(".terminal-target .xterm");
   await host.keyboard.sendCharacter(command);
   await host.keyboard.press("Enter");
@@ -146,9 +146,14 @@ try {
     assert.match(new URL(src).hostname, /^[a-z2-7]+\.preview\./, `${who}: ${src}`);
     assert.deepEqual(sandbox.split(" ").sort(), ["allow-forms", "allow-modals", "allow-same-origin", "allow-scripts"], `${who}: sandbox`);
     assert.equal(await tab.evaluate(() => crossOriginIsolated), true, `${who}: Riff's page stays isolated`);
-    // Riff's own origin never serves the relay path.
-    const onRiff = await tab.evaluate(async (path) => (await fetch(path)).status, new URL(src).pathname);
+    // Riff's own origin never serves the relay path (the host's frame may
+    // start at the pod bridge's page instead, docs/adr/0011 2b), nor the
+    // bridge's worker.
+    const relayPath = src.includes("/room-preview/") ? new URL(src).pathname : "/room-preview/x/y/1/";
+    const onRiff = await tab.evaluate(async (path) => (await fetch(path)).status, relayPath);
     assert.equal(onRiff, 404, `${who}: Riff's origin served the preview`);
+    const bridgeOnRiff = await tab.evaluate(async () => (await fetch("/__riff_preview__/sw.js")).text());
+    assert.doesNotMatch(bridgeOnRiff, /riff-port/, `${who}: Riff's origin served the bridge's worker`);
 
     const frame = await element.contentFrame();
     assert(frame, `${who}: no frame`);
