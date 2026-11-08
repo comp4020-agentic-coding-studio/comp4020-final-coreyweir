@@ -410,10 +410,10 @@ auto-release at the latest.
   phone participant and the reverse, the host resized mid-way, the screens
   equal row by row and inside the box. Red before (cut off), and red if the
   mirror stops taking the host's size.
-  - Still open: the host's terminal keeps its own size. A desktop host's
-    190 columns fit a phone at about 3px a character, which is a thumbnail
-    (pinch-zoom or Actual size to read). Capping the host's columns would
-    help phones and cost the host width; Corey's call.
+  - The host's terminal keeps its own size (decided 8 Nov, Corey): the
+    desktop host's experience isn't made worse to suit phones. A desktop
+    host's 190 columns fit a phone at about 3px a character, a thumbnail;
+    the phone can pinch-zoom, or switch to Actual size and scroll.
 - ~~**Clipboard.**~~ (8 Nov.) Claude Code 2.1.221 copies with OSC 52 (`]52;c;`,
   read from the bundle), which xterm.js ignores. The host's terminal now
   honours copies, never queries (`src/terminalClipboard.ts`, our own OSC
