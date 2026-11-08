@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import type { ClaudePodController, HostConfig } from "./claudePod";
-import { useTerminalChannel, type TerminalEvent } from "./terminalChannel";
+import { useTerminalChannel, type TerminalChannelEvent } from "./terminalChannel";
 import { usePreviewHostChannel } from "./previewChannel";
 import { ACTUAL_FONT_SIZE, fitMirror, type MirrorMode } from "./mirrorFit";
 import "./terminal-stream.css";
@@ -21,7 +21,7 @@ function savedMirrorMode(): MirrorMode {
 // The mirror takes the host's columns and rows from every event, never its
 // own box's, so Claude's output lays out exactly as on the host's screen.
 // Only the font size follows the box (src/mirrorFit.ts).
-function ParticipantTerminal({ subscribe, mode }: { subscribe: (listener: (event: TerminalEvent) => void) => () => void; mode: MirrorMode }) {
+function ParticipantTerminal({ subscribe, mode }: { subscribe: (listener: (event: TerminalChannelEvent) => void) => () => void; mode: MirrorMode }) {
   const targetRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef(mode);
   const refitRef = useRef<() => void>(() => undefined);
@@ -59,6 +59,12 @@ function ParticipantTerminal({ subscribe, mode }: { subscribe: (listener: (event
     let dataEvents = 0;
     let checkpointRenders = 0;
     const unsubscribe = subscribe((event) => {
+      if (event.type === "connected") {
+        // A new connection numbers from 1 again; the next snapshot redraws.
+        sequence = 0;
+        desynchronized = false;
+        return;
+      }
       if (event.sequence <= sequence) return;
       const continuous = event.sequence === sequence + 1;
       if (event.type === "snapshot") {
@@ -140,6 +146,14 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   useEffect(() => {
     if (facilitator) previewChangeRef.current(null, publishPreview(false));
   }, [facilitator, publishPreview]);
+
+  // The relay accepted this page as host, maybe after a restart that lost
+  // its snapshot: forget what was last sent, so the next tick sends one even
+  // if the screen hasn't changed since.
+  useEffect(() => {
+    lastSnapshotRef.current = "";
+    lastCheckpointAtRef.current = 0;
+  }, [channel.hostAccepted]);
 
   useEffect(() => {
     if (!facilitator) return;

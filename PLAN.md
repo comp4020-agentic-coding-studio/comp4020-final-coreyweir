@@ -425,8 +425,15 @@ auto-release at the latest.
   reaches the host's clipboard, a query gets no answer, the participant's
   clipboard is untouched. Red with the handler removed, and red with it on
   the mirror. Not driven: Claude's own copy (a printf sends the same bytes).
-- **Terminal redeploy gap** (ADR 0001): forget the host's last snapshot when
-  the relay accepts the host again.
+- ~~**Terminal redeploy gap** (ADR 0001): forget the host's last snapshot when
+  the relay accepts the host again.~~ Done 8 Nov. On the way: a participant
+  already watching also ignored the restarted relay, whose sequence starts
+  at 1 again, until it passed the old count; each connection now starts the
+  count afresh. `npm run test:terminal-redeploy-browser` (dev only: it
+  restarts the dev server by touching `server/riff.mjs`, and keeps Vite's
+  client from reloading the pages) was red before on both counts.
+  - Needs live: a `flyctl deploy` with a host idle on Claude and a
+    participant joining after it.
 - **Redesign the landing page.** Sign-in, "Your rooms", "Boards on this
   browser", colleagues and both forms all sit in one card, which grew taller
   than the window and hid Create room (found by hand on live, 19 Oct). The

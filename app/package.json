@@ -15,6 +15,7 @@
     "test:terminal-browser": "node scripts/terminal-browser-smoke.mjs",
     "test:terminal-size-browser": "node scripts/terminal-size-browser-smoke.mjs",
     "test:terminal-clipboard-browser": "node scripts/terminal-clipboard-browser-smoke.mjs",
+    "test:terminal-redeploy-browser": "node scripts/terminal-redeploy-browser-smoke.mjs",
     "test:wasix-terminal-browser": "node scripts/wasix-terminal-browser-smoke.mjs",
     "test:wasix-terminal-tail-browser": "node scripts/wasix-terminal-tail-browser-smoke.mjs",
     "test:wasix-mixed-interrupt-browser": "node scripts/wasix-mixed-interrupt-browser-smoke.mjs",
