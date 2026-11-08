@@ -30,6 +30,8 @@
     "test:preview-relay": "node scripts/preview-relay-smoke.mjs",
     "test:preview-participant": "node scripts/preview-participant-browser-smoke.mjs",
     "test:preview-origin-browser": "node scripts/preview-origin-browser-smoke.mjs",
+    "test:preview-bridge-browser": "node scripts/preview-bridge-browser-smoke.mjs",
+    "test:preview-bridge-vite-browser": "node scripts/preview-bridge-vite-browser-smoke.mjs",
     "test:wasmer-command-browser": "node scripts/wasmer-command-browser-smoke.mjs",
     "test:wasix-bash-external-browser": "node scripts/wasix-bash-external-browser-smoke.mjs",
     "test:wasix-bash-mount-matrix": "node scripts/wasix-bash-mount-matrix-browser-smoke.mjs",

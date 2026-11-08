@@ -10,6 +10,7 @@ import { createRooms } from "./rooms.mjs";
 import { createTerminalRelay } from "./terminalRelay.mjs";
 import { createPreviewOrigins, devPreviewTemplate } from "./previewOrigin.mjs";
 import { createPreviewRelay } from "./previewRelay.mjs";
+import { createPreviewBridge } from "./previewBridge.mjs";
 import { createGithubLookup } from "./github.mjs";
 import { createColleagues } from "./colleagues.mjs";
 import { createWatch } from "./watch.mjs";
@@ -246,6 +247,8 @@ export function createRiff({
     },
   });
 
+  const previewBridge = createPreviewBridge({ riffOrigin: origin });
+
   // The room's code, lock, state and member list live in the control document,
   // written only here, so names and the GitHub badge can't be forged from a
   // browser and everyone sees a rotated code or a removal at once.
@@ -293,6 +296,7 @@ export function createRiff({
     // A preview host reaches the preview relay and nothing else of Riff's:
     // no app, no API, no sign-in (docs/adr/0011).
     if (previews.labelOf(request) !== null) {
+      if (previewBridge(request, response, url.pathname)) return;
       previewRelay.middleware(request, response, () => notOnPreviewHost(response));
       return;
     }

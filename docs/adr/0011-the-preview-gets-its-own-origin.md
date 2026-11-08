@@ -1,6 +1,6 @@
 # 11. The preview gets its own origin
 
-- Status: accepted (2a built; 2b designed, not built)
+- Status: accepted (2a built; 2b built behind a switch, off by default, 9 Nov)
 - Date: 2026-11-08
 
 ## Context
@@ -172,7 +172,7 @@ Participants never had either.
   the answer either way); the server's Origin check and the cookie's
   SameSite cover it.
 
-## 2b: designed, not built (8 Nov, night)
+## 2b: designed (8 Nov, night)
 
 Stopped before building, to keep 2a's guarantees intact this close to the
 deadline. Estimate: 4 to 6 hours including the smoke, with two unmeasured
@@ -240,3 +240,54 @@ ignores messages from any other window or origin; a smoke with Vite in
 the host's workspace showing `[vite] hot updated` and an app socket on
 `location.host`, both through the bridge, for the host, while the
 participant's frame still goes through the relay.
+
+## 2b: built behind a switch (9 Nov, morning)
+
+Built in a 70-minute timebox close to the deadline, so it ships **off**:
+the host's frame uses 2a's relay unless that browser has
+`localStorage["riff-preview-bridge"] = "on"`. Flipping
+`PREVIEW_BRIDGE_DEFAULT` in `app/src/previewBridge.ts` turns it on for
+everyone once it has been tried on live.
+
+What was built, as designed above, with two simplifications:
+`app/server/previewBridge.mjs` serves `host.html`, `sw.js` and `helper.js`
+under `/__riff_preview__/` on a preview host only (Riff's own origin has
+none of them); `app/src/previewBridge.ts` is the host page's side (it
+answers only messages whose `event.origin` is this room's preview origin
+and whose `event.source` is its own preview frame's window, and only from
+the active preview, and forces a socket to the active preview's port);
+`PreviewView` loads `host.html` for the host and falls back to the relay
+URL when the page reports a failure or no port arrives in 8 s. "Open in new
+tab" keeps the relay URL. Simplifications: a navigation with no port goes
+back through `host.html?next=`, and a subresource asks its own page for a
+new port (`riff-need-port`); the page also pings the worker every 20 s.
+`helper.js` bridges sockets to localhost names and the preview's own host.
+
+**Measured (Chromium, dev):** `npm run test:preview-bridge-browser`. The
+host's frame is controlled by the worker on the preview origin and its
+responses carry `x-riff-preview: pod`, which only the worker adds; a dev
+server's own WebSocket on `location.host` opens through the bridge and a
+push from the server updates the page without a reload (a marker on the
+window survives); with `/__riff_preview__/` blocked and the worker
+unregistered, the host's frame falls back to the relay URL and the page
+loads. With the switch on, `test:preview-origin-browser` (hostile page,
+both roles, both sizes) stays green: the bridge gives the frame nothing of
+Riff's.
+
+**Real Vite, measured later the same morning** (dev, Chromium, with
+the coordinator's fix for Vite exiting at once from Bash: the bridge
+handler ended every bridged process's stdin, and Vite exits on stdin's
+end): `npm run dev` (Vite 6.4.5) stays up; through the bridge the frame
+logs `[vite] connected.` and, after main.js changes, `[vite] hot updated:
+/main.js` with a marker on the window kept (no reload);
+`npm run test:preview-bridge-vite-browser`. The same run found Vite 6
+refusing every relayed request, 2a's path included ("Blocked request.
+This host (undefined) is not allowed"): neither the relay nor the bridge
+passed a Host. The host page now addresses the preview's server as
+`localhost:<port>`. With the relay, Vite's page loads but its socket
+can't connect (no hot reload), as designed. **Not measured:** Firefox and Safari (whether they let the
+cross-site frame register a worker; if not, the fallback should apply);
+a worker Chrome stops after ~30 s idle and restarts mid-session; live
+(https, `airiff.tech`, fly). Mutation: removing the `event.source` check
+isn't caught by any smoke (a hostile nested frame would need its own
+test).

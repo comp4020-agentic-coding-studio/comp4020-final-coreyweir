@@ -85,6 +85,20 @@ describe("the preview's own origin", () => {
     }
   }, 30_000);
 
+  it("serves the host's pod bridge on the preview origin only (ADR 0011, 2b)", async () => {
+    const host = await createRoom(baseUrl);
+    const worker = await fetch(new URL("/__riff_preview__/sw.js", host.previewOrigin));
+    expect(worker.status).toBe(200);
+    expect(worker.headers.get("cross-origin-embedder-policy")).toBe("require-corp");
+    expect(worker.headers.get("set-cookie")).toBeNull();
+    expect(await worker.text()).toContain("riff-port");
+    // never on the app's origin, where a worker would control Riff itself
+    for (const path of ["/__riff_preview__/sw.js", "/__riff_preview__/host.html", "/__riff_preview__/helper.js"]) {
+      const onApp = await fetch(new URL(path, baseUrl));
+      expect(await onApp.text(), path).not.toContain("riff-port");
+    }
+  });
+
   it("can't act as anyone on the app's API", async () => {
     const host = await createRoom(baseUrl);
     // a page on the preview origin posting to the app with the host's

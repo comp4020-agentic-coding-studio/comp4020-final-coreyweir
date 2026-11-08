@@ -1321,12 +1321,31 @@ export class ClaudePodController {
 
   async requestPreview(init: PreviewRequest): Promise<PreviewResponse> {
     if (!this.pod || !this.activePreview) throw new Error("Preview is offline");
-    const response = await this.pod.request(this.activePreview.port, init);
+    // The preview's server sees itself addressed as localhost, as it would
+    // from a browser on the same machine: neither the relay nor the bridge
+    // passes the preview origin's Host on, and Vite 6 refuses a request
+    // without an allowed Host ("Blocked request. This host (undefined)").
+    const headers = { ...init.headers, host: `localhost:${this.activePreview.port}` };
+    const response = await this.pod.request(this.activePreview.port, { ...init, headers });
     return {
       status: response.statusCode,
       headers: response.headers,
       body: new Uint8Array(response.body),
     };
+  }
+
+  /** What a WebSocket from the host's own preview needs to reach the
+   * preview's server through Nodepod's socket bridge (previewBridge.ts):
+   * always the active preview's port, never another. */
+  previewSocketTarget(): { instanceId: string; token: string | null; port: number } | null {
+    if (!this.pod || !this.activePreview) return null;
+    const proxy = this.pod.proxy as unknown as {
+      _instances?: Map<string, { wsBridgeToken: string | null }>;
+      _startWsBridge?: () => void;
+    };
+    proxy._startWsBridge?.();
+    const instanceId = this.pod.instanceId;
+    return { instanceId, token: proxy._instances?.get(instanceId)?.wsBridgeToken ?? null, port: this.activePreview.port };
   }
 
   /** The workspace as a zip (workspaceExport.ts). The real tokens are passed
