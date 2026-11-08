@@ -5,7 +5,9 @@
 // gets its reply after SLOW_MS, so a smoke can send while Claude is busy;
 // one containing "fail" gets a 400, so a turn ends in an API error. One
 // containing "webfetch <url>" or "websearch <query>" gets that tool call. Image
-// blocks reaching the model are recorded per turn.
+// blocks reaching the model are recorded per turn. It also answers Claude Code's
+// remote-session web routes (`/v1/code/sessions/<id>/worker/web-fetch` and
+// `web-search`) with a canned page or result, recorded in `workerCalls`.
 //
 // It listens on this machine's first non-loopback address: Nodepod keeps
 // 127.0.0.0/8 inside the guest.
@@ -52,6 +54,7 @@ function textBlocks(content) {
 export async function startFakeAnthropic({ reply = "Done." } = {}) {
   const turns = [];
   const requests = [];
+  const workerCalls = [];
   const server = http.createServer((req, res) => {
     if (req.method === "OPTIONS") {
       res.writeHead(204, cors);
@@ -67,6 +70,19 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
       if (path.endsWith("/count_tokens")) {
         res.writeHead(200, { ...cors, "content-type": "application/json" });
         res.end(JSON.stringify({ input_tokens: 10 }));
+        return;
+      }
+      // Claude Code's remote-session web tools: with
+      // CLAUDE_CODE_WEB{FETCH,SEARCH}_USE_CCR_PROXY and a session id it asks
+      // `<base>/v1/code/sessions/<id>/worker/web-fetch|web-search` instead of
+      // fetching from the browser.
+      const worker = /\/v1\/code\/sessions\/([^/]+)\/worker\/(web-fetch|web-search)$/.exec(path);
+      if (worker) {
+        workerCalls.push({ at: Date.now(), session: decodeURIComponent(worker[1]), route: worker[2], authorization: req.headers.authorization ?? null, body });
+        res.writeHead(200, { ...cors, "content-type": "application/json" });
+        res.end(JSON.stringify(worker[2] === "web-fetch"
+          ? { url: body.url, destination_url: body.url, title: "Fake page", text: `The worker read ${body.url}: Riff worker page`, content_type: "text/plain" }
+          : { results: [{ title: "Riff worker result", url: "https://example.com/riff-worker-result", snippet: `found for ${body.query}` }] }));
         return;
       }
       if (!path.endsWith("/v1/messages")) {
@@ -154,6 +170,7 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
     url: `http://${lanAddress()}:${server.address().port}`,
     turns,
     requests,
+    workerCalls,
     /** How many turns carried exactly this prompt as one of their text blocks. */
     count: (prompt) => turns.filter((turn) => turn.blocks.includes(prompt)).length,
     close: () => new Promise((resolve) => server.close(resolve)),
