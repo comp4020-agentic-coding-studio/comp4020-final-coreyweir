@@ -122,7 +122,8 @@ try {
     await host.evaluate((value) => {
       [...document.querySelectorAll(".prompt-card")].find((card) => card.querySelector("textarea")?.value === value).querySelector("footer button").click();
     }, text);
-    await until(async () => (await queuedTexts(participant)).includes(text), `"${text}" queued for the participant`, 10_000);
+    // With auto on and Claude idle it may go before the participant sees it queued.
+    await until(async () => (await queuedTexts(participant)).includes(text) || fake.count(text) > 0, `"${text}" queued for the participant`, 10_000);
   };
   await queue(PROMPTS.manual);
   await queue(PROMPTS.autoFirst);

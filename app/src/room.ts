@@ -111,6 +111,8 @@ export function useRoom(access: Access) {
   });
   const [persistence] = useState(() => openCopy(`room/${roomId}/shared`, doc));
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
+  // Whether this page has had the control document from the server yet.
+  const [controlSynced, setControlSynced] = useState(() => controlProvider.isSynced);
   const [shutOut, setShutOut] = useState<string | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [promptVersion, setPromptVersion] = useState(0);
@@ -128,6 +130,7 @@ export function useRoom(access: Access) {
     const onPrompts = () => setPromptVersion((version) => version + 1);
     const onControl = () => setRoomVersion((version) => version + 1);
     const onRefused = ({ reason }: { reason: string }) => setShutOut(reason);
+    const onControlSynced = () => setControlSynced(true);
 
     awareness.setLocalStateField("user", {
       memberId: access.member.id,
@@ -137,6 +140,8 @@ export function useRoom(access: Access) {
     });
     socket.on("status", onStatus);
     provider.on("authenticationFailed", onRefused);
+    controlProvider.on("synced", onControlSynced);
+    if (controlProvider.isSynced) onControlSynced();
     awareness.on("change", onAwareness);
     prompts.observeDeep(onPrompts);
     control.on("update", onControl);
@@ -145,6 +150,7 @@ export function useRoom(access: Access) {
     return () => {
       socket.off("status", onStatus);
       provider.off("authenticationFailed", onRefused);
+      controlProvider.off("synced", onControlSynced);
       awareness.off("change", onAwareness);
       prompts.unobserveDeep(onPrompts);
       control.off("update", onControl);
@@ -194,6 +200,7 @@ export function useRoom(access: Access) {
     promptVersion,
     prompts,
     provider,
+    controlSynced,
     queue,
     queued,
     queuePrompt,

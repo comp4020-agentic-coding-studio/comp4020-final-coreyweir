@@ -453,6 +453,38 @@ auto-release at the latest.
   `npm run test:audit-log`, `spec/permissions.test.ts`.
   - Left: live verification. A slash command fires no hook, so auto pauses
     after one until the host turns it on again (measured, by design).
+  - Resilience (8 Nov, `628ee23`): `npm run test:queue-release-resilience-browser`
+    hides the host's tab for a minute, freezes it for 45 s mid-turn, exits
+    and restarts Claude, and reloads mid-turn; auto carries on and every
+    prompt arrives once. It found that a reloaded host page could leave the
+    room seeing "Claude is working" for good (its "off" was written before
+    the room's state arrived, and Yjs kept the old page's value); the page
+    now publishes only once synced. After a reload Claude starts a new
+    session: the turn that was running is gone, though its transcript is in
+    the saved `/home/user/.claude`. Not handled: a Send typed while Claude
+    shows a dialog mid-turn (a question or plan approval) goes into the
+    dialog; Claude's `Notification` hook could tell Riff about one.
+- ~~**Images into the host's Claude**~~ (8 Nov, `d07ddcc`). xterm reads
+  only text from the clipboard, so a pasted screenshot did nothing. Claude
+  Code 2.1.221 attaches an image itself when its absolute path is pasted
+  (measured in Nodepod: `[Image #1]`, then an image block and
+  `[Image source: …]` in the request), so a paste or drop on the host's
+  terminal writes the image to `/tmp/riff/paste-N.<ext>` in the pod and
+  pastes the path (`src/imagePaste.ts`). Claude silently attaches nothing
+  over 2000 px a side and the pod has no `sharp`, so the page shrinks it
+  first. Host only (a mirror has no pod); a clipboard with text too stays a
+  text paste. Riff's free model reads text only (OpenRouter answers an
+  image 404 "No endpoints found that support image input", measured), so
+  with it the image isn't given to Claude and the footer says why. Checked
+  by `npm run test:image-paste` and `npm run test:image-paste-browser`
+  (dev, judged from the fake API: a 3000x1500 paste arrives as one
+  2000x1000 block, a dropped 320x160 one as it was, text with an image as
+  text); red with no shrinking, no text rule, or the path typed instead of
+  pasted. Ctrl+V inside Claude stays broken (it reads the clipboard
+  through `xclip`, which Nodepod's shell can't give it).
+  - Left: a real paste from the OS clipboard and a drag from the desktop
+    on live, with a real model; a paste on a phone host. Sending the board
+    or a selection to Claude is in P3.
 - ~~**Terminals the same size**~~ (crit 11; 8 Nov). The mirror already took
   the host's columns and rows, but at a fixed 12px, so a phone watching a
   desktop host saw the first 390px of a 1368px screen. Now the font follows

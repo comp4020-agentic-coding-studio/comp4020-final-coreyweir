@@ -14,9 +14,11 @@ import { acknowledgesSend, canSend, CLAUDE_STATE_LABEL, isSlashCommand, nextClau
  * ref as well as in React state, so a send flips it to "working" at once and
  * a second render can't send another prompt before Claude's hook arrives.
  */
-export function useQueueRelease({ facilitator, roomState, terminalRef, queued, auto, full, onSend }: {
+export function useQueueRelease({ facilitator, roomState, synced, terminalRef, queued, auto, full, onSend }: {
   facilitator: boolean;
   roomState: Y.Map<unknown>;
+  /** The page has had the control document from the server. */
+  synced: boolean;
   terminalRef: RefObject<TerminalPaneHandle | null>;
   queued: QueuedPrompt[];
   auto: boolean;
@@ -43,11 +45,15 @@ export function useQueueRelease({ facilitator, roomState, terminalRef, queued, a
   }, [setPending]);
 
   // What the room sees. A reloaded host page starts at "off" and says so,
-  // so the room never shows a state left behind by the last page.
+  // so the room never shows a state left behind by the last page. Not
+  // before the page has the server's copy: written earlier, "off" is
+  // concurrent with the old page's "working", Yjs keeps either one, and the
+  // room could be left seeing "working" for good (found by
+  // test:queue-release-resilience-browser).
   useEffect(() => {
-    if (!facilitator || full) return;
+    if (!facilitator || full || !synced) return;
     if (roomState.get("claude") !== state) roomState.set("claude", state);
-  }, [facilitator, full, roomState, state]);
+  }, [facilitator, full, roomState, state, synced]);
 
   const send = useCallback((prompt: QueuedPrompt, by: SentBy) => {
     if (!canSend(stateRef.current) || unacknowledgedRef.current) return false;
