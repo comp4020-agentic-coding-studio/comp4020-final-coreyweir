@@ -207,6 +207,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
           },
         );
         controller.onClaudeEvent = (event) => claudeEventRef.current?.(event);
+        controller.onNotice = setError;
         controllerRef.current = controller;
         await controller.boot();
         controller.attach(targetRef.current);

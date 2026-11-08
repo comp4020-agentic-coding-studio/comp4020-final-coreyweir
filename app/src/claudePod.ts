@@ -18,6 +18,8 @@ import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
 import { createRiffHook, promptKeystrokes, riffHookSettings, RIFF_HOOK_COMMAND } from "./claudeHooks";
 import { isInterruptKey, type ClaudeEvent } from "./queueRelease";
+import { RIFF_MODEL } from "./api";
+import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } from "./imagePaste";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
 import { credentialFor, GITHUB_ORIGINS, serveCredentials, type Credential } from "./credentials";
@@ -546,6 +548,8 @@ export class ClaudePodController {
       }
       return false;
     });
+    this.stopImagePaste?.();
+    this.stopImagePaste = installImagePaste(target, (files) => void this.pasteImages(files));
     this.resizeObserver = new ResizeObserver(() => {
       if (target.offsetParent !== null) {
         this.terminal?.fit();
@@ -930,6 +934,25 @@ export class ClaudePodController {
     return true;
   }
 
+  /** Something the host should know that isn't terminal output (imagePaste.ts). */
+  onNotice: (text: string) => void = () => {};
+  private stopImagePaste: (() => void) | null = null;
+  /** Images pasted or dropped on the terminal go in as a path to the file. */
+  private pasteImages = createImagePaster({
+    readsImages: () => !this.process || this.process.exited || modelReadsImages(this.config.env, RIFF_MODEL),
+    exists: (path) => this.pod?.volume.existsSync(path) ?? false,
+    save: (path, bytes) => {
+      if (!this.pod) throw new Error("Workspace has not booted");
+      this.pod.volume.mkdirSync(PASTE_DIR, { recursive: true });
+      this.pod.volume.writeFileSync(path, bytes);
+    },
+    paste: (text) => {
+      if (this.process && !this.process.exited) this.process.write(`\x1b[200~${text}\x1b[201~`);
+      else this.terminal?.xterm.paste(text);
+    },
+    notice: (text) => this.onNotice(text),
+  });
+
   interrupt() {
     if (this.process && !this.process.exited) {
       this.onClaudeEvent({ event: "Interrupt" });
@@ -1043,6 +1066,8 @@ export class ClaudePodController {
     this.previewServers.clear();
     this.activePreview = null;
     this.reportPreview(null);
+    this.stopImagePaste?.();
+    this.stopImagePaste = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     for (const timer of this.fitTimers) clearTimeout(timer);
