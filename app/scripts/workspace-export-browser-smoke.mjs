@@ -190,7 +190,9 @@ try {
     assert.ok(commit, "the manifest lists the real commit Nodepod's git made");
     assert.equal(commit.unpushed, true, "and says no remote branch has it");
     assert.equal(manifest.history.branch, "main");
-    assert.equal(plain.name, `riff-workspace-smoke1-${manifest.exportedAt.slice(0, 10)}.zip`);
+    const at = new Date(manifest.exportedAt); // the browser and this script share a clock and a time zone
+    const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+    assert.equal(plain.name, `riff-workspace-smoke1-${day}.zip`);
     console.log(`plain export: ${Object.keys(f).length} entries, ${(plain.zip.length / 1024).toFixed(0)} KB zip`);
 
     // --- the defaults carry the transcript; and with dependencies asked for too

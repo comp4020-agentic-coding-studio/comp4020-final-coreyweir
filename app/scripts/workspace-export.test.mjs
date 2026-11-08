@@ -298,8 +298,12 @@ test("no remote branches means every commit is unpushed, and a repo-less workspa
   assert.ok("repo/.git/objects/store.json" in broken.files, "and it's still carried as it was");
 });
 
-test("the file is named for the room and the day, or just the day with no room", () => {
-  const at = new Date("2026-11-08T23:30:00Z");
+test("the file is named for the room and the exporter's own day, or just the day with no room", () => {
+  // Local time: 23:30 on the 8th is the 8th wherever the test runs.
+  const at = new Date(2026, 10, 8, 23, 30);
   assert.equal(workspaceFileName("K7MQ2P", at), "riff-workspace-k7mq2p-2026-11-08.zip");
   assert.equal(workspaceFileName(null, at), "riff-workspace-2026-11-08.zip");
+  // 08:30 on the 9th in Sydney is the 8th in UTC; the name says the 9th.
+  const early = new Date(2026, 10, 9, 8, 30);
+  assert.equal(workspaceFileName(null, early), "riff-workspace-2026-11-09.zip");
 });
