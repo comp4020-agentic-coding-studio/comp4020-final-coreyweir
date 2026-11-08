@@ -705,7 +705,12 @@ auto-release at the latest.
   - ~~Long commands scrolled sideways~~ (a row starting `<`, the rest cut
     off): the session has no terminal description, so readline treated
     xterm as dumb. Bash's GNU termcap now gets an `xterm-256color` entry
-    inline in `TERMCAP` (from ncurses, in THIRD_PARTY_NOTICES).
+    inline in `TERMCAP` (from ncurses, in THIRD_PARTY_NOTICES). Knowing
+    the terminal, readline also turned on bracketed paste, so a pasted
+    command waited for an Enter the paste already held: 6 of 33 inputs
+    "stalled" in `test:terminal-input-browser` (measured: the same pastes
+    pass with one more Enter). The rc turns bracketed paste off, so a paste
+    runs, as before. The terminal smoke now checks Up recalls a command.
   - ~~`clear`, `which`, `man`~~ were "command not found"; `clear` and
     `which` are small scripts, `man` says there are no manual pages and to
     try `--help`.
@@ -718,7 +723,10 @@ auto-release at the latest.
   `diff`, `patch`, `file`, `tput`, `ps`, `top`, `free`, `df`, `vi`/`vim`,
   `zip`/`unzip`; no /etc/os-release, and `uname` says
   `wasi riff 0.0.0 wasm32`. Any other program that reads keys from
-  /dev/tty would hang the way less did. A `sudo` that runs its command
+  /dev/tty would hang the way less did. Typing ahead while a command runs
+  keeps a whole line (typed with its Enter) but loses a part line: measured
+  with and without the termcap entry, so it predates it (the runtime's tty,
+  hypothesis: its line buffer is dropped when readline takes the terminal). A `sudo` that runs its command
   (the guest is uid 0 already) would be cheap, but it pretends, so it's a
   call for Corey.
 
