@@ -414,6 +414,21 @@ auto-release at the latest.
   Join | Host tabs scrolls, and the whole card scrolls if what's above the
   tabs is too tall on its own. Now that there are accounts, colleagues and
   past rooms, not everything needs to be on the landing page.
+- **Week-12 bugs** (`docs/week-12.md`), one at a time:
+  - ~~"Everything missing" (curl, jq, pnpm all gone at once).~~ The session's
+    tools, bridge stubs and bridge pipe lived in `/work/repo/.wasix-session`,
+    inside the user's workspace. Measured on dev: `git status` listed all 22
+    files (~57 MB of binaries for a `git add -A`), and emptying the workspace
+    (`rm -rf` before a clone, `git clean`, a scaffolder clearing the
+    directory) left every tool "command not found" and `node`/`git` unable
+    to open the bridge pipe. That is the only thing curl, jq and pnpm have in
+    common, so it is the likely cause; what emptied it at the crit wasn't
+    recorded. Now the control directory is its own mount, `/opt/riff`, and
+    a failed session start says why on the command's stderr. Checked by
+    `test:wasix-claude-bash-browser` (wipes the workspace, then git, jq, rg,
+    nano, node and npm must run; red with the old location) and
+    `test:wasix-session-browser`. Also keeps the tools out of the OPFS
+    workspace and its export.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own

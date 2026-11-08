@@ -141,6 +141,14 @@ try {
       );
       out.stream = await spawnCollect("bash", ["-c", "npm run tickle"], { cwd: "/work/repo", env: {} });
 
+      // 6) docs/week-12.md, "everything missing": the session's tools and
+      // bridge pipe used to live in /work/repo/.wasix-session, so git saw them
+      // as untracked files and anything that emptied the workspace took every
+      // tool at once. Empty it here; the snapshot commands below (git, jq, rg,
+      // nano, node, npm) then have to run from a wiped workspace.
+      out.workspaceGit = await spawnCollect("bash", ["-c", "git init -q && git status --porcelain --untracked-files=all"], { cwd: "/work/repo", env: {} });
+      out.wipe = await spawnCollect("bash", ["-c", "rm -rf /work/repo/* /work/repo/.[!.]* && ls -A /work/repo | wc -l"], { cwd: "/work/repo", env: {} });
+
       // Exercise the pinned Claude shell provider itself, without an API call.
       // Only replace its CLI entrypoint; snapshot generation and command wrapping
       // remain the shipped implementation running inside a real Nodepod worker.
@@ -226,7 +234,9 @@ try {
   assert.match(result.byName.stdout, /grep: 1/);
   assert.match(result.byName.stdout, /sed: alpha/);
   assert.match(result.byName.stdout, /git: git version 2\.43\.0/);
-  assert.match(result.byName.stdout, /token:claude-bash-fake-token/);
+  // The guest holds a placeholder, never the token itself (docs/adr/0007).
+  assert.match(result.byName.stdout, /token:riff-placeholder-github-[0-9a-f]+/);
+  assert.doesNotMatch(result.byName.stdout, /claude-bash-fake-token/);
   assert.equal(result.cwdReadback, "/work/repo\n");
 
   // Absolute-path snapshot startup sees the Nodepod-created home file.
@@ -252,12 +262,17 @@ try {
   assert.ok(firstTickTime !== undefined && result.stream.exitedAt - firstTickTime >= 500,
     `output arrived late: first chunk at ${firstTickTime} ms, exit at ${result.stream.exitedAt} ms`);
 
+  assert.equal(result.workspaceGit.code, 0, result.workspaceGit.stderr);
+  assert.doesNotMatch(result.workspaceGit.stdout, /wasix-session/, "the session's control files must not show up in the user's repo");
+  assert.equal(result.wipe.code, 0, result.wipe.stderr);
+  assert.equal(result.wipe.stdout.trim(), "0", "the workspace should be empty before the snapshot commands run");
+
   assert.deepEqual(errors, []);
   assert.equal(result.realSnapshot.code, 0, result.realSnapshot.stderr);
   const snapshot = result.snapshot;
-  assert.ok(snapshot.parentPath.split(":").includes("/work/repo/.wasix-session/bin"));
+  assert.ok(snapshot.parentPath.split(":").includes("/opt/riff/.wasix-session/bin"));
   assert.equal(snapshot.snapshotPaths.length, 1, "Claude must create a real snapshot, not fall back to a login shell");
-  assert.match(snapshot.snapshotPaths[0], /\/work\/repo\/\.wasix-session\/bin/);
+  assert.match(snapshot.snapshotPaths[0], /\/opt\/riff\/\.wasix-session\/bin/);
   for (const [name, command] of Object.entries(snapshot.commands)) {
     assert.equal(command.code, 0, `${name}: ${command.stderr}`);
     assert.match(command.commandString, /^source \/home\/user\/\.claude\/shell-snapshots\/snapshot-/);

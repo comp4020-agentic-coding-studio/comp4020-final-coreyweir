@@ -82,7 +82,7 @@ try {
   });
 
   console.log(JSON.stringify(result, null, 2));
-  assert.equal(result.interactiveBash, "/work/repo/.wasix-session/bashrc");
+  assert.equal(result.interactiveBash, "/opt/riff/.wasix-session/bashrc");
   assert.ok(result.pathEntry.includes(".wasix-session/bin"));
   assert.equal(result.requests.length, 1, `expected one bridge request, got ${result.requests.length}`);
   assert.equal(result.requests[0].argv[0], "node");

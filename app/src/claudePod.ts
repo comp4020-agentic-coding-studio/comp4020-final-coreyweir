@@ -11,7 +11,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { createRiffWasmerProvider, type WasmerCommandProvider } from "./wasmerCommandProvider";
 import { loadClaudeBundle } from "./claudeBundle";
-import { SIGINT, WASIX_SESSION_CONTROL_DIR, WasixSession, type WasixSessionCommand } from "./wasixSession";
+import { SIGINT, WASIX_SESSION_CONTROL_DIR, WASIX_SESSION_CONTROL_ROOT, WasixSession, type WasixSessionCommand } from "./wasixSession";
 import { attachNetGatewayBrowser, type NetGatewayBrowserHandle } from "./netGatewayBrowser";
 import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
@@ -367,7 +367,7 @@ export class ClaudePodController {
       SHELL: "bash",
       // Claude snapshots its parent PATH and restores it inside Bash. Include
       // the session's bridge stubs before that snapshot can be generated.
-      PATH: `/work/repo/${WASIX_SESSION_CONTROL_DIR}/bin:/usr/local/bin:/usr/bin:/bin:/node_modules/.bin`,
+      PATH: `${WASIX_SESSION_CONTROL_ROOT}/${WASIX_SESSION_CONTROL_DIR}/bin:/usr/local/bin:/usr/bin:/bin:/node_modules/.bin`,
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       FORCE_COLOR: "1",
@@ -606,7 +606,7 @@ export class ClaudePodController {
       TMPDIR: "/tmp",
       // curl verifies the browser-generated leaf presented by the in-tab TLS
       // server. The subsequent browser fetch performs real-origin TLS checks.
-      CURL_CA_BUNDLE: "/work/repo/.wasix-session/ca.pem",
+      CURL_CA_BUNDLE: `${WASIX_SESSION_CONTROL_ROOT}/${WASIX_SESSION_CONTROL_DIR}/ca.pem`,
       // Bridged processes inherit the guest env verbatim (ProcessContext
       // env is replace-not-merge), so the GitHub placeholder must ride the
       // session env for `git push` et al to work. Same pair Claude mode sets.
@@ -651,9 +651,9 @@ export class ClaudePodController {
     request: ExternalCommandRequest,
     context: ExternalCommandContext,
   ): Promise<{ exitCode: number }> => {
-    const { session, bridge } = await this.ensureWasixSession();
     const report = (message: string) => this.report(message);
     try {
+      const { session, bridge } = await this.ensureWasixSession();
       const cwd = request.cwd || session.root;
       const result = await session.run(INTERACTIVE_BASH, this.bashArgsWithCd(cwd, request.args), {
           cwd,
@@ -686,6 +686,10 @@ export class ClaudePodController {
         return { exitCode: 130 };
       }
       report(`[bash] failed: ${String(error)}`);
+      // Say why on the command's own stderr, so Claude and whoever reads the
+      // terminal see it, not a silent exit 1. A failed session start is
+      // retried by the next command (ensureWasixSession forgets it).
+      context.writeStderr(new TextEncoder().encode(`riff: bash could not run: ${error instanceof Error ? error.message : String(error)}\n`));
       return { exitCode: 1 };
     }
   };
@@ -750,7 +754,7 @@ export class ClaudePodController {
       env: this.wasixBaseEnv(bridge),
       onStart: (execId) => {
         this.wasixShellExecId = execId;
-        this.wasixShellBridgeRoot = WasixSession.bridgeChannel(session.root, execId).guestRoot;
+        this.wasixShellBridgeRoot = WasixSession.bridgeChannel(session.controlRoot, execId).guestRoot;
       },
       onReady: (write) => {
         this.writeWasixStdin = write;

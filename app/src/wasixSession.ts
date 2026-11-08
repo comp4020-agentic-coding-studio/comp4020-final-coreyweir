@@ -5,12 +5,25 @@ type Path = string;
 /** Reserved Directory-only files for the interactive WASIX session. */
 export const WASIX_SESSION_CONTROL_DIR = ".wasix-session";
 
+/**
+ * Where the control directory lives (tools on PATH, bridge pipes, bashrc, CA):
+ * its own mount, outside the workspace. Under `/work/repo` it was the user's
+ * files as far as git and Claude could tell: untracked in `git status`, ~57 MB
+ * of binaries for `git add -A`, and gone after `git clean`, `git stash -u`, a
+ * scaffolder emptying the directory or `rm -rf` before a clone, which took
+ * every tool (curl, jq, pnpm, git, node) and the bridge pipe with it at once
+ * (docs/week-12.md, "everything missing").
+ */
+export const WASIX_SESSION_CONTROL_ROOT = "/opt/riff";
+
 /** WASI signal numbers the host delivers to a single running command. */
 export const SIGINT = 2;
 export const SIGKILL = 9;
 
 type SessionConfigWire = {
   root: string;
+  /** Mount holding the control directory (WASIX_SESSION_CONTROL_ROOT). */
+  controlRoot: string;
   sharedSystemPaths: string[];
   /** Same-origin gateway WebSocket the runtime's virtual-net client connects to. */
   networkGatewayUrl?: string;
@@ -283,15 +296,16 @@ export class WasixSession {
 
   private static async openNew(options: WasixSessionOptions): Promise<WasixSession> {
     const root = normalizeRoot(options.root ?? "/work/repo");
+    const controlRoot = WASIX_SESSION_CONTROL_ROOT;
     const sharedSystemPaths = WASIX_SHARED_SYSTEM_PATHS.map(normalizeRoot);
-    for (const path of sharedSystemPaths) options.volume.mkdirSync(path, { recursive: true });
+    for (const path of [...sharedSystemPaths, controlRoot]) options.volume.mkdirSync(path, { recursive: true });
     options.volume.mkdirSync("/home/user", { recursive: true });
     const { store, memory } = await sharedStoreForVolume(options.volume);
     const worker = new Worker(new URL("./wasixSessionWorker.ts", import.meta.url), { type: "module" });
     try {
       const opened = await WasixSession.openWorker(
         worker,
-        { root, sharedSystemPaths, networkGatewayUrl: options.networkGatewayUrl, networkGatewayPort: options.networkGatewayPort },
+        { root, controlRoot, sharedSystemPaths, networkGatewayUrl: options.networkGatewayUrl, networkGatewayPort: options.networkGatewayPort },
         memory,
         store.pointer,
         store.byteLength,
@@ -328,11 +342,16 @@ export class WasixSession {
     return this.rootPath;
   }
 
+  /** The mount the control directory lives in, outside the workspace. */
+  get controlRoot(): string {
+    return WASIX_SESSION_CONTROL_ROOT;
+  }
+
   /** Install the bashrc that emits OSC 133 command-boundary markers. */
   async installInteractiveBash(): Promise<WasixInteractiveBash> {
     const path = `${WASIX_SESSION_CONTROL_DIR}/bashrc`;
     await this.writeControlFile(path, new TextEncoder().encode(osc133BashRc(this.rootPath)));
-    const bashrcPath = `${this.rootPath}/${path}`;
+    const bashrcPath = `${this.controlRoot}/${path}`;
     return {
       bashrcPath,
       args: ["--noprofile", "--rcfile", bashrcPath, "-i"],
@@ -377,10 +396,10 @@ export class WasixSession {
    * top-level instances, so the root is what makes the path unique per
    * command. It stays under the session control directory.
    */
-  static bridgeChannel(root: string, execId: number): { guestRoot: string; channel: string } {
+  static bridgeChannel(controlRoot: string, execId: number): { guestRoot: string; channel: string } {
     const suffix = `${WASIX_SESSION_CONTROL_DIR}/c/${execId}`;
     return {
-      guestRoot: `${root}/${suffix}`,
+      guestRoot: `${controlRoot}/${suffix}`,
       channel: `/${suffix}/${WASIX_SESSION_CONTROL_DIR}/bridge`,
     };
   }
@@ -389,7 +408,7 @@ export class WasixSession {
   channelForBridgeRoot(guestRoot: string | undefined): string {
     const fallback = `/${WASIX_SESSION_CONTROL_DIR}/bridge`;
     if (guestRoot === undefined) return fallback;
-    const prefix = `${this.rootPath}/`;
+    const prefix = `${this.controlRoot}/`;
     if (!guestRoot.startsWith(prefix)) return fallback;
     return `/${guestRoot.slice(prefix.length)}/${WASIX_SESSION_CONTROL_DIR}/bridge`;
   }
@@ -408,10 +427,10 @@ export class WasixSession {
     }
     return {
       pipeEnv: {
-        RIFF_BRIDGE_PIPE: `${this.rootPath}/${WASIX_SESSION_CONTROL_DIR}/bridge/req`,
-        RIFF_BRIDGE_ROOT: this.rootPath,
+        RIFF_BRIDGE_PIPE: `${this.controlRoot}/${WASIX_SESSION_CONTROL_DIR}/bridge/req`,
+        RIFF_BRIDGE_ROOT: this.controlRoot,
       },
-      pathEntry: `${this.rootPath}/${bin}`,
+      pathEntry: `${this.controlRoot}/${bin}`,
     };
   }
 
@@ -454,7 +473,7 @@ export class WasixSession {
     // Each command gets its own bridge channel: guest pids repeat across
     // top-level instances, so the channel is what keeps two concurrent stubs
     // off the same response pipe.
-    const { guestRoot } = WasixSession.bridgeChannel(this.rootPath, id);
+    const { guestRoot } = WasixSession.bridgeChannel(this.controlRoot, id);
     return new Promise<WasixSessionResult>((resolve, reject) => {
       // Abort this command only. This used to call failSession, which
       // terminates the worker: one Bash-tool timeout would have killed every
@@ -538,7 +557,7 @@ export class WasixSession {
     if (path !== WASIX_SESSION_CONTROL_DIR && !path.startsWith(`${WASIX_SESSION_CONTROL_DIR}/`)) {
       throw new Error(`WASIX control files must be under ${WASIX_SESSION_CONTROL_DIR}/`);
     }
-    const absolute = this.rootPath === "/" ? `/${path}` : `${this.rootPath}/${path}`;
+    const absolute = `${this.controlRoot}/${path}`;
     this.store.mkdir(absolute.slice(0, absolute.lastIndexOf("/")), true, 0o755);
     this.store.writeFile(absolute, data);
   }
