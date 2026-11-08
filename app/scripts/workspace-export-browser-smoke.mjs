@@ -111,8 +111,8 @@ try {
     assert.equal(result.status, 0, `a stock tool reads the zip: ${result.stdout}${result.stderr}`);
   };
 
-  // --- default: no dependencies, no transcripts
-  const plain = await exportZip({ room: "SMOKE1" });
+  // --- no dependencies (the default), transcripts unticked
+  const plain = await exportZip({ room: "SMOKE1", transcripts: false });
   stockTool(plain.zip);
   const f = plain.files;
   const same = (name, expected) => {
@@ -148,11 +148,18 @@ try {
   assert.ok(manifest.left.some((e) => e.reason === "transcripts" && e.files === 1));
   assert.ok(manifest.changed.some((e) => e.path === "repo/.git/config" && e.what === "url-credentials-removed"));
   assert.ok(manifest.changed.some((e) => e.path === "repo/notes.txt"));
+  const commit = manifest.history?.commits.find((c) => c.message === "unpushed work");
+  assert.ok(commit, "the manifest lists the real commit Nodepod's git made");
+  assert.equal(commit.unpushed, true, "and says no remote branch has it");
+  assert.equal(manifest.history.branch, "main");
   assert.equal(plain.name, `riff-workspace-smoke1-${manifest.exportedAt.slice(0, 10)}.zip`);
   console.log(`plain export: ${Object.keys(f).length} entries, ${(plain.zip.length / 1024).toFixed(0)} KB zip`);
 
-  // --- with transcripts and dependencies
-  const full = await exportZip({ room: "SMOKE1", transcripts: true, dependencies: true });
+  // --- the defaults carry the transcript; and with dependencies asked for too
+  const byDefault = await exportZip({ room: "SMOKE1" });
+  assert.ok(byDefault.files["claude/projects/-work-repo/0b1c2d3e.jsonl"], "transcripts are on by default");
+  assert.equal(Object.keys(byDefault.files).some((n) => n.includes("node_modules")), false, "dependencies are off by default");
+  const full = await exportZip({ room: "SMOKE1", dependencies: true });
   stockTool(full.zip);
   assert.equal(dec.decode(full.files["repo/node_modules/left-pad/index.js"]), "module.exports = 1;\n");
   const transcript = dec.decode(full.files["claude/projects/-work-repo/0b1c2d3e.jsonl"]);

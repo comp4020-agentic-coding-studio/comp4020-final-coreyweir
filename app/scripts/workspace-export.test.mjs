@@ -164,12 +164,13 @@ test("a credentials file inside .git stays out", async () => {
   assert.ok("repo/.git/HEAD" in files, "the rest of .git stays: unpushed commits are the point");
 });
 
-test("transcripts are left out unless asked for, and then they're under claude/", async () => {
-  const off = await run(workspace());
+test("transcripts come by default, under claude/, and the checkbox's off leaves them out and says so", async () => {
+  const off = await run(workspace(), { transcripts: false });
   assert.equal(has(off.files, "claude"), false);
   assert.equal(off.manifest.includes.transcripts, false);
   assert.ok(off.manifest.left.some((e) => e.reason === "transcripts" && e.files === 1));
-  const on = await run(workspace(), { transcripts: true });
+  const on = await run(workspace());
+  assert.equal(on.manifest.includes.transcripts, true);
   assert.equal(dec.decode(on.files["claude/projects/-work-repo/0b1c.jsonl"]), '{"type":"user","message":"build a thing"}\n');
   assert.equal(on.manifest.transcriptFiles, 1);
   assert.equal(on.manifest.files, off.manifest.files, "the file count is the repo's alone");
@@ -183,7 +184,7 @@ test("a real credential is overwritten wherever it turns up, in text, binary, .g
     [`${R}/.git/objects/store.json`]: file(JSON.stringify({ x: { type: "blob", data: `const t = "${GITHUB}"` } })),
     [`${TRANSCRIPTS_DIR}/0b1c.jsonl`]: file(`{"tool_result":"${MODEL}"}\n`),
   });
-  const { files, manifest } = await run(source, { secrets: [MODEL, GITHUB, "short"], transcripts: true });
+  const { files, manifest } = await run(source, { secrets: [MODEL, GITHUB, "short"] });
   const notes = dec.decode(files["repo/notes.txt"]);
   assert.equal(notes, `token is ${"*".repeat(MODEL.length)} and again ${"*".repeat(MODEL.length)}\nplaceholder ${PLACEHOLDER}\n`, "same length; a placeholder is left alone");
   const blob = files["repo/assets/blob.bin"];
@@ -245,6 +246,53 @@ test("a file that can't be read is named, not silently dropped, and doesn't stop
 });
 
 test("the zip's own listing has nothing outside repo/, claude/ and the manifest", async () => {
-  const { files } = await run(workspace(), { transcripts: true });
+  const { files } = await run(workspace());
   for (const name of names(files)) assert.match(name, /^(repo\/|claude\/|riff-workspace\.json$)/);
+});
+
+// Nodepod's store: hash -> {type, data}; a commit's data is JSON.
+function store(commits) {
+  const objects = {};
+  for (const [hash, parent, message, timestamp, author = "A <a@b.c>"] of commits) {
+    objects[hash] = { type: "commit", data: JSON.stringify({ tree: "t", parent, author, committer: author, timestamp, message }) };
+  }
+  return JSON.stringify(objects);
+}
+
+test("the manifest lists the commits and marks the ones no remote branch reaches", async () => {
+  const T = Date.UTC(2026, 10, 8, 1);
+  const { manifest } = await run(workspace({
+    [`${R}/.git/objects/store.json`]: file(store([
+      ["aaaaaaa1", null, "first", T], ["aaaaaaa2", "aaaaaaa1", "cloned tip", T + 1000], ["aaaaaaa3", "aaaaaaa2", "unpushed one", T + 2000], ["aaaaaaa4", "aaaaaaa3", `unpushed two ${MODEL}`, T + 3000],
+      ["bbbbbbb1", "aaaaaaa1", "on another branch", T + 500],
+    ])),
+    [`${R}/.git/refs/heads/main`]: file("aaaaaaa4\n"),
+    [`${R}/.git/refs/heads/feature/x`]: file("bbbbbbb1\n"),
+    [`${R}/.git/refs/remotes/origin/main`]: file("aaaaaaa2\n"),
+  }), { secrets: [MODEL] });
+  const history = manifest.history;
+  assert.equal(history.branch, "main");
+  assert.equal(history.head, "aaaaaaa4");
+  assert.deepEqual(history.branches, { main: "aaaaaaa4", "feature/x": "bbbbbbb1" });
+  assert.deepEqual(history.remotes, { "origin/main": "aaaaaaa2" });
+  const by = Object.fromEntries(history.commits.map((c) => [c.hash, c]));
+  assert.deepEqual(history.commits.map((c) => c.hash), ["aaaaaaa4", "aaaaaaa3", "aaaaaaa2", "bbbbbbb1", "aaaaaaa1"]);
+  assert.deepEqual([by.aaaaaaa1.unpushed, by.aaaaaaa2.unpushed, by.aaaaaaa3.unpushed, by.aaaaaaa4.unpushed, by.bbbbbbb1.unpushed], [false, false, true, true, true]);
+  assert.equal(history.unpushed, 3);
+  assert.equal(by.aaaaaaa3.at, "2026-11-08T01:00:02.000Z");
+  assert.equal(by.aaaaaaa3.author, "A <a@b.c>");
+  assert.equal(by.aaaaaaa4.message.includes(MODEL), false, "a token in a commit message is overwritten in the manifest too");
+});
+
+test("no remote branches means every commit is unpushed, and a repo-less workspace has no history", async () => {
+  const withRepo = await run(workspace({
+    [`${R}/.git/objects/store.json`]: file(store([["aaaaaaa1", null, "x", 1000]])),
+    [`${R}/.git/refs/heads/main`]: file("aaaaaaa1\n"),
+  }));
+  assert.equal(withRepo.manifest.history.unpushed, 1);
+  const noRepo = await run(memorySource({ [`${R}/a.txt`]: file("hi") }));
+  assert.equal(noRepo.manifest.history, null);
+  const broken = await run(workspace({ [`${R}/.git/objects/store.json`]: file("{not json") }));
+  assert.equal(broken.manifest.history, null, "a store that won't parse doesn't stop the export");
+  assert.ok("repo/.git/objects/store.json" in broken.files, "and it's still carried as it was");
 });

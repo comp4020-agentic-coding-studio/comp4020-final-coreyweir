@@ -13,13 +13,16 @@
 // - `.wasix-session` always stays out: Riff's own session folder (about
 //   70 MB of command stubs, a per-session certificate), rebuilt on every
 //   start. It isn't the host's work.
-// - Claude's transcripts (`claude/projects/-work-repo/`) only if asked for.
-//   They hold everything people typed to Claude, and whatever the tools
-//   printed (docs/adr/0003, "Claude session transcripts").
+// - Claude's transcripts (`claude/projects/-work-repo/`) by default, with
+//   a checkbox to leave them out. They hold everything people typed to
+//   Claude, and whatever the tools printed (docs/adr/0003, "Claude session
+//   transcripts"). Files in the workspace itself (a `.env`, say) go as they
+//   are: this keeps someone's work, it doesn't package it for others.
 // - No credential. The guest holds placeholders, not the real tokens
 //   (docs/adr/0007), but this checks anyway: any file holding a real
-//   token's exact bytes has them overwritten with `*`s, same length, and
-//   the manifest says which files. `.git/config` loses the user:token part
+//   token's exact bytes (the ones Riff holds, not anything a project keeps
+//   for itself) has them overwritten with `*`s, same length, and the
+//   manifest says which files. `.git/config` loses the user:token part
 //   of remote URLs and any extraheader line (what a pasted-in token would
 //   look like), and `.git-credentials` and the like are never included.
 //
@@ -63,7 +66,8 @@ export type ExportOptions = {
   secrets?: readonly string[];
   /** Keep node_modules and the other dependency folders. */
   dependencies?: boolean;
-  /** Include Claude's session transcripts. */
+  /** Include Claude's session transcripts. On unless set to false: this
+   * is preserving a workspace, not packaging an app (the host decided). */
   transcripts?: boolean;
   now?: Date;
   onProgress?: (progress: { files: number; bytes: number; path: string }) => void;
@@ -84,11 +88,27 @@ export type Manifest = {
   files: number;
   bytes: number;
   transcriptFiles: number;
+  /** The repo's commits, read from Nodepod's git store: what is not on
+   * the remote yet is the point of exporting. null without a repo. */
+  history: History | null;
   /** Left out, with why: paths as they would have been in this zip. */
   left: Left[];
   /** Included, but not byte for byte what was in the pod (zip paths). */
   changed: Changed[];
   notes: string[];
+};
+
+export type Commit = { hash: string; parents: string[]; author: string; at: string; message: string; unpushed: boolean };
+export type History = {
+  /** The branch HEAD is on, null when detached. */
+  branch: string | null;
+  head: string | null;
+  branches: Record<string, string>;
+  remotes: Record<string, string>;
+  commits: Commit[];
+  /** Commits no remote branch reaches. */
+  unpushed: number;
+  truncated: boolean;
 };
 
 export type ExportResult = { blob: Blob; manifest: Manifest; name: string };
@@ -98,7 +118,7 @@ const ALREADY_COMPRESSED = new Set([
   "woff", "woff2", "mp3", "mp4", "m4a", "webm", "ogg", "mov", "pdf", "jar",
 ]);
 
-const GIT_NOTE = "The .git folder is Nodepod's own store (objects in .git/objects/store.json), not the format real git writes. It keeps every commit, so Riff can reopen the history, but `git log` outside Riff won't read it. The files under repo/ are the working tree as it was.";
+const GIT_NOTE = "The .git folder is Nodepod's own store (objects in .git/objects/store.json), not the format real git writes, so `git log` outside Riff can't read it. It keeps every commit, and `history` above lists them, marking the ones no remote branch reaches. The files under repo/ are the working tree as it was.";
 
 export function workspaceFileName(room: string | null, at: Date) {
   const day = at.toISOString().slice(0, 10);
@@ -170,6 +190,87 @@ export function scrubGitConfig(text: string): { text: string; urls: number; head
     return [next];
   });
   return { text: lines.join("\n"), urls, headers };
+}
+
+// -- history ----------------------------------------------------------------
+
+const MAX_COMMITS = 500;
+
+async function readText(source: WorkspaceSource, path: string): Promise<string | null> {
+  try { return new TextDecoder().decode(await source.readFile(path)); } catch { return null; }
+}
+
+async function refsUnder(source: WorkspaceSource, dir: string, prefix = ""): Promise<Record<string, string>> {
+  const found: Record<string, string> = {};
+  let names: string[];
+  try { names = await source.readdir(dir); } catch { return found; }
+  for (const name of names) {
+    const full = joinPath(dir, name);
+    const stat = await source.lstat(full);
+    if (stat?.kind === "dir") Object.assign(found, await refsUnder(source, full, `${prefix}${name}/`));
+    else if (stat?.kind === "file") {
+      const hash = (await readText(source, full))?.trim();
+      if (hash && /^[0-9a-f]{7,64}$/.test(hash)) found[`${prefix}${name}`] = hash;
+    }
+  }
+  return found;
+}
+
+/** The commits in Nodepod's own git store (`.git/objects/store.json`: hash ->
+ * {type, data}, a commit's data being JSON). Nothing here writes a repo; it
+ * lists what's in one, so the export says which commits only exist here. */
+export async function readHistory(source: WorkspaceSource, gitDir: string): Promise<History | null> {
+  const raw = await readText(source, joinPath(gitDir, "objects/store.json"));
+  if (raw === null) return null;
+  let store: Record<string, { type?: string; data?: string }>;
+  try { store = JSON.parse(raw); } catch { return null; }
+  const commitOf = (hash: string) => {
+    const object = store[hash];
+    if (object?.type !== "commit" || typeof object.data !== "string") return null;
+    try {
+      const data = JSON.parse(object.data) as { parent?: string | null; parent2?: string | null; author?: string; timestamp?: number; message?: string };
+      return { parents: [data.parent, data.parent2].filter((p): p is string => typeof p === "string" && p !== ""), author: String(data.author ?? ""), timestamp: Number(data.timestamp ?? 0), message: String(data.message ?? "") };
+    } catch { return null; }
+  };
+  const headText = (await readText(source, joinPath(gitDir, "HEAD")))?.trim() ?? "";
+  const branchName = /^ref:\s*refs\/heads\/(.+)$/.exec(headText)?.[1] ?? null;
+  const branches = await refsUnder(source, joinPath(gitDir, "refs/heads"));
+  const remotes = await refsUnder(source, joinPath(gitDir, "refs/remotes"));
+  const head = branchName ? branches[branchName] ?? null : /^[0-9a-f]{7,64}$/.test(headText) ? headText : null;
+
+  const reach = (tips: string[], limit: number) => {
+    const seen = new Set<string>();
+    const order: string[] = [];
+    const queue = [...tips];
+    let truncated = false;
+    while (queue.length) {
+      const hash = queue.shift()!;
+      if (seen.has(hash)) continue;
+      if (seen.size >= limit) { truncated = true; break; }
+      seen.add(hash);
+      const commit = commitOf(hash);
+      if (!commit) continue;
+      order.push(hash);
+      queue.push(...commit.parents);
+    }
+    return { seen, order, truncated };
+  };
+  const onRemote = reach(Object.values(remotes), 1_000_000).seen;
+  const mine = reach([...(head ? [head] : []), ...Object.values(branches)], MAX_COMMITS);
+  // Newest first, like a log; the walk's order breaks ties.
+  const newestFirst = mine.order.map((hash, i) => ({ hash, i, at: commitOf(hash)!.timestamp })).sort((a, b) => b.at - a.at || a.i - b.i);
+  const commits: Commit[] = newestFirst.map(({ hash }) => {
+    const commit = commitOf(hash)!;
+    return {
+      hash,
+      parents: commit.parents,
+      author: commit.author,
+      at: commit.timestamp > 0 ? new Date(commit.timestamp).toISOString() : "",
+      message: commit.message.slice(0, 500),
+      unpushed: !onRemote.has(hash),
+    };
+  });
+  return { branch: branchName, head, branches, remotes, commits, unpushed: commits.filter((c) => c.unpushed).length, truncated: mine.truncated };
 }
 
 // -- the walk -------------------------------------------------------------
@@ -335,15 +436,16 @@ export async function exportWorkspace(source: WorkspaceSource, options: ExportOp
   await walk(c, WORKSPACE_ROOT, "", "repo");
 
   let transcriptFiles = 0;
+  const transcripts = options.transcripts !== false;
   const transcriptDir = await source.lstat(TRANSCRIPTS_DIR);
-  if (options.transcripts && transcriptDir?.kind === "dir") {
+  if (transcripts && transcriptDir?.kind === "dir") {
     const before = c.files;
     addDirectory(c, "claude", null);
     addDirectory(c, "claude/projects", null);
     addDirectory(c, "claude/projects/-work-repo", transcriptDir);
     await walk(c, TRANSCRIPTS_DIR, "", "claude/projects/-work-repo");
     transcriptFiles = c.files - before;
-  } else if (!options.transcripts && transcriptDir?.kind === "dir") {
+  } else if (!transcripts && transcriptDir?.kind === "dir") {
     const size = await tally(source, TRANSCRIPTS_DIR);
     leave(c, "claude/projects/-work-repo", "transcripts", size.files, size.bytes);
   }
@@ -356,22 +458,25 @@ export async function exportWorkspace(source: WorkspaceSource, options: ExportOp
     room: options.room ?? null,
     root: WORKSPACE_ROOT,
     layout: { repo: "repo/", transcripts: "claude/projects/-work-repo/" },
-    includes: { dependencies: options.dependencies === true, transcripts: options.transcripts === true },
+    includes: { dependencies: options.dependencies === true, transcripts },
     files: c.files - transcriptFiles,
     bytes: c.bytes,
     transcriptFiles,
+    history: await readHistory(source, joinPath(WORKSPACE_ROOT, ".git")),
     left,
     changed: c.changed,
     notes: [GIT_NOTE],
   };
-  const text = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
+  // A commit message can hold anything; the manifest gets the same check.
+  const text = overwriteSecrets(strToU8(`${JSON.stringify(manifest, null, 2)}\n`), c.secrets).bytes;
+  const written = JSON.parse(new TextDecoder().decode(text)) as Manifest;
   addEntry(c, MANIFEST_NAME, text, null);
   zip.end();
   await done;
   if (failure) throw failure instanceof Error ? failure : new Error(String(failure));
   return {
     blob: new Blob(chunks as BlobPart[], { type: "application/zip" }),
-    manifest,
+    manifest: written,
     name: workspaceFileName(options.room ?? null, now),
   };
 }
