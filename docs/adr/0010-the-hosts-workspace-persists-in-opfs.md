@@ -91,10 +91,13 @@ unsaved scratch workspace.
   lock goes with it. The server already lets the newest host socket take
   over the room; this is the same rule for the workspace.
 - **Listed and deleted** with the room's row in "Boards on this browser":
-  a "workspace" marker with its size and when it was last saved, and
-  "Delete workspace". The row's Delete removes the workspace too, since
-  Delete leaves nothing of the room on the machine (ADR 0003), and
-  signing out offers to delete both. The planned signed-in page shows the
+  a "Files" marker with how many, their size and when they were last
+  saved, and "Delete files" (the list calls the workspace the host's
+  files, and says what is and isn't saved). The row's Delete removes the
+  workspace too, since Delete leaves nothing of the room on the machine
+  (ADR 0003), and signing out offers to delete both. A workspace whose
+  board copy the browser cleared gets a row of its own, so none is kept
+  silently. The planned signed-in page shows the
   same marker on each room. Export is the workspace zip (P2, built
   alongside).
 - Only the host's browser has a workspace. Nothing about it reaches the
