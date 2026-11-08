@@ -401,8 +401,8 @@ auto-release at the latest.
   Implementation section. Checked by `npm run test:queue-release-browser`
   (two clients, exactly once, dev), `npm run test:queue-release`,
   `npm run test:audit-log`, `spec/permissions.test.ts`.
-  - Left: live verification; a local slash command that fires no hooks
-    may leave auto waiting (unmeasured).
+  - Left: live verification. A slash command fires no hook, so auto pauses
+    after one until the host turns it on again (measured, by design).
 - **Clipboard.** Claude Code copies a selection with OSC 52, which xterm.js
   ignores. Load `@xterm/addon-clipboard`. Fallback: `copyOnSelect: false` in
   `/home/user/.claude.json` and Shift+drag. Check the participants' mirror

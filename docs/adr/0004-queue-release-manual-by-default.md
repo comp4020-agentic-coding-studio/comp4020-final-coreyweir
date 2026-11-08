@@ -117,8 +117,12 @@ was needed.
   Send) means working; `Stop` without `stop_hook_active` means idle.
   Esc or Ctrl+C typed into Claude, or the Interrupt button, means paused,
   and so does `StopFailure` (a turn ended by an API error): there is no
-  hook for an interrupt. Turning auto on while paused counts as idle,
-  since Claude is at its prompt again.
+  hook for an interrupt. So does sending a slash command: most run
+  locally and fire no hook at all (measured: `/cost`, `/help`, `/model`,
+  `/compact` with nothing to compact), and some leave a dialog open that
+  the next prompt would be typed into. A finished turn or `/clear`
+  (which fires `SessionStart`) resumes. Turning auto on while paused
+  counts as idle: the host is saying Claude is at its prompt again.
 - **Auto** (`useQueueRelease` in `app/src/QueuePanel.tsx`): whenever auto
   is on, Claude is idle and something is queued, the first prompt goes.
   A send marks Claude working at once, before its hook says so, so a
@@ -146,11 +150,12 @@ was needed.
   - `npm run test:queue-release-browser` (in `app/`): two clients, the
     participant at 390×844. The participant stages six prompts and the host
     queues them; one by Send, two by turning auto on while idle, one queued
-    while auto is on, and a Send while Claude works. Every prompt reaches
+    while auto is on, a `/cost` after which auto pauses until the host
+    turns it on again, and a Send while Claude works. Every prompt reaches
     the model exactly once, newlines intact, one turn each. The
     participant sees the state and the toggle and has no Send. Mutations:
-    flattening newlines (as Load did) and dropping the immediate "working"
-    on send each turn it red. It can't see a prompt whose turn failed
+    flattening newlines (as Load did), dropping the immediate "working"
+    on send, and not pausing after a slash command each turn it red. It can't see a prompt whose turn failed
     before the model call, or what a slow real model would change.
   - `npm run test:queue-release`: the state machine, hook input and
     keystrokes.
@@ -161,7 +166,7 @@ was needed.
     are refused and absent on a fresh read; the host's toggle sticks.
     Red with the control document writable by participants.
 - **Left.**
-  - A local slash command (one that never reaches the model) may fire no
-    hooks, which would leave the state at working and auto waiting.
-    Unmeasured. Send still works, and `/clear` fires `SessionStart`.
   - Live verification on fly.
+  - Auto treats any prompt starting `/word` as a slash command, including
+    a custom command that does reach the model; it pauses after it anyway
+    and resumes when that turn's `Stop` arrives.
