@@ -682,7 +682,16 @@ export class ClaudePodController {
       // stay in this tab; the app server never sees guest network plaintext.
       const channel = new MessageChannel();
       const certificateAuthority = createCertificateAuthority();
-      this.netGateway = attachNetGatewayBrowser(channel.port1, certificateAuthority);
+      // localhost in the session is the workspace's own servers (Nodepod's),
+      // so `curl localhost:PORT` reaches what the preview shows.
+      this.netGateway = attachNetGatewayBrowser(channel.port1, certificateAuthority, {
+        listening: (port) => [...this.previewServers.values()].some((server) => server.port === port),
+        request: async (port, init) => {
+          if (!this.pod) throw new Error("Workspace has not booted");
+          const response = await this.pod.request(port, init);
+          return { status: response.statusCode, headers: response.headers, body: new Uint8Array(response.body) };
+        },
+      });
       const session = await WasixSession.open({
         volume: this.pod!.volume,
         root: "/work/repo",
