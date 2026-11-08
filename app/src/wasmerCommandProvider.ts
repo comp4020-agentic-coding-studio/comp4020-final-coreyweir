@@ -12,7 +12,16 @@ function concatBytes(parts: readonly Uint8Array[]) {
   return result;
 }
 
-const PYTHON_PACKAGE_URL = "https://cdn.wasmer.io/webcimages/fc2d303b48e6d0f4ce3d7d199c57b55190788fda685b54f1506378a72e5a5d6c.webc";
+/**
+ * wasmer/python@3.12.10-beta.2 (CPython 3.12.0 for WASIX, ~115 MB with its
+ * standard library). Nodepod's `python` runs it here; the host's WASIX bash
+ * runs the same bytes (pythonCommand.ts), sharing one cached download.
+ */
+export const PYTHON_PACKAGE = {
+  url: "https://cdn.wasmer.io/webcimages/fc2d303b48e6d0f4ce3d7d199c57b55190788fda685b54f1506378a72e5a5d6c.webc",
+  sha256: "fc2d303b48e6d0f4ce3d7d199c57b55190788fda685b54f1506378a72e5a5d6c",
+} as const;
+const PYTHON_PACKAGE_URL = PYTHON_PACKAGE.url;
 
 type FileEntry = { type: "file"; data: Uint8Array; hash?: string; size?: number };
 type DirectoryEntry = { type: "dir" };
@@ -450,7 +459,7 @@ export async function createRiffWasmerProvider(volume: MemoryVolume) {
       {
         name: "python",
         packageUrl: PYTHON_PACKAGE_URL,
-        packageSha256: "fc2d303b48e6d0f4ce3d7d199c57b55190788fda685b54f1506378a72e5a5d6c",
+        packageSha256: PYTHON_PACKAGE.sha256,
         command: "python",
       },
     ],

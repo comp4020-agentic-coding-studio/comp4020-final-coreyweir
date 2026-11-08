@@ -158,6 +158,29 @@ try {
       out.stdinTty = await spawnCollect("bash", ["-c", "node -e 'console.log(String(process.stdin.isTTY))'"], { cwd: "/work/repo", env: {} });
       out.workspaceGit = await spawnCollect("bash", ["-c", "git init -q && git status --porcelain --untracked-files=all"], { cwd: "/work/repo", env: {} });
       out.wipe = await spawnCollect("bash", ["-c", "rm -rf /work/repo/* /work/repo/.[!.]* && ls -A /work/repo | wc -l"], { cwd: "/work/repo", env: {} });
+      // A Python script for the snapshot commands: relative paths must
+      // resolve against the cwd bash gave it, not the root.
+      controller.pod.volume.mkdirSync("/work/repo/py", { recursive: true });
+      await controller.pod.fs.writeFile("/work/repo/py/script.py", [
+        "import os, sys",
+        "text = open('in.txt').read().strip()",
+        "open('out.txt', 'w').write(os.getcwd() + ' ' + text)",
+        "print('read:' + text)",
+        "sys.exit(int(sys.argv[1]))",
+        "",
+      ].join("\n"));
+      // subprocess from Python: by bare name (cat isn't in the first PATH
+      // directory), Python itself, and a program that doesn't exist.
+      await controller.pod.fs.writeFile("/work/repo/py/sub.py", [
+        "import subprocess, sys",
+        "print(subprocess.run(['cat', 'in.txt'], capture_output=True, text=True).stdout.strip())",
+        "print(subprocess.run([sys.executable, '-c', 'import os; print(os.getcwd())'], capture_output=True, text=True).stdout.strip())",
+        "try:",
+        "    subprocess.run(['riff-no-such-program'])",
+        "except FileNotFoundError as error:",
+        "    print('missing:' + error.filename)",
+        "",
+      ].join("\n"));
 
       // Exercise the pinned Claude shell provider itself, without an API call.
       // Only replace its CLI entrypoint; snapshot generation and command wrapping
@@ -188,6 +211,14 @@ try {
             nanoVersion: 'nano --version',
             nodeVersion: 'node --version',
             npmVersion: 'npm --version',
+            // python/python3 run in the session itself (pythonCommand.ts).
+            pythonPrint: \`python3 -c 'print(6*7)'\`,
+            pythonVersion: 'python --version',
+            pythonStdin: \`echo hi | python3 -c 'import sys;print(sys.stdin.read().upper())'\`,
+            pythonExit: \`python3 -c 'import sys; sys.exit(3)'; echo "exit=$?"\`,
+            pythonScript: 'cd py && echo from-bash > in.txt && python3 script.py 0 && cat out.txt',
+            pythonScriptExit: 'cd py && python3 script.py 5; echo "exit=$?"',
+            pythonSubprocess: 'cd py && python3 sub.py',
           };
           for (const [name, command] of Object.entries(commands)) {
             const { commandString, cwdFilePath } = await provider.buildExecCommand(command, { id: name, useSandbox: false });
@@ -221,7 +252,8 @@ try {
           return content.split('\n').find(line => line.startsWith('export PATH='));
         }));
         for (const command of Object.values(out.snapshot.commands)) {
-          command.cwd = await controller.pod.fs.readFile(command.cwdFilePath, 'utf8');
+          // A failed command never writes it; let the code assertion say why.
+          command.cwd = await controller.pod.fs.readFile(command.cwdFilePath, 'utf8').catch(() => null);
         }
       }
 
@@ -289,7 +321,8 @@ try {
     assert.equal(command.code, 0, `${name}: ${command.stderr}`);
     assert.match(command.commandString, /^source \/home\/user\/\.claude\/shell-snapshots\/snapshot-/);
     assert.deepEqual(command.spawnFlags, ["-c"], "snapshot-backed commands should not need a login shell");
-    assert.equal(command.cwd, name === "gitCommit" || name === "gitStatus" || name === "gitLogTail" || name === "rgNeedle" || name === "tailRelCwd" ? "/work/repo/snapshot-git\n" : "/work/repo\n");
+    const subdirectory = { gitCommit: "snapshot-git", gitStatus: "snapshot-git", gitLogTail: "snapshot-git", rgNeedle: "snapshot-git", tailRelCwd: "snapshot-git", pythonScript: "py", pythonScriptExit: "py", pythonSubprocess: "py" }[name];
+    assert.equal(command.cwd, subdirectory ? `/work/repo/${subdirectory}\n` : "/work/repo\n");
   }
   assert.equal(snapshot.commands.gitVersion.stdout, "git version 2.43.0\n");
   assert.match(snapshot.commands.gitCommit.stdout, /snapshot-commit\n$/);
@@ -311,6 +344,13 @@ try {
   assert.match(snapshot.commands.nanoVersion.stdout, /GNU nano, version 9\.2\n/);
   assert.match(snapshot.commands.nodeVersion.stdout, /^v\d+\./);
   assert.match(snapshot.commands.npmVersion.stdout, /^\d+\./);
+  assert.equal(snapshot.commands.pythonPrint.stdout, "42\n");
+  assert.equal(snapshot.commands.pythonVersion.stdout, "Python 3.12.0\n");
+  assert.equal(snapshot.commands.pythonStdin.stdout, "HI\n\n");
+  assert.equal(snapshot.commands.pythonExit.stdout, "exit=3\n");
+  assert.equal(snapshot.commands.pythonScript.stdout, "read:from-bash\n/work/repo/py from-bash");
+  assert.equal(snapshot.commands.pythonScriptExit.stdout, "read:from-bash\nexit=5\n");
+  assert.equal(snapshot.commands.pythonSubprocess.stdout, "from-bash\n/work/repo/py\nmissing:riff-no-such-program\n");
   console.log(`Claude-bash E2E: both $SHELL forms intercepted; tools/bridge/token/exit-code verified; first output at ${firstTickTime} ms of ${result.stream.exitedAt} ms.`);
 } finally {
   await browser.close();

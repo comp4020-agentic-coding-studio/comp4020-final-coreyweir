@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import puppeteer from "puppeteer-core";
 
 const baseUrl = process.env.RIFF_URL ?? "http://127.0.0.1:8093";
+
+/** Wait until `predicate(terminal text)` holds; on timeout, show the terminal. */
+async function waitForTerminal(page, predicate, what, timeout = 60_000) {
+  const read = `(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? "").replace(/\\u00a0/g, " ")`;
+  try {
+    await page.waitForFunction(`(${predicate})(${read})`, { timeout });
+  } catch (error) {
+    const terminal = await page.evaluate(read);
+    throw new Error(`Timed out waiting for ${what}. Terminal: ${JSON.stringify(terminal.slice(-1500))}`, { cause: error });
+  }
+}
 const browser = await puppeteer.launch({
   executablePath: process.env.CHROMIUM_PATH ?? "/usr/local/bin/chromium",
   headless: true,
@@ -136,6 +147,31 @@ try {
     }));
     throw new Error(`Bridge stubs did not answer in the interactive shell: ${JSON.stringify(diagnostics)}`, { cause: error });
   }
+  // Python's REPL in the same terminal (pythonCommand.ts): it reads lines
+  // from the tty, and Ctrl-C interrupts running code without ending Python.
+  await waitForTerminal(page, (text) => text.lastIndexOf("I have no name!@wasmer:/work/repo#") > text.lastIndexOf("1 2 3"), "prompt after the bridge check");
+  await page.keyboard.type("python3");
+  await page.keyboard.press("Enter");
+  // The first run in a fresh profile downloads the package (115 MB).
+  await waitForTerminal(page, (text) => text.lastIndexOf(">>> ") > text.lastIndexOf("python3"), "the Python REPL prompt", 240_000);
+  await page.keyboard.type("6*7");
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => /6\*7\s*42\s*>>> $/.test(text.trimEnd() + " "), "the REPL's answer");
+  // The marker is computed, so it can't match the echoed input: once it
+  // shows, the loop is running.
+  await page.keyboard.type("import time; exec(\"print('loop' + 'ing:' + str(6*7))\\nwhile True: time.sleep(0.05)\")");
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.includes("looping:42"), "the loop to start");
+  await page.keyboard.down("Control");
+  await page.keyboard.press("KeyC");
+  await page.keyboard.up("Control");
+  await waitForTerminal(page, (text) => {
+    const interrupted = text.lastIndexOf("KeyboardInterrupt");
+    return interrupted > text.lastIndexOf("looping:42") && text.lastIndexOf(">>> ") > interrupted;
+  }, "Ctrl-C to interrupt the loop and return to the REPL");
+  await page.keyboard.type("exit()");
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.lastIndexOf("I have no name!@wasmer:/work/repo#") > text.lastIndexOf("exit()"), "bash after exit()");
   await page.keyboard.type("exit");
   await page.keyboard.press("Enter");
   await page.waitForFunction(
@@ -289,10 +325,19 @@ try {
     if (!(button instanceof HTMLButtonElement)) throw new Error("Start Bash control was not found");
     button.click();
   });
-  await page.waitForFunction(
-    () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
-    { timeout: 120_000 },
-  );
+  try {
+    await page.waitForFunction(
+      () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
+      { timeout: 120_000 },
+    );
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => ({
+      heading: document.querySelector(".terminal-heading")?.textContent,
+      error: document.querySelector(".terminal-note strong")?.textContent,
+      terminal: document.querySelector(".terminal-target .xterm-rows")?.textContent?.slice(-1500),
+    }));
+    throw new Error(`WASIX Bash did not restart: ${JSON.stringify({ diagnostics, consoleErrors, pageErrors })}`, { cause: error });
+  }
   await page.locator(".terminal-target textarea").click();
   await page.keyboard.type("export INTERRUPT_STATE=preserved; sleep 30");
   await page.keyboard.press("Enter");

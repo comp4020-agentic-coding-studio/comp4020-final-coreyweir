@@ -26,6 +26,7 @@ import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./wor
 import { cloneRepository, githubRepoUrl } from "./repoClone";
 import { credentialFor, GITHUB_ORIGINS, replaceCredential, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
+import { createPythonFetchHandler, isPythonFetch, PYTHON_FETCH_COMMAND, pythonLaunchers, pythonSessionFiles } from "./pythonCommand";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
 import bridgeStubUrl from "./assets/wasmer/bridge-stub.wasm?url";
 import uutilsCoreutilsUrl from "./assets/wasmer/uutils-coreutils-0.11.0.wasm?url";
@@ -664,7 +665,7 @@ export class ClaudePodController {
       this.workspace?.reapplyModes();
       await session.installSessionFile("ca.pem", new TextEncoder().encode(certificateAuthority.pem));
       const bridgeStubBytes = await fetchBytes(bridgeStubUrl);
-      // Every name here must resolve host-side via createBridgeHostHandler →
+      // Every name here but PYTHON_FETCH_COMMAND resolves host-side via createBridgeHostHandler →
       // pod.spawn; these are all native Nodepod commands like npm/git
       // (nodepod_fork/src/shell/commands/, registered in
       // polyfills/child_process.ts). One 83 KB stub copy per name in session
@@ -678,6 +679,8 @@ export class ClaudePodController {
         ["bun", bridgeStubBytes],
         ["bunx", bridgeStubBytes],
         ["git", bridgeStubBytes],
+        // Answered by the page itself (startBridge), not Nodepod.
+        [PYTHON_FETCH_COMMAND, bridgeStubBytes],
       ]));
       // One uutils 0.11.0 atom fetch, installed under each multicall name.
       // The shared-store write cost of repeated bytes is accepted for now;
@@ -695,6 +698,9 @@ export class ClaudePodController {
         const bytes = await fetchBytes(binary.url);
         await session.installBinaries(new Map([[binary.name, bytes]]));
       }
+      // python/python3 launchers; the package itself comes on first use.
+      await session.installBinaries(pythonLaunchers());
+      for (const [path, data] of pythonSessionFiles()) await session.installSessionFile(path, data);
       return { session, bridge };
     })().catch(async (error) => {
       const failedSession = this.wasixSession;
@@ -933,7 +939,10 @@ export class ClaudePodController {
     const bridge = sessionBridge(session);
     // Stage 7.E: both runtimes address the same store, so a bridged tool sees
     // preceding guest writes and Bash sees the tool's writes without a barrier.
-    const handler = createBridgeHostHandler(pod, this.report, this.registerBridgeProcess);
+    const nodepod = createBridgeHostHandler(pod, this.report, this.registerBridgeProcess);
+    const pythonFetch = createPythonFetchHandler(session);
+    const handler: BridgeHostHandler = (request, output) =>
+      isPythonFetch(request) ? pythonFetch(request, output) : nodepod(request, output);
     this.bridgeLoop = (async () => {
       try {
         await bridgeServeAll(bridge, handler);
