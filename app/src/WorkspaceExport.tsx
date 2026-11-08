@@ -53,9 +53,9 @@ function Summary({ name, bytes, manifest }: { name: string; bytes: number; manif
 // booting starts, so it can't be the test: an export then has no files yet.
 // exporter: where the zip comes from instead of the running pod (the landing
 // page's "Export files" reads the saved workspace); label and className are
-// its button's.
+// its button's. room: the room's code, to name the file after it.
 type Exporter = (options: Omit<ExportOptions, "secrets">) => Promise<ExportResult>;
-export function WorkspaceExport({ getController, ready, exporter, label = "Export", className, note }: { getController?: () => ClaudePodController | null; ready: boolean; exporter?: Exporter; label?: string; className?: string; note?: ReactNode }) {
+export function WorkspaceExport({ getController, ready, exporter, room, label = "Export", className, note }: { getController?: () => ClaudePodController | null; ready: boolean; room?: string; exporter?: Exporter; label?: string; className?: string; note?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [transcripts, setTranscripts] = useState(true);
   const [dependencies, setDependencies] = useState(false);
@@ -86,7 +86,7 @@ export function WorkspaceExport({ getController, ready, exporter, label = "Expor
     setDone(null);
     setProgress(0);
     try {
-      const result = await make({ transcripts, dependencies, onProgress: ({ files }) => setProgress(files) });
+      const result = await make({ transcripts, dependencies, room, onProgress: ({ files }) => setProgress(files) });
       download(result.blob, result.name);
       setDone({ name: result.name, bytes: result.blob.size, manifest: result.manifest });
     } catch (failure) {

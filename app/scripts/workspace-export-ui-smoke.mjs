@@ -188,7 +188,7 @@ try {
     function check(label, { zipPath, files, summary }, { transcripts = true, dependencies = false } = {}) {
       stockTool(zipPath);
       const m = (what) => say(`${label}: ${what}`);
-      assert.match(summary, /riff-workspace-.*\.zip/, m("the summary names the file"));
+      assert.match(summary, /riff-workspace-[a-z0-9]{6}-\d{4}-\d\d-\d\d\.zip/, m("the summary names the file, after the room"));
       assert.match(dec.decode(files["repo/src/deep er/nü.txt"] ?? new Uint8Array()), /^nested\n$/, m("a nested dir and a unicode name with a space"));
       assert.ok(files["repo/empty.txt"] && files["repo/empty.txt"].length === 0, m("an empty file"));
       assert.equal(createHash("sha256").update(files["repo/random.bin"] ?? new Uint8Array()).digest("hex"), sha, m("the binary file matches the hash bash printed"));

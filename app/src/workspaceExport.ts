@@ -120,8 +120,10 @@ const ALREADY_COMPRESSED = new Set([
 
 const GIT_NOTE = "The .git folder is Nodepod's own store (objects in .git/objects/store.json), not the format real git writes, so `git log` outside Riff can't read it. It keeps every commit, and `history` above lists them, marking the ones no remote branch reaches. The files under repo/ are the working tree as it was.";
 
+// The day is the exporter's own, as in boardFileName: in UTC, an export made
+// on the morning of the 9th in Australia was named for the 8th.
 export function workspaceFileName(room: string | null, at: Date) {
-  const day = at.toISOString().slice(0, 10);
+  const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
   const code = room?.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return code ? `riff-workspace-${code}-${day}.zip` : `riff-workspace-${day}.zip`;
 }
