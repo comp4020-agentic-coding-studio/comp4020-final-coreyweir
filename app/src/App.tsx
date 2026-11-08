@@ -1311,6 +1311,59 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 // Works out who this browser is in the room the URL names, before anything
 // connects: a shared link (?room=CODE) for someone already in the room goes
 // straight in; for anyone else it's the join form with the code filled in.
+// Opened from a room's link by a browser that isn't in the room yet: ask
+// for a name before going in, the last one used filled in.
+function JoinByLink({ code, keep }: { code: string; keep?: boolean }) {
+  const user = useUser();
+  const [name, setName] = useState(savedName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const [filledAt, setFilledAt] = useState(0);
+  const shownName = name;
+  // Signed in with no name used before, your GitHub login is the default.
+  useEffect(() => {
+    if (!user || savedName()) return;
+    setName((current) => current || user.login);
+    setFilledAt((count) => count + 1);
+  }, [user]);
+  // focused and selected, so typing replaces whatever is filled in
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, [filledAt]);
+
+  async function join() {
+    const chosen = shownName.trim();
+    if (!chosen) return;
+    setBusy(true);
+    setError(null);
+    saveName(chosen);
+    try {
+      goToRoom((await joinRoom(code, chosen)).room.id);
+    } catch (failure) {
+      setError(problem(failure));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="landing closed join-link">
+      <header><strong className="brand">riff</strong><span>Collaborative design crits</span><SiteAccount user={user} /></header>
+      <section className="entry-card">
+        <h2>Join room <code>{code}</code></h2>
+        <form onSubmit={(event) => { event.preventDefault(); void join(); }}>
+          <label>Your name<input ref={input} required maxLength={40} value={shownName} onChange={(event) => setName(event.target.value)} placeholder="e.g. Corey" /></label>
+          {keep !== undefined && <p className="local-note board-fate">{boardFate(keep)}</p>}
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <button className="primary" disabled={busy || !shownName.trim()}>{busy ? "Joining..." : "Join room"}</button>
+        </form>
+        <button className="link" onClick={() => location.assign(location.pathname)}>Back to start</button>
+      </section>
+    </main>
+  );
+}
+
 function RoomGate({ roomId, code }: { roomId: string | null; code: string | null }) {
   const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean; pushRevoked?: string } | { join: string; keep?: boolean } | { error: string } | null>(null);
   const [withoutGitHub, setWithoutGitHub] = useState(false);
@@ -1348,7 +1401,7 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
   }, [code, roomId]);
 
   if (!state) return <main className="landing"><section className="entry-card"><p>Finding the room...</p></section></main>;
-  if ("join" in state) return <Landing code={state.join} keep={state.keep} />;
+  if ("join" in state) return <JoinByLink code={state.join} keep={state.keep} />;
   if ("error" in state) {
     return (
       <main className="landing">
