@@ -123,6 +123,31 @@ was needed.
   the next prompt would be typed into. A finished turn or `/clear`
   (which fires `SessionStart`) resumes. Turning auto on while paused
   counts as idle: the host is saying Claude is at its prompt again.
+- **A dialog mid-turn** (9 Nov). A question (AskUserQuestion, which asks
+  even in bypass mode), a permission prompt or plan approval, or an MCP
+  server's form takes Claude's keys, so a Send then went into the dialog
+  (measured: the prompt was lost and the first option chosen). Two more
+  states, both "Claude is asking the host" to the room: `asking` (a
+  question or a form) and `approving` (a permission prompt or plan
+  approval). Send is disabled ("Claude is asking something in the
+  terminal. Answer it first.") and auto waits. What fires, measured on
+  2.1.221 in Nodepod (`riff-hook` now also on `PermissionRequest`,
+  `Notification`, `Elicitation`, `ElicitationResult`, `PostToolUse`,
+  `PostToolUseFailure`, `PermissionDenied`):
+  - `PermissionRequest` as the dialog opens, for AskUserQuestion too
+    (`tool_name` tells them apart); `Notification` `permission_prompt`
+    comes 6 s later and only if nobody typed, so it only stands in for a
+    dialog nothing announced (from working, never after an answer);
+  - an answer fires `PostToolUse` once the tool has run (back to
+    working), then `Stop`; "Chat about this" ends the turn (`Stop`);
+  - Esc fires nothing, but the page sees the key: paused, as for any
+    interrupt;
+  - **No to a permission prompt fires nothing**: the turn just ends. So in
+    `approving`, the host's own answer key in Claude's terminal (Enter or
+    a digit) moves to paused, and a Yes's `PostToolUse` and `Stop` follow.
+    In `asking` keys don't count, since Enter moves between a question's
+    options. The cost: every tool call now runs `riff-hook` once more
+    (`PostToolUse`, about 30-40 ms in the page).
 - **One send at a time.** Measured: a second prompt typed before Claude
   has processed the first one's Enter is merged into it, duplicated or
   lost, idle or busy (sends 1-20 ms apart; none from 50 ms on; with or
@@ -174,8 +199,17 @@ was needed.
     on send, not pausing after a slash command, and not waiting for the
     acknowledgement each turn it red. It can't see a prompt whose turn failed
     before the model call, or what a slow real model would change.
+    The question step: a Send while Claude asks is disabled with the
+    reason, the participant sees "Claude is asking the host", auto turned
+    on waits, the host's Enter answers, and the next prompt goes once the
+    turn ends; the answer (not a prompt) reaches the model as the tool
+    result. Red when `PermissionRequest` isn't read. It can't tell
+    `PostToolUse` from `Stop` as the clear (the fake ends the turn at
+    once), and it has no permission prompt (bypass mode allows every
+    tool; measured by hand in default mode).
   - `npm run test:queue-release`: the state machine, hook input and
-    keystrokes.
+    keystrokes, dialogs included (red without the answer key or with late
+    notifications reopening a dialog).
   - `npm run test:audit-log`: `by=host`/`by=auto` and the toggle, read
     back from `events`; logging every send as the host's, or every toggle
     write, turns it red.
