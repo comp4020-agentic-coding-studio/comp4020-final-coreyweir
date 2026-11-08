@@ -43,7 +43,7 @@ jobs:
         run: |
           docker build -t app .
           docker run -d --init --name app -p 8080:8080 -e PORT=8080 --tmpfs /data \
-            -e RIFF_ORIGIN=http://localhost:8080 \
+            -e RIFF_ORIGIN=http://127.0.0.1:8080 \
             -e GITHUB_CLIENT_ID=Ov23liF1O4v3obY6vdCc \
             -e SESSION_SECRET="$(openssl rand -hex 32)" \
             -e OPENROUTER_API_KEY \
@@ -51,7 +51,7 @@ jobs:
       - name: Run the spec
         run: pnpm check
         env:
-          APP_URL: http://localhost:8080
+          APP_URL: http://127.0.0.1:8080
       - name: Show the app's output
         # what the container printed, so a crash or slow boot is visible
         if: ${{ failure() }}
