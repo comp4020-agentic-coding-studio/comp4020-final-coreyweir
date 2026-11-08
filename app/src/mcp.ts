@@ -121,3 +121,29 @@ export function mcpServers(settings: McpSettings, github: { placeholder: string 
   }
   return servers;
 }
+
+/**
+ * What's wrong with a custom server before it's added, or null. https only,
+ * except on a page that is itself plain http (the dev server), where a
+ * local test server can be http. A token goes in one header, whole (e.g.
+ * "Bearer ..."); Riff swaps it in on the way out and does nothing else.
+ */
+export function customProblem(entry: CustomMcp, others: CustomMcp[], allowHttp = false) {
+  const name = serverName(entry.name);
+  if (!name) return "Give it a name: letters, digits, - or _.";
+  if (name === "github") return "\"github\" is GitHub's own server, above. Pick another name.";
+  if (others.some((other) => serverName(other.name) === name)) return `There's already a server called "${name}".`;
+  let url: URL;
+  try {
+    url = new URL(entry.url.trim());
+  } catch {
+    return "That isn't a URL. It starts with https://.";
+  }
+  if (url.protocol !== "https:" && !(allowHttp && url.protocol === "http:")) return "The URL must start with https://.";
+  if (url.username || url.password) return "Put the token in a header, not in the URL.";
+  const header = entry.header.trim();
+  if (entry.value && !header) return "Say which header the token goes in, e.g. Authorization.";
+  if (header && !/^[A-Za-z0-9-]+$/.test(header)) return "That isn't a header name: letters, digits and - only.";
+  if (header && !entry.value) return `Give the ${header} header's value, or leave the header empty.`;
+  return null;
+}
