@@ -122,3 +122,6 @@
  the workspace, so a board or terminal as tall as the viewport pushed its
  bottom, the drawing toolbar, out of sight. Fill what is left instead. */
 @media(max-width:780px){.board-wrap,.crit-room{height:100%}.workspace.preview-workspace{height:auto}}
+/* The workspace export dialog at the MCP dialog's sizes (its hints were 9px beside 13px text), and Download in reach if a long summary makes it scroll on a short phone. */
+.ws-export h2{font-size:16px}.ws-export .ws-export-option small,.ws-export .ws-export-quiet,.ws-export-summary{font-size:12px}.ws-export small code,.ws-export .ws-export-quiet code,.ws-export-summary code{font-size:11px}.ws-export-actions button{font-size:13px}
+.ws-export>.ws-export-actions{position:sticky;bottom:-20px;margin:0 -20px -20px;padding:12px 20px 20px;border-top:1px solid #eeeeea;background:white}
