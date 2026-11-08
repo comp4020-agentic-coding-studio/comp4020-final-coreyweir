@@ -9,7 +9,7 @@ Riff ships third-party code in two places: the npm dependencies bundled into
 The npm tree is permissively licensed (MIT, ISC, Apache-2.0, BSD, 0BSD,
 BlueOak). The licenses below need more than a mention:
 
-- **@scelar/nodepod** (`app/vendor/scelar-nodepod-1.9.20-riff.48.tgz`, a
+- **@scelar/nodepod** (`app/vendor/scelar-nodepod-1.9.20-riff.49.tgz`, a
   locally patched build): MIT with the Commons Clause, © 2026 R1ck404 /
   ScelarOrg. The Commons Clause forbids selling the software. Riff is
   non-commercial coursework. See `third_party/licenses/nodepod-MIT-CommonsClause.txt`.
