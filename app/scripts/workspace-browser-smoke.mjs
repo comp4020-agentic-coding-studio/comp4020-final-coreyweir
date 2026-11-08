@@ -254,7 +254,7 @@ try {
   const rows = await listed();
   console.log("listed", JSON.stringify(rows));
   assert.ok(rows.some((row) => /WSUI/.test(row) && /Files: [^(]+\(\d/.test(row)), "the room's row says this browser has its files");
-  assert.ok(await other.$eval(".workspace-note", (n) => n.textContent.includes("Not saved: /tmp")), "the list says what is saved");
+  assert.ok(await other.$eval(".workspace-note", (n) => n.textContent.includes("/work and /home/user")), "the list says what the files are");
   // "Delete files" takes the workspace and leaves the board copy
   await clickIn("WSUI", "Delete files");
   await clickIn("WSUI", "Delete files");
