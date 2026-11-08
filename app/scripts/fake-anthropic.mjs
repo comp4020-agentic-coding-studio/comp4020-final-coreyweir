@@ -113,7 +113,7 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
       // Claude Code also streams side requests (a title, a topic); only a
       // request that carries tools is a turn of the conversation.
       const isTurn = Array.isArray(body.tools) && body.tools.length > 0;
-      if (isTurn) turns.push({ at: Date.now(), blocks, images: imageBlocks(lastUser?.content), toolResult: Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result") });
+      if (isTurn) turns.push({ at: Date.now(), blocks, images: imageBlocks(lastUser?.content), toolResult: Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result"), messages: (body.messages ?? []).length });
       if (isTurn && blocks.some((text) => text.includes("fail"))) {
         res.writeHead(400, { ...cors, "content-type": "application/json" });
         res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "the fake API refuses prompts containing fail" } }));

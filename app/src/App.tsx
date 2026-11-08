@@ -1109,7 +1109,7 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, h
   return (
     <section className="crit-room" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
       {/* A participant's terminal stops asking once the room ends; a new one starts if the host revives it. Never remount the host's: it runs Claude. */}
-      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} onPodReady={onPodReady} onBootStatus={onBootStatus} />
+      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} claudeState={facilitator ? release.state : undefined} ended={ended} onPodReady={onPodReady} onBootStatus={onBootStatus} />
       <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} ended={ended} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
     </section>
   );
