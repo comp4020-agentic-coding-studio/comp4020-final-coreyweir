@@ -203,6 +203,14 @@ try {
   await bo.goto(baseUrl, { waitUntil: "networkidle0" });
   await waitText(bo, ".your-rooms li", new RegExp(`Room ${code}.*Hana is hosting.*copy on this browser`));
   await shot(bo, "boards-list");
+  // One line of buttons whatever the width: Enter, and the rest under More.
+  const shown = () => bo.$$eval(".your-rooms li .actions button, .your-rooms li summary", (elements) => elements.filter((element) => element.checkVisibility()).map((element) => element.textContent));
+  assert.deepEqual(await shown(), ["Enter", "More"]);
+  await bo.click(".your-rooms li summary");
+  assert.deepEqual(await shown(), ["Enter", "More", "Open", "Export board", "Delete"]);
+  await shot(bo, "row-more");
+  await bo.keyboard.press("Escape");
+  assert.deepEqual(await shown(), ["Enter", "More"], "Escape closes the menu");
   await Promise.all([bo.waitForNavigation(), clickText(bo, ".your-rooms li .actions button", /^Enter$/)]);
   assert.match(bo.url(), /\?id=/, "a room you're still in enters the room");
   await bo.waitForSelector(".new-prompt textarea");

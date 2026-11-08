@@ -140,7 +140,13 @@ try {
   await bo.reload({ waitUntil: "networkidle0" });
   await waitText(bo, ".room-banner.ended", /keeps this board/);
   await bo.waitForFunction(() => [...document.querySelectorAll(".prompt-card textarea")].some((element) => element.value === "kept prompt" && element.readOnly), { timeout: 10_000, polling: 100 });
-  console.log("kept room ended: guest's board read-only, still there after a reload");
+  // The rest of the room says it has ended, not that the host is away.
+  assert.equal(await bo.$("button.share"), null, "nothing to share in an ended room");
+  await waitText(bo, ".terminal-empty", /This room has ended/);
+  assert.match(await textOf(bo, ".terminal-heading"), /Room ended/);
+  assert.equal(await bo.$(".terminal-note strong"), null, "no raw relay error code");
+  assert.match(await textOf(bo, ".claude-state"), /Room ended/);
+  console.log("kept room ended: guest's board read-only, still there after a reload, the room says it ended");
   await bo.close();
   await back.close();
 

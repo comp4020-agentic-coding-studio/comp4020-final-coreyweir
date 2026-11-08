@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Children, useEffect, useRef, useState } from "react";
 import { Quickdraw, useQuickdrawStore, type QuickdrawRef, type ShapeRecord } from "@quickdrawjs/react";
 import { addPrompt, replaceYText, saveName, savedName, snapshotPrompts, type PromptSnapshot, type QueuedPrompt, type RoomMember, type SentBy, useRoom } from "./room";
 import { QueuePanel, useQueueRelease } from "./QueuePanel";
@@ -494,6 +494,47 @@ async function exportCopy(copy: LocalCopy) {
   }
 }
 
+// A row's first action stays in sight (Enter, or Open for a copy); the
+// rest go in a More menu once there are two or more of them, so a row
+// stays one line of buttons at 390px however many a room collects. A
+// native <details>: keyboard and screen readers get a disclosure for free;
+// a click outside, Escape or choosing an action closes it.
+function RowActions({ label, children }: { label: string; children: React.ReactNode }) {
+  const actions = Children.toArray(children).filter(Boolean);
+  const more = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const details = more.current;
+    if (!details) return;
+    const outside = (event: Event) => {
+      if (details.open && !details.contains(event.target as Node)) details.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !details.open) return;
+      details.open = false;
+      details.querySelector("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", outside);
+    details.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      details.removeEventListener("keydown", escape);
+    };
+  }, [actions.length]);
+  const [first, ...rest] = actions;
+  if (rest.length < 2) return <span className="actions">{actions}</span>;
+  return (
+    <span className="actions">
+      {first}
+      <details className="row-more" ref={more}>
+        <summary aria-label={`More for ${label}`}>More</summary>
+        <span className="row-menu" role="group" aria-label={`More for ${label}`} onClick={(event) => {
+          if ((event.target as HTMLElement).closest("button")) more.current!.open = false;
+        }}>{rest}</span>
+      </details>
+    </span>
+  );
+}
+
 function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChanged }: {
   list: RoomList | null;
   // the room this browser's host just ended, which says so quietly
@@ -555,16 +596,14 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
             ) : (
-              <span className="actions">
+              <RowActions label={code ? `room ${code}` : "this room"}>
                 {room && <button className="link" onClick={() => goToRoom(room.id)}>Enter</button>}
-                {copy && <>
-                  <button className="link" onClick={() => onOpen(copy)}>Open</button>
-                  <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>
-                </>}
+                {copy && <button className="link" onClick={() => onOpen(copy)}>Open</button>}
+                {copy && <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>}
                 {workspace && <ExportFiles workspace={workspace} code={code ?? null} secrets={hostSecrets} />}
                 {workspace && <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>}
                 {copy && <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>}
-              </span>
+              </RowActions>
             )}
           </li>
         ))}
@@ -932,8 +971,8 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, h
   return (
     <section className="crit-room" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
       {/* A participant's terminal stops asking once the room ends; a new one starts if the host revives it. Never remount the host's: it runs Claude. */}
-      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} />
-      <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
+      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} />
+      <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} ended={ended} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
     </section>
   );
 }
@@ -1334,7 +1373,8 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
           <button className={view === "preview" ? "active" : ""} onClick={() => setView("preview")}>Preview</button>
         </nav>
         <button className="participants" aria-expanded={panel === "people"} onClick={() => setPanel((open) => open === "people" ? null : "people")} title="People in this room">{room.participants.slice(0, 4).map((participant) => <span key={participant.clientId} style={{ background: participant.colour }} title={`${participant.name}${participant.role === "facilitator" ? " (host)" : ""}`}>{participant.name.slice(0, 1).toUpperCase()}</span>)}</button>
-        <button className="share" aria-expanded={panel === "share"} onClick={() => setPanel((open) => open === "share" ? null : "share")}>Share room</button>
+        {/* an ended room has nothing to share: nobody new can join it */}
+        {room.state !== "ended" && <button className="share" aria-expanded={panel === "share"} onClick={() => setPanel((open) => open === "share" ? null : "share")}>Share room</button>}
       </header>
 
       {room.full ? <FullBanner limitBytes={room.limitBytes} onExport={exportRoom} /> : <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} onExport={exportRoom} />}
@@ -1344,7 +1384,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}
-        {panel === "share" && <SharePanel access={access} room={room} onClose={() => setPanel(null)} />}
+        {panel === "share" && room.state !== "ended" && <SharePanel access={access} room={room} onClose={() => setPanel(null)} />}
       </main>
     </div>
   );
