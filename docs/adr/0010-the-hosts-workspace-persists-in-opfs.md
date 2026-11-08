@@ -84,7 +84,9 @@ unsaved scratch workspace.
   room with a repository and a push token, is cloned into `/work/repo`
   before Claude starts, with the clone's output in the terminal, so the
   room sees it. Without a token there's no clone (Nodepod's git needs
-  one) and the terminal says so.
+  one) and the terminal says so. Since 8 Nov a clone only goes into an
+  empty `/work/repo`: a workspace imported from an export (ADR 0003,
+  "Import") brings its own repository, and the room's is left alone.
 - **A second tab** of the same room (the host duplicating the tab) asks
   before taking the workspace over, through a Web Lock per room. The
   first tab stops saving and says so. A reload never asks: the old page's

@@ -572,3 +572,75 @@ the hundreds of megabytes (the zip is built in memory). **Seen, not ours:** a
 `chmod` from WASIX bash doesn't reach the volume (`ls` says rwx, the volume
 says 644), so an executable made that way exports as 644; one made through
 Nodepod's own fs keeps its mode.
+
+### Import (2026-11-08)
+
+An export can be loaded again, not only unpacked.
+
+**Decided with the host (8 Nov):**
+
+- **On the host form**, below "Start from an exported board": "Start from
+  an exported workspace". The zip is read and checked before any room
+  exists, and once the room is created its workspace (ADR 0010) is written
+  in this browser; Start Claude or Start Bash then boots from it like any
+  saved workspace. The other option, an Import beside Export usable until
+  the workspace first starts, put it where Export is but behind a rule
+  ("only before you start") that the form doesn't need.
+- **Into a new room's workspace only.** Never over one, and never merged
+  (two of Nodepod's git stores can't be merged meaningfully), so nothing
+  can be overwritten and there is nothing to confirm. To load an export
+  where there is already work, host a new room.
+- **The export's repository wins.** It brings its own `.git` (its remote,
+  its unpushed commits), so the room's Git repository is ignored for that
+  room; the form says so when one is filled in. It doesn't compare
+  remotes. Clone at boot (ADR 0010) now clones only into an empty
+  `/work/repo`, so it never clones over an import, `.git` or not.
+- **What the export left out stays out.** Nothing is run to rebuild
+  `node_modules` and the like: an install command is one framework's. The
+  form and the first boot's terminal name what was left out and say to
+  reinstall it.
+- **Transcripts behind an unticked box**, with a line saying what they
+  hold: imported, they become Claude's history in the room.
+- **Riff exports, version 1, only.** `riff-workspace.json` must say format
+  `riff-workspace` and version 1; anything else is refused with why.
+
+**What comes back, and what doesn't.** The working tree comes back byte for
+byte (binary included), with unix modes, symlinks, empty directories and
+times (to the zip's two seconds). `.git` comes back exactly as exported,
+which is Nodepod's JSON store: a binary file committed in it was already
+lossy when committed (above), so `git checkout` of one gives the lossy
+version back, while the working-tree copy is exact. Transcripts come back
+only when ticked. Never brought in, whatever the zip holds:
+`.wasix-session`, `.git-credentials` and `.git/credentials`, the bytes of a
+token Riff holds (overwritten with `*`, as on export; ADR 0007), and the
+`user:token@` of a remote URL or an `extraheader` in `.git/config`.
+Anything in the zip outside `repo/` and the transcripts folder is skipped.
+A name that would land outside the workspace (`..`, a leading `/`, a
+backslash), a name twice, an entry inside a symlink, a damaged entry, more
+than 512 MB (the zip, or everything in it inflated, as the zip declares it
+before anything is inflated) or 200,000 entries refuses the whole file: a
+Riff export never has one.
+
+**Implementation.** `app/src/workspaceImport.ts` reads the zip with its own
+small reader (fflate inflates; a general unzip doesn't give the unix modes
+and symlink bit) and maps it to workspace entries, inflating one at a time.
+`seedWorkspace` in `app/src/workspace.ts` writes them into OPFS in 16 MB
+batches and the manifest last, so a crash part-way leaves nothing a boot
+would restore; a failure deletes what was written. The manifest notes the
+import until the first save, for the first boot to say so.
+`app/src/ImportWorkspace.tsx` is the form's part.
+
+**Checked:** `npm run test:workspace-import` (the module under node: real
+exports round-trip, each refusal and cleaning on zips made by hand; ten
+mutations, one per rule, each turn it red); `npm run test:workspace-import-ui`
+(the page, so it can run against the built app: one profile works in WASIX
+bash and exports through the dialog; a fresh profile is refused a zip that
+isn't an export, imports the export with a repository filled in, and bash
+shows the unpushed commit, the uncommitted change and untracked file, the
+bytes and the transcript, before and after an unannounced reload; passed
+on dev at 1920x1080 and 390x844, 8 Nov).
+
+**Not checked:** an export in the hundreds of megabytes (it is read in
+memory); a browser other than Chrome; an import of a workspace with no
+`.git` into a room with a repository (the clone guard covers it, read
+from the code, not run).
