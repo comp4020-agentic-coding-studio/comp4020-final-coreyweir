@@ -80,18 +80,23 @@ try {
     const button = [...document.querySelectorAll(".topbar nav button")].find((element) => element.textContent === "Room");
     button?.click();
   });
-  // A late joiner first gets the host's latest snapshot. Claude may be idle
-  // by then (the fake endpoint fails at once), so live data only follows
-  // once the host's screen changes: type into the host's terminal.
+  // A late joiner first gets the host's latest snapshot, or, if the host
+  // hasn't sent its first one yet (it checkpoints every 3 s, and the boot's
+  // own lines can pass the 200-character mark first), the whole output from
+  // the first byte. Claude may be idle by then (the fake endpoint fails at
+  // once), so more live data only follows once the host's screen changes:
+  // type into the host's terminal.
   await participant.waitForFunction(
-    () => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-checkpoint-renders")) > 0,
+    () => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-checkpoint-renders")) + Number(document.querySelector(".readonly-terminal")?.getAttribute("data-data-events")) > 0,
     { timeout: 30_000 },
   );
+  const eventsBefore = await participant.$eval(".readonly-terminal", (element) => Number(element.getAttribute("data-data-events")));
   await host.click(".terminal-target .xterm");
   await host.keyboard.type("riff smoke");
   await participant.waitForFunction(
-    () => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-data-events")) > 0,
+    (before) => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-data-events")) > before,
     { timeout: 30_000 },
+    eventsBefore,
   );
 
   // A prompt's whole trip: the participant stages it, the host queues it,

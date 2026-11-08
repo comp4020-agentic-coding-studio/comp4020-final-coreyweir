@@ -98,7 +98,9 @@ try {
   await host.waitForFunction(() => /Yes, I accept/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""), { timeout: 90_000 });
 
   const early = await join(room, "Early Participant");
-  await early.waitForFunction(() => Number(document.querySelector(".readonly-terminal")?.dataset.checkpointRenders) > 0, { timeout: 30_000 });
+  // The host's first snapshot, or its output from the first byte if that
+  // snapshot hasn't been sent yet: either way the screen is drawn.
+  await early.waitForFunction(() => Number(document.querySelector(".readonly-terminal")?.dataset.checkpointRenders) + Number(document.querySelector(".readonly-terminal")?.dataset.dataEvents) > 0, { timeout: 30_000 });
   await sameScreen(host, early, "the early participant sees the host's screen");
   // Let the host's screen settle into "already sent" before the restart.
   await new Promise((resolve) => setTimeout(resolve, 4_000));

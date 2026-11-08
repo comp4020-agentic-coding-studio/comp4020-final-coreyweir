@@ -69,6 +69,9 @@ async function run(hostViewport, participantViewport, label) {
     () => Number(document.querySelector(".terminal-target")?.getAttribute("data-output-size")) > 200,
     { timeout: 90_000 },
   );
+  // Claude's dialog is what's compared, so it has to be on the host's screen
+  // first; the boot's own lines come before it.
+  await host.waitForFunction(() => /Yes, I accept/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""), { timeout: 90_000 });
 
   const participantContext = await browser.createBrowserContext();
   const participant = await participantContext.newPage();
@@ -81,8 +84,12 @@ async function run(hostViewport, participantViewport, label) {
   await participant.click(".entry-card form .primary");
   await participant.waitForFunction(() => location.search.startsWith("?id="), { timeout: 10_000 });
   await openRoomTab(participant);
+  // A late joiner gets the host's latest snapshot, or, if the host hasn't
+  // sent its first one yet (it checkpoints every 3 s; the boot's own lines
+  // can pass the 200-character mark first), the whole output from the
+  // first byte. Either way the screen is drawn.
   await participant.waitForFunction(
-    () => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-checkpoint-renders")) > 0,
+    () => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-checkpoint-renders")) + Number(document.querySelector(".readonly-terminal")?.getAttribute("data-data-events")) > 0,
     { timeout: 30_000 },
   );
   // The host resizes their window while the participant watches: the host's
