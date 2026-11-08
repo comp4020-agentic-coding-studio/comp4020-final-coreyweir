@@ -67,7 +67,10 @@ async function hostForm(tab, name, repo = "") {
   if (await keep.evaluate((element) => element.checked)) await keep.click();
 }
 
-async function createRoom(tab) {
+async function createRoom(tab, { autoBoot = false } = {}) {
+  // Bash first, unless asked: keep the new room from booting Claude by
+  // itself (autoBoot.ts).
+  if (!autoBoot) await tab.evaluateOnNewDocument(() => sessionStorage.removeItem("riff-auto-boot"));
   await tab.click(".entry-card form .primary");
   await tab.waitForFunction(() => location.search.startsWith("?id="), { timeout: 60_000 });
   // a repository but no GitHub: the room asks first
@@ -235,6 +238,31 @@ try {
     assert.match(unwrap(await run(b, "cat later.txt")), /after import/, say("work done after the import too"));
     await endRoom(b);
     await second.close();
+
+    // ---- the same import, left to boot Claude by itself as a new room
+    // does: the boot has to come after the seed, so the pod has the files.
+    if (size.name === "desktop") {
+      const third = await browser.createBrowserContext();
+      const c = await third.newPage();
+      c.on("pageerror", (error) => pageErrors.push(String(error)));
+      await c.setViewport({ width: size.width, height: size.height, deviceScaleFactor: 1 });
+      await hostForm(c, "Auto", REPO);
+      await (await c.$(".import-workspace input[type=file]")).uploadFile(zipPath);
+      await c.waitForSelector(".import-workspace .import-summary", { timeout: 20_000 });
+      await (await c.$(".import-workspace label.check input[type=checkbox]")).click();
+      const roomC = await createRoom(c, { autoBoot: true });
+      await c.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "idle", { timeout: 240_000, polling: 200 });
+      await roomButton(c);
+      await c.focus(".terminal-target .xterm-helper-textarea");
+      await c.keyboard.type("/exit", { delay: 20 });
+      await c.keyboard.press("Enter");
+      await c.waitForFunction(() => [...document.querySelectorAll(".terminal-controls button")].some((b) => b.textContent === "Start Bash" && !b.disabled), { timeout: 30_000, polling: 200 });
+      await startBash(c);
+      await checkWork(c, (m) => say(`imported, Claude booted by itself: ${m}`));
+      await endRoom(c);
+      await third.close();
+      console.log(`${size.name}: auto-boot after the seed ok (${roomC.code})`);
+    }
     console.log(`${size.name}: ok (exported from ${roomA.code}, imported into ${roomB.code})`);
   }
   assert.deepEqual(pageErrors, [], "no page errors");

@@ -47,7 +47,7 @@ try {
   assert.deepEqual({ models: saved.models, token: saved.token }, { models: "riff", token: "" });
 
   await host.evaluate(() => [...document.querySelectorAll(".topbar nav button")].find((element) => element.textContent === "Room")?.click());
-  await host.locator(".terminal-controls button").click();
+  // No Boot Claude to press: a new room boots Claude by itself (autoBoot.ts).
   await host.waitForSelector(".terminal-target .xterm", { timeout: 90_000 });
 
   // Claude Code's first screens: accept bypass-permissions mode once, then

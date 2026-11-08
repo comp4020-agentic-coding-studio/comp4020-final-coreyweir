@@ -54,7 +54,7 @@ try {
   await host.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 10_000 });
   await host.evaluate(() => [...document.querySelectorAll(".topbar nav button")].find((element) => element.textContent === "Room")?.click());
 
-  await host.locator(".terminal-controls button").click();
+  // No Boot Claude to press: a new room boots Claude by itself (autoBoot.ts).
   await host.waitForSelector(".terminal-target .xterm", { timeout: 180_000 });
   const screen = () => host.$eval(".terminal-target .xterm-rows", (element) => element.textContent);
   // Straight to the prompt: Riff accepts the bypass-permissions dialog.

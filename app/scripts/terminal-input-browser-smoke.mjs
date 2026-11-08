@@ -55,6 +55,8 @@ async function host(context) {
   await inputs[2].type("invalid-terminal-input-smoke-token");
   const keep = await tab.$(".entry-card form label.check input[type=checkbox]");
   if (await keep.evaluate((element) => element.checked)) await keep.click();
+  // Bash first: keep the new room from booting Claude by itself (autoBoot.ts).
+  await tab.evaluateOnNewDocument(() => sessionStorage.removeItem("riff-auto-boot"));
   await tab.click(".entry-card form .primary");
   await tab.waitForFunction(() => location.search.startsWith("?id="), { timeout: 15_000 });
   await tab.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 15_000, polling: 100 });

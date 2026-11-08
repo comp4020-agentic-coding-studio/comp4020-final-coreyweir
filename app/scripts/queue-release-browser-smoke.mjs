@@ -91,7 +91,7 @@ try {
   // the bypass-permissions dialog for the host (claudePod.ts settings).
   await openTab(host, "Room");
   await openTab(participant, "Room");
-  await host.locator(".terminal-controls button").click();
+  // No Boot Claude to press: a new room boots Claude by itself (autoBoot.ts).
   await host.waitForSelector(".terminal-target .xterm", { timeout: 180_000 });
   const screen = () => host.$eval(".terminal-target .xterm-rows", (element) => element.textContent);
   await until(async () => (await stateOn(participant)) === "idle", "the participant to see Claude waiting", 180_000).catch(async (error) => {
