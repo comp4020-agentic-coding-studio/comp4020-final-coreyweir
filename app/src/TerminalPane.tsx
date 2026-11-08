@@ -130,7 +130,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       if (!controller) {
         const { ClaudePodController } = await import("./claudePod");
         controller = new ClaudePodController(
-          config,
+          { ...config, workspaceRoom: roomId },
           setStatus,
           (url) => previewChangeRef.current(url, publishPreview(Boolean(url))),
           (data) => {
