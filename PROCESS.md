@@ -15,6 +15,8 @@ implementation phase. The decisions up to the end of the phase are [here](https:
 
 This week, the focus became implementing the key features required for the site to start taking shape.
 
+The move from y-websocket and y-leveldb to back the whiteboard landed in [36c41f6](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/36c41f6). This set the scene for the role of the server as decided in ADR 00006: 
+
 The major change for the week was in [389ffff](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/389ffff).
 This commit included the data model, the new GitHub OAuth flow, the Hocuspocus SQLite whiteboard, and the initial audit logging.
 
