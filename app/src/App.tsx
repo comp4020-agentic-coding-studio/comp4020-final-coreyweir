@@ -427,8 +427,10 @@ async function exportCopy(copy: LocalCopy) {
   }
 }
 
-function RoomsList({ list, copies, workspaces, peeking, onOpen, onChanged }: {
+function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChanged }: {
   list: RoomList | null;
+  // the room this browser's host just ended, which says so quietly
+  endedNow: string | null;
   copies: LocalCopy[] | null;
   workspaces: WorkspaceSummary[];
   peeking: string | null;
@@ -465,7 +467,9 @@ function RoomsList({ list, copies, workspaces, peeking, onOpen, onChanged }: {
               ? <button className="room-link" onClick={() => room ? goToRoom(room.id) : copy && onOpen(copy)}>{code ? <>Room <code>{code}</code></> : "A room"}</button>
               : <span className="room-link">A room you hosted</span>}
             <span className="room-state">
-              {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept" : "board not kept"}</> : <><i className="gone"></i>Not live</>}
+              {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept" : "board not kept"}</>
+                : endedNow && (copy?.roomId === endedNow || workspace?.room === endedNow) ? <><i className="gone"></i>Ended just now</>
+                : <><i className="gone"></i>Not live</>}
             </span>
             <span className="room-detail">
               {copy ? <small>{copyDetail(copy, Boolean(room))}</small> : workspace && !room && <small>no board copy</small>}
@@ -630,7 +634,15 @@ function ImportBoard({ imported, onChange }: { imported: ParsedBoard | null; onC
 function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; keep?: boolean }) {
   const user = useUser();
   const [keepBoard, setKeepBoard] = useState(true);
-  const ended = new URLSearchParams(location.search).get("ended")?.replace(/[^A-Z0-9]/gi, "").slice(0, 16);
+  // The host who just ended a room: no notice (they know), only its row
+  // saying so. Dropped from the URL so a reload doesn't say "just now".
+  const [endedNow] = useState(() => new URLSearchParams(location.search).get("ended")?.replace(/[^\w-]/g, "").slice(0, 64) || null);
+  useEffect(() => {
+    if (!endedNow) return;
+    const url = new URL(location.href);
+    url.searchParams.delete("ended");
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+  }, [endedNow]);
   const [mode, setMode] = useState<"join" | "host">(() => new URLSearchParams(location.search).get("setup") === "host" ? "host" : "join");
   const [code, setCode] = useState(sharedCode);
   const [name, setName] = useState(savedName);
@@ -690,7 +702,6 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
       </section>
       )}
       <section className="entry-card">
-        {ended && <p className="ended-note" role="status">Room <code>{ended}</code> has ended.</p>}
         <Invites name={shownName} list={list} />
         <nav><button className={mode === "join" ? "active" : ""} onClick={() => setMode("join")}>Join</button><button className={mode === "host" ? "active" : ""} onClick={() => setMode("host")}>Host</button></nav>
         {mode === "join" ? (
@@ -739,7 +750,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
           </form>
         )}
       </section>
-      <RoomsList list={list} copies={copies} workspaces={workspaces} peeking={peeked?.database ?? null} onChanged={refreshCopies} onOpen={(copy) => {
+      <RoomsList list={list} copies={copies} workspaces={workspaces} peeking={peeked?.database ?? null} endedNow={endedNow} onChanged={refreshCopies} onOpen={(copy) => {
         if (narrow) location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`);
         else setPeek((current) => current === copy.database ? null : copy.database);
       }} />
@@ -1000,7 +1011,7 @@ function EndRoom({ access, code, keep }: { access: Access; code: string; keep: b
     try {
       await endRoom(access);
       // Leave at once: the host's page reconnecting would revive the room.
-      location.assign(`${location.pathname}?${new URLSearchParams({ ended: code })}`);
+      location.assign(`${location.pathname}?${new URLSearchParams({ ended: access.room.id })}`);
     } catch (failure) {
       setError(problem(failure));
       setBusy(false);
@@ -1113,13 +1124,20 @@ function RoomClosed({ reason, roomId }: { reason: string; roomId?: string }) {
   useEffect(() => {
     if (ended && roomId) findCopy(`room/${roomId}/shared`).then(setCopy, () => {});
   }, [ended, roomId]);
+  // A page of its own, with the start page's header: the participant
+  // didn't choose to leave, so it says why before anything else.
   return (
-    <main className="landing">
+    <main className="landing closed">
+      <header><strong className="brand">riff</strong><span>Collaborative design crits</span></header>
       <section className="entry-card">
         <h2>{ended ? "This room has ended" : reason === "removed" ? "The host removed you from this room" : "You're no longer in this room"}</h2>
+        {ended && copy?.code && <p className="closed-room">Room <code>{copy.code}</code>{copy.hostName ? `, hosted by ${copy.hostName}` : ""}</p>}
         <p>{reason === "board-pruned" ? "The server deleted this board to make space." : ended ? "The server doesn't keep this board." : reason === "removed" ? "You can't open it again unless they invite you back." : "The host removed you, or the room has ended."}</p>
-        {copy && <p>This browser kept its own copy. <button className="link" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Open it</button></p>}
-        <button className="primary" onClick={() => location.assign(location.pathname)}>Back to start</button>
+        {copy && <p>This browser kept its own copy of the board, which you can still look at and export.</p>}
+        <div className="closed-actions">
+          {copy && <button className="primary" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Open this browser's copy</button>}
+          <button className={copy ? "secondary" : "primary"} onClick={() => location.assign(location.pathname)}>Back to start</button>
+        </div>
       </section>
     </main>
   );

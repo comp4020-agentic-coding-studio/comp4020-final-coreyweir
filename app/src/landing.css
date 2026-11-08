@@ -99,3 +99,14 @@
    not on a line of its own under it. */
 .entry-card form label:not(.check):has(>small){grid-template-columns:minmax(0,1fr) auto;align-items:baseline}
 .entry-card form label:not(.check):has(>small)>:not(small){grid-column:1/-1}
+
+/* A participant shut out of a room (it ended, or they were removed): the
+   start page's header, and one card saying why. */
+.landing.closed{grid-template-columns:minmax(0,1fr);grid-template-rows:64px minmax(0,1fr)}
+.landing.closed>.entry-card{justify-self:center;align-self:center;width:min(480px,100%);max-width:none;margin:24px 0}
+.landing.closed .closed-room{color:#191919}
+.landing.closed .closed-room code{font-family:"SFMono-Regular",Consolas,monospace;letter-spacing:.08em}
+.landing.closed .closed-actions{margin:20px 26px 26px;display:flex;flex-wrap:wrap;gap:10px}
+.landing.closed .closed-actions .primary{padding:0 18px}
+.landing.closed .closed-actions .secondary{height:41px;padding:0 18px;border:1px solid #d5d5cf;border-radius:4px;background:white;font-size:10px}
+@media(max-width:780px){.landing.closed{grid-template-rows:60px auto}}
