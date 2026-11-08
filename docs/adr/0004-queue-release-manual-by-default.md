@@ -1,6 +1,6 @@
 # 4. Queue release: manual by default, auto as an option
 
-- Status: accepted, not yet implemented (week 10, planning phase)
+- Status: accepted (week 10); implemented 8 Nov with the hooks fallback (see "Implementation")
 - Date: 2026-10-12
 
 ## Context
@@ -88,3 +88,102 @@ click. A host who wants a fast pipeline is one toggle away.
 are working through an agreed plan, and a host who wants that shouldn't have
 to stay glued to the queue. The toggle is visible to everyone, and
 interrupting stops it.
+
+## Implementation (8 Nov)
+
+Built on the fallback: settings hooks and `riff-hook`. They proved
+workable on the bundled 2.1.221, so the bundle stays where it is and no mod
+was needed.
+
+- **The channel.** `app/src/claudeHooks.ts`. At boot the host's
+  `~/.claude/settings.json` gets `SessionStart`, `UserPromptSubmit`,
+  `Stop` and `StopFailure` hooks in exec form (`command: "riff-hook"`,
+  `args: []`, so no shell parses them). Nodepod runs `riff-hook` as an
+  external command in the host's page with the hook's JSON on stdin. It
+  prints nothing, because a `UserPromptSubmit` hook's stdout would be
+  added to the prompt.
+- **Send** (`promptKeystrokes`, `ClaudePodController.sendPrompt`): Ctrl+S,
+  then the prompt as one bracketed paste, then Enter on its own. Ctrl+S
+  stashes whatever is already in Claude's input box (the host's own draft,
+  or a prompt Claude put back after an interrupt); without it the queued
+  prompt was appended to that text and both went as one. Claude restores
+  the stash after the submit. With an empty box Ctrl+S does nothing,
+  unless the host stashed something by hand, which it brings back: the
+  one case this can't tell apart.
+- **What Claude is doing** (`app/src/queueRelease.ts`): off, starting,
+  idle, working, paused. Starting lasts until `SessionStart`, which on
+  2.1.221 fires only once the bypass-permissions dialog is accepted, so
+  nothing is typed into a dialog. `UserPromptSubmit` (or the page's own
+  Send) means working; `Stop` without `stop_hook_active` means idle.
+  Esc or Ctrl+C typed into Claude, or the Interrupt button, means paused,
+  and so does `StopFailure` (a turn ended by an API error): there is no
+  hook for an interrupt. So does sending a slash command: most run
+  locally and fire no hook at all (measured: `/cost`, `/help`, `/model`,
+  `/compact` with nothing to compact), and some leave a dialog open that
+  the next prompt would be typed into. A finished turn or `/clear`
+  (which fires `SessionStart`) resumes. Turning auto on while paused
+  counts as idle: the host is saying Claude is at its prompt again.
+- **One send at a time.** Measured: a second prompt typed before Claude
+  has processed the first one's Enter is merged into it, duplicated or
+  lost, idle or busy (sends 1-20 ms apart; none from 50 ms on; with or
+  without the Ctrl+S). No delay is safe on every machine, so Riff types
+  the next prompt only once Claude has acknowledged the last with its
+  `UserPromptSubmit` hook: at once when idle, and at the end of the turn
+  for a follow-up typed while Claude works (so one follow-up per busy
+  turn). Until then Send is disabled ("Waiting for Claude to take the last
+  prompt") and auto waits. An interrupt, an API error, Claude exiting or a
+  new session also end the wait; a slash command never starts one.
+  Separate from the WASIX bash input stall found on 8 Nov: Send writes to
+  Claude's node process, not bash, and 20 sends one acknowledgement apart
+  (up to 13 KB, with `$(...)`, quotes, Unicode) all arrived; Claude
+  itself turns a tab into spaces and trims trailing whitespace.
+- **Auto** (`useQueueRelease` in `app/src/QueuePanel.tsx`): whenever auto
+  is on, Claude is idle and something is queued, the first prompt goes.
+  A send marks Claude working at once, before its hook says so, so a
+  second render can't send another: one prompt per turn. The toggle is
+  `roomState.autoRelease` in the control document, and the host's page
+  publishes Claude's state as `roomState.claude`; everyone sees both in
+  the queue's heading ("Host away" while the room is away, because the
+  last state may be stale). A reloaded host page starts at off and says
+  so.
+- **The log.** `queue.send` now carries `by=host` or `by=auto` (from
+  `roomState.lastSentBy`, written with `lastSent` in the delete's
+  transaction), and the toggle logs `queue.auto on=true|false`, once per
+  change. Still the host's claim: the server never sees the terminal.
+- **Measured on 2.1.221 in Nodepod** (fake Anthropic API,
+  `app/scripts/fake-anthropic.mjs`, recording each turn's prompt):
+  - a bracketed paste, then a separate Enter, submits every time;
+  - a 40-line prompt shows as pasted text and reaches the model whole;
+  - a Send while Claude works (a slow reply, or between tool calls) is
+    held and goes in once the turn ends, as its own turn, or, when two
+    were waiting, joined into one turn;
+  - Esc interrupts with no hook, and Claude puts the interrupted prompt
+    back in the input box (hence Ctrl+S);
+  - an API error fires `StopFailure`, not `Stop`.
+- **Checks.**
+  - `npm run test:queue-release-browser` (in `app/`): two clients, the
+    participant at 390×844. The participant stages six prompts and the host
+    queues them; one by Send, two by turning auto on while idle, one queued
+    while auto is on, a `/cost` after which auto pauses until the host
+    turns it on again, two Sends clicked in the same moment (the second
+    waits and is sent once Claude has the first), and a Send while
+    Claude works. Every prompt reaches
+    the model exactly once, newlines intact, one turn each. The
+    participant sees the state and the toggle and has no Send. Mutations:
+    flattening newlines (as Load did), dropping the immediate "working"
+    on send, not pausing after a slash command, and not waiting for the
+    acknowledgement each turn it red. It can't see a prompt whose turn failed
+    before the model call, or what a slow real model would change.
+  - `npm run test:queue-release`: the state machine, hook input and
+    keystrokes.
+  - `npm run test:audit-log`: `by=host`/`by=auto` and the toggle, read
+    back from `events`; logging every send as the host's, or every toggle
+    write, turns it red.
+  - `spec/permissions.test.ts`: a participant's forged toggle and send
+    are refused and absent on a fresh read; the host's toggle sticks.
+    Red with the control document writable by participants.
+- **Left.**
+  - Live verification on fly.
+  - Auto treats any prompt starting `/word` as a slash command, including
+    a custom command that does reach the model; it pauses after it anyway
+    and resumes when that turn's `Stop` arrives.

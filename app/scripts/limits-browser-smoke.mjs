@@ -153,7 +153,7 @@ try {
   await bo.click(".new-prompt button");
   await hana.tab.waitForSelector(".prompt-card footer button:not([disabled])", { timeout: 10_000 });
   await hana.tab.click(".prompt-card footer button");
-  await hana.tab.waitForSelector(".queue-row .load-prompt");
+  await hana.tab.waitForSelector(".queue-row .send-prompt");
 
   // A small image fits.
   const small = await pasteImage(bo, 48);
@@ -192,7 +192,7 @@ try {
     assert.equal(await tab.$(".new-prompt"), null, `${who}: no new prompts`);
     assert.equal(await tab.$eval(".prompt-card textarea", (element) => element.readOnly), true, `${who}: prompts read-only`);
   }
-  assert.equal(await hana.tab.$(".load-prompt"), null, "the host's queue stops too");
+  assert.equal(await hana.tab.$(".send-prompt"), null, "the host's queue stops too");
   await shot(hana.tab, "full-host");
   await shot(bo, "full-guest");
   await bo.reload({ waitUntil: "networkidle0" });

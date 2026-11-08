@@ -35,7 +35,7 @@ README, PROCESS.md and the reflections are mine to write.
 | [0001](docs/adr/0001-the-terminal-mirror-is-not-persisted.md) | The terminal mirror stays in server memory and is never persisted | Yes (today's behaviour) |
 | [0002](docs/adr/0002-room-state-in-sqlite-as-an-append-log.md) | Room state in SQLite (`node:sqlite`) as an append-only update log, served by Hocuspocus | Yes (`36c41f6`) |
 | [0003](docs/adr/0003-room-lifecycle-and-board-retention.md) | 5-minute host grace, then the room ends. Host chooses at creation whether the board is kept (default: keep). No promised retention. Local copies for everyone. Export and import. 4 MB per room, pruning from 70% of the volume | Partly: lifecycle, keeping, End room (`7928bac`, `8066106`, `d9a7766`), size cap and pruning (`f512b5a`, `7d27daa`), 18 Oct; local copies, export and import (`4e17a8f`, `65ba779`), 19 Oct; workspace export, 8 Nov |
-| [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | No |
+| [0004](docs/adr/0004-queue-release-manual-by-default.md) | Queue release: manual Send by default, auto toggle on turn end | Yes (8 Nov, hooks fallback) |
 | [0005](docs/adr/0005-identity-github-sign-in-and-room-scoped-guests.md) | Identity: GitHub sign-in on the server, guests exist only inside their room, encrypted push token in the browser | Yes (`389ffff`, `4acb32b`; push token in the client 18 Oct) |
 | [0006](docs/adr/0006-who-may-see-and-change-what.md) | Who may see and change what, removal/lock/rotate, the who-did-what log. Crit 10's written decision. Amended 18 Oct: participants don't queue | Yes (`389ffff`, `4acb32b`, `f78b367`, `381dfba`) |
 | [0007](docs/adr/0007-credentials-stay-in-the-tab.md) | The host's tokens stay in the page; the guest holds placeholders, swapped by our service worker (P1.6) | Yes (18 Oct) |
@@ -442,15 +442,17 @@ auto-release at the latest.
   - Left: anonymous clone of a public repo (Nodepod's git needs a token,
     so without GitHub connected the terminal says it didn't clone);
     a clone on live.
-- **Queue release** (ADR 0004):
-  - Send submits with newlines intact; an auto toggle, visible to the room.
-  - Planned mechanism: a Claude Code mod. That needs the bundle upgraded
-    from 2.1.221 to 2.1.287+ and the `claudeBundle.ts` patches redone, which
-    also brings newer models.
-  - Fallback: `Stop` and `UserPromptSubmit` settings hooks, plus a
-    bracketed paste and a separate enter.
-  - Either way, `riff-hook` is the channel to the page, as a Nodepod
-    `externalCommands` entry.
+- ~~**Queue release** (ADR 0004)~~. Built 8 Nov on the fallback (settings
+  hooks, `riff-hook`, a bracketed paste and a separate Enter), which works
+  on 2.1.221, so no bundle upgrade. Send submits with newlines intact,
+  auto sends the next prompt whenever Claude is idle, and the room sees
+  the toggle and what Claude is doing. The log says `queue.send by=host|auto`
+  and `queue.auto on=…`. Details and what was measured in the ADR's
+  Implementation section. Checked by `npm run test:queue-release-browser`
+  (two clients, exactly once, dev), `npm run test:queue-release`,
+  `npm run test:audit-log`, `spec/permissions.test.ts`.
+  - Left: live verification. A slash command fires no hook, so auto pauses
+    after one until the host turns it on again (measured, by design).
 - ~~**Terminals the same size**~~ (crit 11; 8 Nov). The mirror already took
   the host's columns and rows, but at a fixed 12px, so a phone watching a
   desktop host saw the first 390px of a 1368px screen. Now the font follows

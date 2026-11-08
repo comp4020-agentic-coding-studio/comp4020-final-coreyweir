@@ -5,6 +5,7 @@ import { openCopy } from "./copies";
 import { stagePrompt } from "./boardFile";
 import { Awareness } from "y-protocols/awareness";
 import type { Access, RoomState } from "./api";
+import { CLAUDE_STATES, type ClaudeState } from "./queueRelease";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -20,6 +21,7 @@ export type Participant = {
 export type RoomMember = { id: number; name: string; host: boolean; login: string | null; removed: boolean };
 
 export type QueuedPrompt = { id: string; author: string; text: string; rank: number };
+export type SentBy = "host" | "auto";
 
 export type PromptSnapshot = {
   id: string;
@@ -171,12 +173,13 @@ export function useRoom(access: Access) {
     prompts.delete(prompt.id);
   }
 
-  // Once a queued prompt is in the host's terminal it leaves the queue.
-  // `lastSent` in the same transaction is how the server's log tells this
-  // apart from removing it.
-  function sendQueued(id: string) {
+  // Once a queued prompt is sent to Claude it leaves the queue. `lastSent`
+  // in the same transaction is how the server's log tells this apart from
+  // removing it, and `lastSentBy` whether the host or auto sent it.
+  function sendQueued(id: string, by: SentBy = "host") {
     control.transact(() => {
       roomState.set("lastSent", id);
+      roomState.set("lastSentBy", by);
       queue.delete(id);
     });
   }
@@ -205,6 +208,10 @@ export function useRoom(access: Access) {
     limitBytes: typeof roomInfo.get("limitBytes") === "number" ? Number(roomInfo.get("limitBytes")) : access.room.limitBytes,
     previewLive: roomState.get("previewLive") === true,
     previewGeneration: Number(roomState.get("previewGeneration") ?? 0),
+    // Queue release (docs/adr/0004): the host's auto toggle, and what Claude
+    // is doing as the host's page last said.
+    autoRelease: roomState.get("autoRelease") === true,
+    claudeState: (CLAUDE_STATES as readonly unknown[]).includes(roomState.get("claude")) ? (roomState.get("claude") as ClaudeState) : "off",
     roomState,
     roomVersion,
     shutOut,

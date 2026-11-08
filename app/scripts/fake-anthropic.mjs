@@ -1,0 +1,122 @@
+// A stand-in for the Anthropic Messages API, for smokes that need Claude
+// Code to finish real turns. It streams a short reply to every streamed
+// request and records each turn's prompt: the text blocks of the last user
+// message, which is what reached the model. A prompt containing "slow"
+// gets its reply after SLOW_MS, so a smoke can send while Claude is busy;
+// one containing "fail" gets a 400, so a turn ends in an API error.
+//
+// It listens on this machine's first non-loopback address: Nodepod keeps
+// 127.0.0.0/8 inside the guest.
+import http from "node:http";
+import os from "node:os";
+
+export const SLOW_MS = 4_000;
+
+function lanAddress() {
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries ?? []) if (entry.family === "IPv4" && !entry.internal) return entry.address;
+  }
+  throw new Error("No non-loopback IPv4 address for the fake Anthropic API");
+}
+
+const cors = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "*, authorization, x-api-key",
+  "access-control-allow-methods": "*",
+};
+
+function textBlocks(content) {
+  if (typeof content === "string") return [content];
+  if (!Array.isArray(content)) return [];
+  return content.filter((block) => block?.type === "text" && typeof block.text === "string").map((block) => block.text);
+}
+
+export async function startFakeAnthropic({ reply = "Done." } = {}) {
+  const turns = [];
+  const server = http.createServer((req, res) => {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, cors);
+      res.end();
+      return;
+    }
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; });
+    req.on("end", () => {
+      let body = {};
+      try { body = JSON.parse(raw || "{}"); } catch { /* not JSON */ }
+      const path = new URL(req.url, "http://x").pathname;
+      if (path.endsWith("/count_tokens")) {
+        res.writeHead(200, { ...cors, "content-type": "application/json" });
+        res.end(JSON.stringify({ input_tokens: 10 }));
+        return;
+      }
+      if (!path.endsWith("/v1/messages")) {
+        res.writeHead(404, { ...cors, "content-type": "application/json" });
+        res.end(JSON.stringify({ type: "error", error: { type: "not_found_error", message: "not here" } }));
+        return;
+      }
+      const message = {
+        id: `msg_${turns.length}_${Date.now()}`,
+        type: "message",
+        role: "assistant",
+        model: body.model ?? "claude-fake",
+        content: [{ type: "text", text: reply }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 10, output_tokens: 2 },
+      };
+      if (!body.stream) {
+        res.writeHead(200, { ...cors, "content-type": "application/json" });
+        res.end(JSON.stringify(message));
+        return;
+      }
+      const lastUser = [...(body.messages ?? [])].reverse().find((entry) => entry.role === "user");
+      const blocks = textBlocks(lastUser?.content);
+      // Claude Code also streams side requests (a title, a topic); only a
+      // request that carries tools is a turn of the conversation.
+      const isTurn = Array.isArray(body.tools) && body.tools.length > 0;
+      if (isTurn) (globalThis.__raw ??= []).push(lastUser);
+      if (isTurn) turns.push({ at: Date.now(), blocks, toolResult: Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result") });
+      if (isTurn && blocks.some((text) => text.includes("fail"))) {
+        res.writeHead(400, { ...cors, "content-type": "application/json" });
+        res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "the fake API refuses prompts containing fail" } }));
+        return;
+      }
+      // A prompt containing "tool" gets a Bash tool call first (sleep 3),
+      // so a smoke can send while Claude is mid-turn between tool calls.
+      const answered = Array.isArray(lastUser?.content) && lastUser.content.some((block) => block?.type === "tool_result");
+      if (isTurn && !answered && blocks.some((text) => text.includes("tool"))) {
+        const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-cache" });
+        send("message_start", { type: "message_start", message: { ...message, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } });
+        send("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: `toolu_${Date.now()}`, name: "Bash", input: {} } });
+        send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify({ command: "sleep 3", description: "Wait" }) } });
+        send("content_block_stop", { type: "content_block_stop", index: 0 });
+        send("message_delta", { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 5 } });
+        send("message_stop", { type: "message_stop" });
+        res.end();
+        return;
+      }
+      const slow = isTurn && blocks.some((text) => text.includes("slow"));
+      const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-cache" });
+      send("message_start", { type: "message_start", message: { ...message, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } });
+      send("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+      setTimeout(() => {
+        send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: reply } });
+        send("content_block_stop", { type: "content_block_stop", index: 0 });
+        send("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 2 } });
+        send("message_stop", { type: "message_stop" });
+        res.end();
+      }, slow ? SLOW_MS : 50);
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "0.0.0.0", resolve));
+  return {
+    url: `http://${lanAddress()}:${server.address().port}`,
+    turns,
+    /** How many turns carried exactly this prompt as one of their text blocks. */
+    count: (prompt) => turns.filter((turn) => turn.blocks.includes(prompt)).length,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+}

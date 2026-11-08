@@ -16,6 +16,8 @@ import { SIGINT, WASIX_SESSION_CONTROL_DIR, WasixSession, type WasixSessionComma
 import { attachNetGatewayBrowser, type NetGatewayBrowserHandle } from "./netGatewayBrowser";
 import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
+import { createRiffHook, promptKeystrokes, riffHookSettings, RIFF_HOOK_COMMAND } from "./claudeHooks";
+import { isInterruptKey, type ClaudeEvent } from "./queueRelease";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
 import { credentialFor, GITHUB_ORIGINS, serveCredentials, type Credential } from "./credentials";
@@ -384,7 +386,7 @@ export class ClaudePodController {
       FORCE_COLOR: "1",
       CLAUDE_CODE_NO_FLICKER: "1",
       CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE: "80x24",
-      NODEPOD_EXTERNAL_COMMANDS: "wasm-fs-probe:python:bash",
+      NODEPOD_EXTERNAL_COMMANDS: `wasm-fs-probe:python:bash:${RIFF_HOOK_COMMAND}`,
       ANTHROPIC_BASE_URL: this.config.baseUrl,
     };
     const model = credentialFor("model", this.config.token, [new URL(this.config.baseUrl).origin]);
@@ -419,6 +421,8 @@ export class ClaudePodController {
           showThinkingSummaries: true,
           verbose: true,
           permissions: { defaultMode: "bypassPermissions" },
+          // Turn start and end reach the page through riff-hook (docs/adr/0004).
+          hooks: riffHookSettings(),
         }),
         "/home/user/.claude/.keep": "",
       },
@@ -437,6 +441,7 @@ export class ClaudePodController {
         // needed. `sh -c` stays with Nodepod's built-in shell.
         bash: this.runBashExternal,
         "/bin/bash": this.runBashExternal,
+        [RIFF_HOOK_COMMAND]: this.runRiffHook,
       },
       memory: {
         budgetMB: 768,
@@ -570,7 +575,11 @@ export class ClaudePodController {
     internal._dataDisposable?.dispose();
     internal._dataDisposable = null;
     this.rawInput?.dispose();
-    this.rawInput = xterm.onData((data: string) => process.write(data));
+    this.rawInput = xterm.onData((data: string) => {
+      if (isInterruptKey(data)) this.onClaudeEvent({ event: "Interrupt" });
+      process.write(data);
+    });
+    this.onClaudeEvent({ event: "Started" });
 
     let previousEndedWithCarriageReturn = false;
     const write = (text: string) => {
@@ -587,6 +596,7 @@ export class ClaudePodController {
     process.on("exit", () => {
       if (this.process !== process) return;
       this.process = null;
+      this.onClaudeEvent({ event: "Exited" });
       this.restoreTerminalInput();
       terminal.showPrompt();
       this.report("Terminal ready");
@@ -903,15 +913,26 @@ export class ClaudePodController {
     return this.bridgeLoop;
   }
 
-  loadPrompt(prompt: string) {
+  /** Turn start and end from Claude's hooks (claudeHooks.ts), plus start, exit and interrupts. */
+  onClaudeEvent: (event: ClaudeEvent) => void = () => {};
+  private runRiffHook = createRiffHook((event) => this.onClaudeEvent(event));
+
+  /**
+   * Send a prompt to Claude: one bracketed paste, so newlines stay in the
+   * prompt, then Enter on its own. False if Claude isn't running.
+   */
+  sendPrompt(prompt: string) {
     if (!this.terminal || !this.process || this.process.exited) return false;
-    this.process.write(prompt.replace(/[\r\n]+/g, " "));
-    this.terminal.xterm.focus();
+    const { stash, paste, submit } = promptKeystrokes(prompt);
+    this.process.write(stash);
+    this.process.write(paste);
+    this.process.write(submit);
     return true;
   }
 
   interrupt() {
     if (this.process && !this.process.exited) {
+      this.onClaudeEvent({ event: "Interrupt" });
       this.process.write("\x03");
     } else if (this.writeWasixStdin) {
       const write = this.writeWasixStdin;

@@ -80,30 +80,33 @@ try {
     const button = [...document.querySelectorAll(".topbar nav button")].find((element) => element.textContent === "Room");
     button?.click();
   });
-  // A late joiner first gets the host's latest snapshot, or, if the host
-  // hasn't sent its first one yet (it checkpoints every 3 s, and the boot's
-  // own lines can pass the 200-character mark first), the whole output from
-  // the first byte. Claude may be idle by then (the fake endpoint fails at
-  // once), so more live data only follows once the host's screen changes:
-  // type into the host's terminal.
-  await participant.waitForFunction(
-    () => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-checkpoint-renders")) + Number(document.querySelector(".readonly-terminal")?.getAttribute("data-data-events")) > 0,
-    { timeout: 30_000 },
-  );
-  const eventsBefore = await participant.$eval(".readonly-terminal", (element) => Number(element.getAttribute("data-data-events")));
+  // A late joiner first gets the host's latest snapshot; one who joins
+  // while Claude is still drawing (the workspace makes boot slower) gets
+  // the live stream from its start instead, and needs none. Either way
+  // the mirror shows something, and once the host's screen changes (type
+  // into the host's terminal) more live data must follow.
+  const mirror = () => participant.$eval(".readonly-terminal", (element) => ({
+    checkpoints: Number(element.dataset.checkpointRenders),
+    data: Number(element.dataset.dataEvents),
+  }));
+  await participant.waitForFunction(() => {
+    const element = document.querySelector(".readonly-terminal");
+    return Number(element?.getAttribute("data-checkpoint-renders")) > 0 || Number(element?.getAttribute("data-data-events")) > 0;
+  }, { timeout: 30_000 });
+  const before = await mirror();
   await host.click(".terminal-target .xterm");
   await host.keyboard.type("riff smoke");
   await participant.waitForFunction(
-    (before) => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-data-events")) > before,
+    (count) => Number(document.querySelector(".readonly-terminal")?.getAttribute("data-data-events")) > count,
     { timeout: 30_000 },
-    eventsBefore,
+    before.data,
   );
 
-  // A prompt's whole trip: the participant stages it, the host queues it,
-  // and Load types it into the host's terminal and takes it out of the
-  // queue on both screens. The queue only lets go once loadPrompt says the
-  // text went to Claude's process; Claude itself is still on its bypass
-  // permissions dialog here, so the text isn't checked on screen.
+  // A prompt's trip as far as the queue: the participant stages it, the
+  // host queues it, and it shows in both queues. Claude is still on its
+  // bypass-permissions dialog here, so Send waits (disabled) and the room
+  // sees "starting"; the host removes it instead. Sending, by hand and
+  // automatically, is test:queue-release-browser.
   await participant.type(".new-prompt textarea", "riff queue smoke");
   await participant.click(".new-prompt button");
   await host.waitForFunction(() => [...document.querySelectorAll(".prompt-card textarea")].some((element) => element.value === "riff queue smoke"), { timeout: 10_000 });
@@ -113,8 +116,10 @@ try {
   });
   const queuedOn = (page) => page.waitForFunction(() => [...document.querySelectorAll(".queue-row p")].some((element) => element.textContent === "riff queue smoke"), { timeout: 10_000 });
   await Promise.all([queuedOn(host), queuedOn(participant)]);
-  assert.equal(await participant.$(".load-prompt"), null);
-  await host.click(".load-prompt");
+  assert.equal(await participant.$(".send-prompt"), null);
+  assert.equal(await host.$eval(".send-prompt", (element) => element.disabled), true);
+  await participant.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "starting", { timeout: 10_000 });
+  await host.click(".queue-row button[aria-label='Remove queued prompt']");
   const emptyOn = (page) => page.waitForFunction(() => document.querySelectorAll(".queue-row").length === 0, { timeout: 10_000 });
   await Promise.all([emptyOn(host), emptyOn(participant)]);
 
@@ -125,7 +130,7 @@ try {
   assert.equal((await participant.$$(".terminal-controls button:not(.mirror-mode)")).length, 0);
   await participantContext.close();
   assert.deepEqual(pageErrors, []);
-  console.log("Tab layouts, one-click Claude rendering, live participant data, and a prompt from staging to Load passed.");
+  console.log("Tab layouts, one-click Claude rendering, live participant data, and a prompt from staging to the queue passed.");
 } finally {
   await browser.close();
 }

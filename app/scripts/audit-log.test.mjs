@@ -92,7 +92,7 @@ function connect(origin, roomId, part, secret) {
   }));
 }
 
-test("the log names who staged, queued, sent and removed each prompt", async () => {
+test("the log names who staged, queued, sent (host or auto) and removed each prompt, and who toggled auto", async () => {
   const app = await start();
   let rows;
   try {
@@ -115,6 +115,7 @@ test("the log names who staged, queued, sent and removed each prompt", async () 
     };
     stage("p-sent");
     stage("p-removed");
+    stage("p-auto");
     await guestShared.saved();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -122,7 +123,7 @@ test("the log names who staged, queued, sent and removed each prompt", async () 
     // removes the other.
     const queue = hostControl.doc.getMap("queue");
     const roomState = hostControl.doc.getMap("roomState");
-    for (const id of ["p-sent", "p-removed"]) {
+    for (const id of ["p-sent", "p-removed", "p-auto"]) {
       hostControl.doc.transact(() => queue.set(id, { id, author: "Bo", text: SECRET_TEXT, rank: Date.now() }));
       hostShared.doc.getMap("prompts").delete(id);
     }
@@ -132,6 +133,18 @@ test("the log names who staged, queued, sent and removed each prompt", async () 
       queue.delete("p-sent");
     });
     queue.delete("p-removed");
+    await hostControl.saved();
+    // Ada turns auto on, and her page sends the next prompt on its own
+    // (QueuePanel.tsx useQueueRelease), then she turns auto off. Setting
+    // it on twice is one change, logged once.
+    roomState.set("autoRelease", true);
+    roomState.set("autoRelease", true);
+    hostControl.doc.transact(() => {
+      roomState.set("lastSent", "p-auto");
+      roomState.set("lastSentBy", "auto");
+      queue.delete("p-auto");
+    });
+    roomState.set("autoRelease", false);
     await hostControl.saved();
 
     guestShared.leave();
@@ -150,7 +163,11 @@ test("the log names who staged, queued, sent and removed each prompt", async () 
   assert.ok(said(bo, "prompt.add", "p-sent") && said(bo, "prompt.add", "p-removed"), "Bo staged both");
   assert.ok(said(ada, "queue.add", "p-sent") && said(ada, "queue.add", "p-removed"), "Ada queued both");
   assert.ok(said(ada, "prompt.delete", "p-sent"), "queueing takes the prompt out of staging");
-  assert.ok(said(ada, "queue.send", "p-sent"), "loading is logged as a send");
+  assert.ok(said(ada, "queue.send", "p-sent"), "sending is logged as a send");
+  assert.equal(rows.find((row) => row.action === "queue.send" && row.detail.id === "p-sent")?.detail.by, "host", "Ada's Send is logged as the host's");
+  assert.equal(rows.find((row) => row.action === "queue.send" && row.detail.id === "p-auto")?.detail.by, "auto", "the page's own send is logged as auto");
+  assert.ok(!said(ada, "queue.delete", "p-auto"), "an auto send isn't logged as removed");
+  assert.deepEqual(rows.filter((row) => row.action === "queue.auto").map((row) => [row.member, row.detail.on]), [[ada, true], [ada, false]], "auto on, then off, by Ada, once each");
   assert.ok(!said(ada, "queue.delete", "p-sent"), "a sent prompt isn't also logged as removed");
   assert.ok(said(ada, "queue.delete", "p-removed"), "removing is logged as a delete");
   assert.ok(!said(ada, "queue.send", "p-removed"), "a removed prompt isn't logged as sent");
