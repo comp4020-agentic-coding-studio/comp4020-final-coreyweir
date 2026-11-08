@@ -11,6 +11,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { honourClipboardWrites } from "./terminalClipboard";
 import { TERMINAL_THEME } from "./terminalTheme";
+import { wrapNote } from "./terminalWrap";
 import { createRiffWasmerProvider, type WasmerCommandProvider } from "./wasmerCommandProvider";
 import { loadClaudeBundle } from "./claudeBundle";
 import { SIGINT, WASIX_SESSION_CONTROL_DIR, WasixSession, type WasixSessionCommand } from "./wasixSession";
@@ -513,6 +514,8 @@ export class ClaudePodController {
 
   /** A line in the host's terminal and everyone's mirror of it. */
   private terminalNote(text: string, line = true) {
+    // whole notes wrap at words; streamed output (a clone's progress) as is
+    if (line && this.terminal) text = wrapNote(text, this.terminal.xterm.cols);
     const data = `${text.replace(/(^|[^\r])\n/g, "$1\r\n")}${line ? "\r\n" : ""}`;
     this.terminal?.xterm.write(data);
     this.emitOutput(data);
