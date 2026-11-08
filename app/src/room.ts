@@ -6,6 +6,7 @@ import { stagePrompt } from "./boardFile";
 import { Awareness } from "y-protocols/awareness";
 import type { Access, RoomState } from "./api";
 import { CLAUDE_STATES, type ClaudeState } from "./queueRelease";
+import { pickColour, storeColour, storedColour } from "./colours";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -32,22 +33,6 @@ export type PromptSnapshot = {
   text: Y.Text;
   map: Y.Map<unknown>;
 };
-
-const colours = ["#315efb", "#b35642", "#39775d", "#8156a4", "#a16c17"];
-
-// Your colour on the board is a local choice; your name is the one the
-// server holds for you in this room.
-function localColour() {
-  try {
-    const stored = JSON.parse(localStorage.getItem("riff-identity") ?? "null") as { colour?: unknown } | null;
-    if (stored && typeof stored.colour === "string") return stored.colour;
-  } catch {
-    // Replace malformed local identity data below.
-  }
-  const colour = colours[Math.floor(Math.random() * colours.length)];
-  localStorage.setItem("riff-identity", JSON.stringify({ colour }));
-  return colour;
-}
 
 const NAME_KEY = "riff-name";
 
@@ -117,12 +102,35 @@ export function useRoom(access: Access) {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [promptVersion, setPromptVersion] = useState(0);
   const [roomVersion, setRoomVersion] = useState(0);
-  const [colour] = useState(localColour);
+  // Chosen once the shared document has synced, when the awareness of
+  // everyone already here has arrived (the server sends it on connect,
+  // before the sync), and kept for this room after (colours.ts).
+  const [colour, setColour] = useState(() => storedColour(roomId));
   const prompts = doc.getMap<Y.Map<unknown>>("prompts");
   const queue = control.getMap<QueuedPrompt>("queue");
   const roomState = control.getMap<unknown>("roomState");
   const roomInfo = control.getMap<unknown>("room");
   const members = control.getMap<RoomMember>("members");
+
+  useEffect(() => {
+    if (colour) return;
+    const choose = () => {
+      const taken = [...awareness.getStates()]
+        .filter(([clientId]) => clientId !== awareness.clientID)
+        .map(([, state]) => state.user?.colour)
+        .filter((value): value is string => typeof value === "string");
+      const chosen = pickColour(taken);
+      storeColour(roomId, chosen);
+      setColour(chosen);
+    };
+    if (provider.isSynced) choose();
+    else {
+      provider.on("synced", choose);
+      return () => {
+        provider.off("synced", choose);
+      };
+    }
+  }, [awareness, colour, provider, roomId]);
 
   useEffect(() => {
     const onStatus = ({ status: next }: { status: ConnectionStatus }) => setStatus(next);
@@ -132,12 +140,6 @@ export function useRoom(access: Access) {
     const onRefused = ({ reason }: { reason: string }) => setShutOut(reason);
     const onControlSynced = () => setControlSynced(true);
 
-    awareness.setLocalStateField("user", {
-      memberId: access.member.id,
-      name: access.member.name,
-      colour,
-      role: facilitator ? "facilitator" : "participant",
-    });
     socket.on("status", onStatus);
     provider.on("authenticationFailed", onRefused);
     controlProvider.on("synced", onControlSynced);
@@ -161,7 +163,18 @@ export function useRoom(access: Access) {
       doc.destroy();
       control.destroy();
     };
-  }, [access.member.id, access.member.name, awareness, colour, control, controlProvider, doc, facilitator, persistence, prompts, provider, socket]);
+  }, [awareness, control, controlProvider, doc, persistence, prompts, provider, socket]);
+
+  // Who this page is, to everyone else in the room. Its own effect: the
+  // colour arrives after the sync, and must not tear down the sockets.
+  useEffect(() => {
+    awareness.setLocalStateField("user", {
+      memberId: access.member.id,
+      name: access.member.name,
+      colour: colour ?? undefined,
+      role: facilitator ? "facilitator" : "participant",
+    });
+  }, [access.member.id, access.member.name, awareness, colour, facilitator]);
 
   const promptSnapshots = snapshotPrompts(prompts);
 

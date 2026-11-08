@@ -22,6 +22,7 @@ import {
   BoardFileError, MAX_FILE_BYTES, ROOM_LIMIT_BYTES, type BoardFile, type FilePrompt, type ParsedBoard,
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
 } from "./boardFile";
+import { markAutoBoot } from "./autoBoot";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
 import { type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
 import { ImportWorkspace, type PickedWorkspace, seedFromExport } from "./ImportWorkspace";
@@ -830,6 +831,8 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
               if (imported) await seedCopy(access.room.id, (doc) => applyBoardFile(doc, imported));
               // the real tokens, so none of them goes into the guest (ADR 0007)
               if (workspaceExport) await seedFromExport(access.room.id, workspaceExport, [config.token, await unwrapPushToken().catch(() => null) ?? ""]);
+              // after the seeds, so the boot finds the imported workspace
+              markAutoBoot(access.room.id);
               return access;
             });
           }}>
@@ -951,7 +954,7 @@ function BoardView({ store, selected, readOnly, notice, onSelection, onStageSele
   );
 }
 
-function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, hostHere, full, auto, claudeState, roomState, controlSynced, onSend, onDelete, onPreviewUrlChange, terminalRef, onPodReady }: {
+function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, hostHere, full, auto, claudeState, roomState, controlSynced, onSend, onDelete, onPreviewUrlChange, terminalRef, onPodReady, onBootStatus }: {
   roomId: string;
   terminalRef: RefObject<TerminalPaneHandle | null>;
   onPodReady: (ready: boolean) => void;
@@ -971,12 +974,13 @@ function RoomView({ roomId, token, queued, facilitator, config, hidden, ended, h
   onSend: (id: string, by: SentBy) => void;
   onDelete: (id: string) => void;
   onPreviewUrlChange: (url: string | null, generation: number) => void;
+  onBootStatus?: (status: string | null) => void;
 }) {
   const release = useQueueRelease({ facilitator, roomState, synced: controlSynced, terminalRef, queued, auto, full, onSend });
   return (
     <section className="crit-room" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
       {/* A participant's terminal stops asking once the room ends; a new one starts if the host revives it. Never remount the host's: it runs Claude. */}
-      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} onPodReady={onPodReady} />
+      <TerminalPane key={facilitator ? "host" : ended ? "ended" : "open"} ref={terminalRef} roomId={roomId} token={token} facilitator={facilitator} config={config} onPreviewUrlChange={onPreviewUrlChange} onClaudeEvent={facilitator ? release.dispatch : undefined} ended={ended} onPodReady={onPodReady} onBootStatus={onBootStatus} />
       <QueuePanel queued={queued} facilitator={facilitator} full={full} auto={auto} claudeState={facilitator ? release.state : claudeState} hostHere={facilitator || hostHere} ended={ended} canSendNow={canSend(release.state)} waiting={release.unacknowledged} onSend={(prompt) => release.send(prompt, "host")} onDelete={onDelete} onAuto={release.setAuto} />
     </section>
   );
@@ -1294,6 +1298,7 @@ function RoomClosed({ reason, roomId }: { reason: string; roomId?: string }) {
 function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfig | null }) {
   const roomId = access.room.id;
   const facilitator = access.member.host;
+  const [bootStatus, setBootStatus] = useState<string | null>(null);
   const [view, setView] = useState<View>(() => {
     const requested = new URLSearchParams(location.search).get("view");
     return requested === "room" || requested === "preview" ? requested : "board";
@@ -1393,10 +1398,14 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       </header>
 
       {room.full ? <FullBanner limitBytes={room.limitBytes} onExport={exportRoom} /> : <RoomBanner state={room.state} endsAt={room.endsAt} keep={room.keep} facilitator={facilitator} onExport={exportRoom} />}
+      {/* Claude booting while the host is on another tab (autoBoot.ts) */}
+      {facilitator && bootStatus && view !== "room" && (
+        <p className="room-banner booting" role="status">Starting Claude for the room: {bootStatus}. <button className="link" onClick={() => setView("room")}>Watch</button></p>
+      )}
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
         {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} sendBoard={facilitator ? sendBoard : undefined} />}
         {sendBoard.dialog}
-        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} terminalRef={terminalRef} onPodReady={setPodReady} />
+        <RoomView roomId={roomId} token={access.token} queued={room.queued} facilitator={facilitator} config={hostConfig} hidden={view !== "room"} ended={room.state === "ended"} hostHere={room.state === "live"} full={room.full} auto={room.autoRelease} claudeState={room.claudeState} roomState={room.roomState} controlSynced={room.controlSynced} onSend={room.sendQueued} onDelete={(id) => room.queue.delete(id)} onPreviewUrlChange={handlePreviewUrlChange} terminalRef={terminalRef} onPodReady={setPodReady} onBootStatus={setBootStatus} />
         {view === "preview" && <PreviewView roomId={roomId} previewKey={access.member.previewKey} previewOrigin={access.member.previewOrigin} live={room.previewLive} generation={room.previewGeneration} facilitator={facilitator} preview={preview} />}
         {view !== "preview" && <Staging prompts={room.promptSnapshots} canQueue={facilitator} readOnly={readOnly !== null} onAdd={(text) => addPrompt(room.doc, room.identity.name, text)} onQueue={room.queuePrompt} onDelete={(id) => room.prompts.delete(id)} />}
         {panel === "people" && <PeoplePanel access={access} room={room} onClose={() => setPanel(null)} onExport={exportRoom} />}

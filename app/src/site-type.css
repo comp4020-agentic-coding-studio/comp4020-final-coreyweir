@@ -1,0 +1,57 @@
+/* The start page, the host form, the join card and the after-End pages
+   one step up the same scale as the room (room-type.css; Corey, 8 Nov):
+   caption 8px -> 11px, small 9px -> 12px, body 10px -> 13px. Inputs go
+   to 15px, and 16px on a phone, where a smaller one makes iOS zoom in on
+   focus. Nothing else changes. Loaded last. */
+
+/* header and hero */
+.landing>header span{font-size:12px}
+.overline{font-size:11px}
+.landing-copy p{font-size:15px}
+.account,.account .link,.github-sign-in{font-size:13px}
+.account small{font-size:11px}
+@media(min-width:1101px){:is(.home,.join-link)>header .account small{max-width:460px}}
+.account .signing-out{font-size:13px}
+.signing-out button:not(.link){font-size:12px}
+
+/* the card and its forms */
+.entry-card>nav button{font-size:13px}
+.entry-card label,.entry-card fieldset.model-choice legend{font-size:12px}
+.entry-card label small{font-size:11px}
+.entry-card label.check small{font-size:12px}
+.entry-card input{font-size:15px}
+.primary{font-size:13px}
+.local-note{font-size:11px}
+.entry-card>p:not(.account),.entry-card>button.link{font-size:13px}
+.import-board input[type=file]{font-size:13px}
+.github-push,.github-push .link,.github-push-paste button{font-size:13px}
+.github-push-label{font-size:12px}
+.github-push-label small,.github-push>small{font-size:11px}
+
+/* invites on top of the card */
+.invites,.invites .link,.invites form input{font-size:13px}
+.invites button:not(.link){font-size:12px}
+
+/* your rooms */
+.your-rooms h2,.colleagues h2{font-size:11px}
+.home>.your-rooms{font-size:13px}
+.home>.your-rooms .room-link{font-size:14px}
+.home>.your-rooms .room-state,.home>.your-rooms .link{font-size:13px}
+.home>.your-rooms .room-detail small,.home>.your-rooms .workspace-note{font-size:12px}
+.home>.your-rooms button.danger{font-size:12px}
+.home>.your-rooms .actions>.link,.home>.your-rooms .row-more>summary,.home>.your-rooms .row-menu button{font-size:13px}
+
+/* a board's peek, colleagues, the after-End page */
+.board-peek>header strong{font-size:14px}
+.board-peek>header small{font-size:12px}
+.board-peek .actions button{font-size:13px}
+.colleagues,.colleagues .link{font-size:13px}
+.colleagues>p,.colleagues h3,.colleagues form button{font-size:12px}
+.overlay .colleagues form input{font-size:15px}
+.landing.closed .closed-actions .secondary{font-size:13px}
+
+/* the workspace export dialog, which the room's sheet missed */
+.ws-export{font-size:13px}
+.ws-export code{font-size:12px}
+
+@media(max-width:780px){.entry-card input,.overlay .colleagues form input{font-size:16px}}

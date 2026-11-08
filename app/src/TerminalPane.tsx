@@ -10,6 +10,7 @@ import { useTerminalChannel, type TerminalChannelEvent } from "./terminalChannel
 import { usePreviewHostChannel } from "./previewChannel";
 import { ACTUAL_FONT_SIZE, fitMirror, type MirrorMode } from "./mirrorFit";
 import { TERMINAL_THEME } from "./terminalTheme";
+import { takeAutoBoot } from "./autoBoot";
 import "./terminal-stream.css";
 
 export type TerminalPaneHandle = {
@@ -137,7 +138,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   onPodReady?: (ready: boolean) => void;
   /** The room has ended: nothing will appear, so don't say "waiting". */
   ended?: boolean;
-}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent, onPodReady, ended = false }, ref) {
+  /** Host: what booting is doing, or null when it isn't, for the other tabs. */
+  onBootStatus?: (status: string | null) => void;
+}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent, onPodReady, ended = false, onBootStatus }, ref) {
   const targetRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ClaudePodController | null>(null);
   const previewChangeRef = useRef(onPreviewUrlChange);
@@ -190,6 +193,21 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   useEffect(() => {
     if (facilitator) previewChangeRef.current(null, publishPreview(false));
   }, [facilitator, publishPreview]);
+
+  // A room this tab has just created boots Claude by itself (autoBoot.ts).
+  // The terminal is mounted, hidden, from the start, so this runs while the
+  // host is still on the Board.
+  useEffect(() => {
+    if (!facilitator || !config || controllerRef.current || !takeAutoBoot(roomId)) return;
+    void start("claude");
+    // start is this render's; the mark is taken once
+  }, [facilitator, config, roomId]);
+
+  const bootStatusRef = useRef(onBootStatus);
+  bootStatusRef.current = onBootStatus;
+  useEffect(() => {
+    if (facilitator) bootStatusRef.current?.(starting ? status : null);
+  }, [facilitator, starting, status]);
 
   // While hosting with GitHub, ask GitHub whether it still takes the token:
   // when the host comes back to the tab (at most every 5 minutes) and every

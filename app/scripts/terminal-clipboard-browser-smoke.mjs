@@ -50,6 +50,8 @@ try {
   await hostInputs[1].click({ clickCount: 3 });
   await hostInputs[1].type(`${baseUrl}/fake-anthropic`);
   await hostInputs[2].type("invalid-clipboard-smoke-token");
+  // Bash first: keep the new room from booting Claude by itself (autoBoot.ts).
+  await host.evaluateOnNewDocument(() => sessionStorage.removeItem("riff-auto-boot"));
   await host.click(".entry-card form .primary");
   await host.waitForFunction(() => location.search.startsWith("?id="), { timeout: 10_000 });
   await host.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 10_000 });

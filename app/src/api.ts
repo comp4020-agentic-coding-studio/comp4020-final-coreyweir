@@ -7,6 +7,8 @@
 // A room holds `limitBytes`; once a write would cross it the room is `full`
 // and read-only for good. `pruned`: the server deleted an ended board to
 // make space.
+import { forgetColour } from "./colours";
+
 export type RoomState = "live" | "away" | "ended";
 export type RoomInfo = {
   id: string;
@@ -48,6 +50,7 @@ function remember(roomId: string, secret: string | undefined) {
 
 export function forget(roomId: string) {
   localStorage.removeItem(secretKey(roomId));
+  forgetColour(roomId);
 }
 
 async function call<T>(path: string, { method = "GET", body, token }: { method?: string; body?: unknown; token?: string | null } = {}) {

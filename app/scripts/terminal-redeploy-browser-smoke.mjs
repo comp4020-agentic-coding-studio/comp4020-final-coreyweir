@@ -94,8 +94,8 @@ try {
   await host.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 10_000 });
   const room = await host.$eval(".room-name span", (element) => element.textContent.replace("Room ", ""));
   await openRoomTab(host);
-  await host.locator(".terminal-controls button").click();
-  await host.waitForFunction(() => /Yes, I accept/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""), { timeout: 90_000 });
+  // No Boot Claude to press: a new room boots Claude by itself (autoBoot.ts).
+  await host.waitForFunction(() => /bypass permissions on/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""), { timeout: 90_000 });
 
   const early = await join(room, "Early Participant");
   // The host's first snapshot, or its output from the first byte if that
