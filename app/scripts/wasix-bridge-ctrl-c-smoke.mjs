@@ -53,7 +53,7 @@ try {
   await page.waitForFunction(
     () => {
       const text = document.querySelector(".terminal-target .xterm-rows")?.textContent ?? "";
-      return /I have no name!@wasmer:\/work\/repo#/.test(text);
+      return /user@riff:\/work\/repo\$/.test(text);
     },
     { timeout: 30_000 },
   );

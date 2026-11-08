@@ -53,7 +53,7 @@ try {
       () => {
         const rows = [...document.querySelectorAll(".terminal-target .xterm-rows > div")];
         return document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready")
-          && rows.some((row) => row.textContent?.trim().endsWith("I have no name!@wasmer:/work/repo#"));
+          && rows.some((row) => row.textContent?.trim().endsWith("user@riff:/work/repo$"));
       },
       { timeout: 10_000 },
     );

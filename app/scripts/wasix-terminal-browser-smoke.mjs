@@ -73,10 +73,22 @@ try {
   await page.waitForFunction(
     () => {
       const text = document.querySelector(".terminal-target .xterm-rows")?.textContent ?? "";
-      return text.lastIndexOf("I have no name!@wasmer:/work/repo#") > text.lastIndexOf("[tty:");
+      return text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("[tty:");
     },
     { timeout: 30_000 },
   );
+  // Who the session is (sessionSystem.ts): it used to say "I have no
+  // name!@wasmer:/work/repo#", and whoami failed.
+  await page.keyboard.type("printf '[who:%s|%s|%s|%s]' \"$(whoami)\" \"$(id)\" ~ \"$(hostname)\"");
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.includes("[who:user|uid=0(user) gid=0(user) groups=0(user)|/home/user|riff]"), "whoami, id, ~ and hostname");
+  await page.keyboard.type("cd ~");
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.trimEnd().endsWith("user@riff:~$"), "the prompt at ~");
+  await page.keyboard.type("cd /work/repo");
+  await page.keyboard.press("Enter");
+  await waitForTerminal(page, (text) => text.trimEnd().endsWith("user@riff:/work/repo$"), "the prompt back in /work/repo");
+  assert.doesNotMatch(await page.$eval(".terminal-target .xterm-rows", (element) => element.textContent ?? ""), /I have no name/);
   await page.keyboard.type("printf 'newline-one\\nnewline-two\\nnewline-three\\n'");
   await page.keyboard.press("Enter");
   await page.waitForFunction(
@@ -91,7 +103,7 @@ try {
   await page.waitForFunction(
     () => {
       const text = document.querySelector(".terminal-target .xterm-rows")?.textContent ?? "";
-      return text.lastIndexOf("I have no name!@wasmer:/work/repo#")
+      return text.lastIndexOf("user@riff:/work/repo$")
         > text.lastIndexOf("touch /work/repo/ctrl-c-should-not-run");
     },
     { timeout: 30_000 },
@@ -120,7 +132,7 @@ try {
   await page.waitForFunction(
     () => {
       const text = document.querySelector(".terminal-target .xterm-rows")?.textContent ?? "";
-      return text.lastIndexOf("I have no name!@wasmer:/work/repo#") > text.lastIndexOf("wasix-origin");
+      return text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("wasix-origin");
     },
     { timeout: 30_000 },
   );
@@ -149,7 +161,7 @@ try {
   }
   // Python's REPL in the same terminal (pythonCommand.ts): it reads lines
   // from the tty, and Ctrl-C interrupts running code without ending Python.
-  await waitForTerminal(page, (text) => text.lastIndexOf("I have no name!@wasmer:/work/repo#") > text.lastIndexOf("1 2 3"), "prompt after the bridge check");
+  await waitForTerminal(page, (text) => text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("1 2 3"), "prompt after the bridge check");
   await page.keyboard.type("python3");
   await page.keyboard.press("Enter");
   // The first run in a fresh profile downloads the package (115 MB).
@@ -171,7 +183,7 @@ try {
   }, "Ctrl-C to interrupt the loop and return to the REPL");
   await page.keyboard.type("exit()");
   await page.keyboard.press("Enter");
-  await waitForTerminal(page, (text) => text.lastIndexOf("I have no name!@wasmer:/work/repo#") > text.lastIndexOf("exit()"), "bash after exit()");
+  await waitForTerminal(page, (text) => text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("exit()"), "bash after exit()");
   await page.keyboard.type("exit");
   await page.keyboard.press("Enter");
   await page.waitForFunction(
@@ -349,7 +361,7 @@ try {
     await page.waitForFunction(
       () => {
         const text = document.querySelector(".terminal-target .xterm-rows")?.textContent ?? "";
-        return text.lastIndexOf("I have no name!@wasmer:/work/repo#") > text.lastIndexOf("sleep 30");
+        return text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("sleep 30");
       },
       { timeout: 10_000 },
     );
@@ -395,7 +407,7 @@ try {
     await page.waitForFunction(
       () => {
         const text = document.querySelector(".terminal-target .xterm-rows")?.textContent ?? "";
-        return text.lastIndexOf("I have no name!@wasmer:/work/repo#") > text.lastIndexOf("while true; do fg=");
+        return text.lastIndexOf("user@riff:/work/repo$") > text.lastIndexOf("while true; do fg=");
       },
       { timeout: 10_000 },
     );

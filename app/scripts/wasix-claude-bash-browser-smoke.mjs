@@ -219,6 +219,8 @@ try {
             pythonScript: 'cd py && echo from-bash > in.txt && python3 script.py 0 && cat out.txt',
             pythonScriptExit: 'cd py && python3 script.py 5; echo "exit=$?"',
             pythonSubprocess: 'cd py && python3 sub.py',
+            // The session's user and host (sessionSystem.ts): libc reads /etc.
+            identity: 'whoami && id && hostname && echo ~',
           };
           for (const [name, command] of Object.entries(commands)) {
             const { commandString, cwdFilePath } = await provider.buildExecCommand(command, { id: name, useSandbox: false });
@@ -344,6 +346,7 @@ try {
   assert.match(snapshot.commands.nanoVersion.stdout, /GNU nano, version 9\.2\n/);
   assert.match(snapshot.commands.nodeVersion.stdout, /^v\d+\./);
   assert.match(snapshot.commands.npmVersion.stdout, /^\d+\./);
+  assert.equal(snapshot.commands.identity.stdout, "user\nuid=0(user) gid=0(user) groups=0(user)\nriff\n/home/user\n");
   assert.equal(snapshot.commands.pythonPrint.stdout, "42\n");
   assert.equal(snapshot.commands.pythonVersion.stdout, "Python 3.12.0\n");
   assert.equal(snapshot.commands.pythonStdin.stdout, "HI\n\n");

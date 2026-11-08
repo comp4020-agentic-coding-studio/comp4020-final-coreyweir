@@ -92,7 +92,7 @@ async function bootPage() {
   );
   await page.locator(".terminal-target textarea").click();
   await page.waitForFunction(
-    () => /I have no name!@wasmer:\/work\/repo#/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""),
+    () => /user@riff:\/work\/repo\$/.test(document.querySelector(".terminal-target .xterm-rows")?.textContent ?? ""),
     { timeout: 30_000 },
   );
   return { page, pageErrors };

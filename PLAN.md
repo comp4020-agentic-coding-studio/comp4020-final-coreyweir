@@ -668,6 +668,17 @@ auto-release at the latest.
   of 6 without; both failures were in its older steps (a bridged
   `git --version` that never answered, before any Python ran; a third
   "Start Bash" not ready in 120 s), so whether they're related is open.
+- ~~**The host's Bash says "I have no name!"**~~ Done 9 Nov. The prompt read
+  `I have no name!@wasmer:/work/repo#` and `whoami` failed: the guest is
+  uid 0 with an empty /etc. Now it reads `user@riff:/work/repo$`, and
+  `whoami`, `id`, `groups` and `hostname` answer `user` and `riff`. /etc
+  can't be shared like /home: the runtime creates /etc in every run's fresh
+  root and a mount over it fails (virtual-fs `RootFileSystemBuilder`; mounting
+  it stopped every command), so each bash writes passwd, group and hostname
+  as it starts, from `BASH_ENV` (`app/src/sessionSystem.ts`). Checked by
+  `test:wasix-terminal-browser` (prompt, `cd ~`, whoami/id/~/hostname) and
+  `test:wasix-claude-bash-browser` (the same through Claude's Bash tool).
+  An edit to /etc/passwd lasts one command.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own
