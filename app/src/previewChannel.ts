@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { ClaudePodController } from "./claudePod";
+import { setPreviewPod } from "./previewBridge";
 
 type PreviewRequest = {
   type: "request";
@@ -56,6 +57,7 @@ export function usePreviewHostChannel(
 
   useEffect(() => {
     if (!facilitator) return;
+    setPreviewPod(controllerRef);
     let active = true;
     let reconnectTimer = 0;
 
@@ -112,6 +114,7 @@ export function usePreviewHostChannel(
     connect();
     return () => {
       active = false;
+      setPreviewPod(null);
       clearTimeout(reconnectTimer);
       if (liveRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({ type: "preview-down", generation: generationRef.current }));

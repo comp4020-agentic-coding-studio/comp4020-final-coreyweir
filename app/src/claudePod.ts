@@ -1330,6 +1330,20 @@ export class ClaudePodController {
     };
   }
 
+  /** What a WebSocket from the host's own preview needs to reach the
+   * preview's server through Nodepod's socket bridge (previewBridge.ts):
+   * always the active preview's port, never another. */
+  previewSocketTarget(): { instanceId: string; token: string | null; port: number } | null {
+    if (!this.pod || !this.activePreview) return null;
+    const proxy = this.pod.proxy as unknown as {
+      _instances?: Map<string, { wsBridgeToken: string | null }>;
+      _startWsBridge?: () => void;
+    };
+    proxy._startWsBridge?.();
+    const instanceId = this.pod.instanceId;
+    return { instanceId, token: proxy._instances?.get(instanceId)?.wsBridgeToken ?? null, port: this.activePreview.port };
+  }
+
   /** The workspace as a zip (workspaceExport.ts). The real tokens are passed
    * only so the export can check none of them travelled. */
   async exportWorkspace(options: Omit<import("./workspaceExport").ExportOptions, "secrets"> = {}) {

@@ -18,6 +18,7 @@ import { checkGitHubToken } from "./githubCheck";
 import { useLookOnly } from "./lookOnly";
 import type { HostConfig } from "./claudePod";
 import { previewFrameUrl } from "./previewChannel";
+import { previewBridgeEnabled, useHostPreviewSource } from "./previewBridge";
 import {
   BoardFileError, MAX_FILE_BYTES, ROOM_LIMIT_BYTES, type BoardFile, type FilePrompt, type ParsedBoard,
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
@@ -1188,11 +1189,16 @@ function PreviewView({ roomId, previewKey, previewOrigin, live: published, roomS
   const live = published && !gone;
   // Both roles load the room's preview origin (docs/adr/0011), so the frame
   // may keep its own storage (allow-same-origin) without reaching Riff's.
-  const source = live && generation > 0 ? previewFrameUrl(previewOrigin, roomId, previewKey, generation) : null;
+  const relayUrl = live && generation > 0 ? previewFrameUrl(previewOrigin, roomId, previewKey, generation) : null;
+  // The host's own frame comes from their pod when the bridge comes up
+  // (docs/adr/0011, 2b), else the relay as everyone else's does.
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const frameKey = `${generation}:${preview?.revision ?? 0}:${reload}`;
+  const { source } = useHostPreviewSource({ enabled: facilitator && previewBridgeEnabled(), previewOrigin, relayUrl, frameRef, key: frameKey });
   return (
     <section className="preview-pane">
-      <header className="preview-heading"><div><h2>Preview</h2><span className={live ? "live" : "offline"}><i></i>{live ? "Live" : "Not live"}</span></div>{source && <nav className="preview-actions"><button onClick={() => setReload((value) => value + 1)}>Refresh</button>{facilitator && <a href={source} target="_blank" rel="noreferrer">Open in new tab</a>}</nav>}</header>
-      {source ? <iframe className="preview-frame" key={`${generation}:${preview?.revision ?? 0}:${reload}`} src={source} title="Workspace preview" sandbox="allow-forms allow-modals allow-scripts allow-same-origin" /> : <div className="preview-empty">
+      <header className="preview-heading"><div><h2>Preview</h2><span className={live ? "live" : "offline"}><i></i>{live ? "Live" : "Not live"}</span></div>{source && <nav className="preview-actions"><button onClick={() => setReload((value) => value + 1)}>Refresh</button>{facilitator && relayUrl && <a href={relayUrl} target="_blank" rel="noreferrer">Open in new tab</a>}</nav>}</header>
+      {source ? <iframe ref={frameRef} className="preview-frame" key={`${frameKey}:${source}`} src={source} title="Workspace preview" sandbox="allow-forms allow-modals allow-scripts allow-same-origin" /> : <div className="preview-empty">
         {gone ? <><span className="preview-icon"></span><h3>{roomState === "ended" ? "The room has ended" : "The host is away"}</h3><p>{roomState === "ended" ? "The preview stopped with it." : "The preview comes back when they do."}</p></> : live ? <><span className="preview-icon live-icon"></span><h3>Preview is connecting</h3><p>{facilitator ? "Waiting for the workspace's server." : "Waiting for the host's browser."}</p></> : <><span className="preview-icon"></span><h3>No preview yet</h3><p>{facilitator ? "Start a server in the workspace (ask Claude, or use Bash) and it shows here." : "When the host's workspace runs a server, it shows here."}</p></>}
       </div>}
     </section>
