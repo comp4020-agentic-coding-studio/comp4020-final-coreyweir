@@ -7,7 +7,7 @@
 // never pushed, an uncommitted change, a few bytes no editor keeps, a
 // transcript, a node_modules) and exports it with the workspace's own Export
 // dialog. Once OPFS holds that work (read from its manifest, not a sleep), a
-// second tab opens the landing page: the room's row has "Export board" and
+// second tab opens the landing page: the room's row has "Export board (JSON)" and
 // "Export files", and Export files refuses while the room's tab holds the
 // workspace (it never takes it over). The room's tab goes back to the
 // landing page; Export files then downloads a zip with the same file list
@@ -167,7 +167,7 @@ try {
       return landing.evaluateHandle((code) => [...document.querySelectorAll(".your-rooms li")].find((li) => li.textContent.includes(code)), code);
     };
     const buttons = await (await row()).evaluate((li) => [...li.querySelectorAll(".actions button")].map((b) => b.textContent));
-    assert.ok(buttons.includes("Export board") && buttons.includes("Export files"), say(`the row has both exports: ${buttons}`));
+    assert.ok(buttons.includes("Export board (JSON)") && buttons.includes("Export board (PNG)") && buttons.includes("Export files"), say(`the row has both exports: ${buttons}`));
     const clickFiles = async () => (await row()).evaluate((li) => [...li.querySelectorAll(".actions button")].find((b) => b.textContent === "Export files").click());
 
     // while the room's tab holds the workspace: refused, and that tab keeps saving

@@ -35,7 +35,9 @@ async function page(context) {
     HTMLAnchorElement.prototype.click = function () {
       if (this.download && this.href.startsWith("blob:")) {
         const name = this.download;
-        window.__downloads.push(fetch(this.href).then((response) => response.text()).then((text) => ({ name, text })));
+        window.__downloads.push(fetch(this.href).then((response) => response.blob()).then(async (blob) => ({
+          name, bytes: await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result.split(",")[1]); reader.readAsDataURL(blob); }),
+        })));
         return;
       }
       return click.call(this);
@@ -62,8 +64,34 @@ const clickText = (target, selector, pattern) => target.evaluate((sel, source) =
 
 async function lastDownload(tab, count) {
   await tab.waitForFunction((n) => window.__downloads.length >= n, { timeout: 10_000, polling: 100 }, count);
-  const { name, text } = await tab.evaluate((n) => window.__downloads[n - 1], count);
-  return { name, file: JSON.parse(text) };
+  const { name, bytes } = await tab.evaluate((n) => window.__downloads[n - 1], count);
+  const buffer = Buffer.from(bytes, "base64");
+  return name.endsWith(".png") ? { name, buffer } : { name, file: JSON.parse(buffer.toString("utf8")) };
+}
+
+// "Export board (PNG)": a PNG named for the room, as big as a picture of
+// a 64 px image at twice board scale with its margin, and not just paper:
+// the middle of it is the pasted image's noise (many colours), which a
+// blank or background-only picture would not have.
+async function checkPicture(tab, count, code, where) {
+  const { name, buffer } = await lastDownload(tab, count);
+  assert.equal(name, `riff-${code}-board.png`, `${where}: named for the room`);
+  assert.deepEqual([...buffer.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], `${where}: a PNG`);
+  const width = buffer.readUInt32BE(16), height = buffer.readUInt32BE(20);
+  assert.ok(width >= 128 && height >= 128 && buffer.length > 10_000, `${where}: ${width}x${height}, ${buffer.length} bytes`);
+  const colours = await tab.evaluate(async (base64) => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob());
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext("2d");
+    context.drawImage(bitmap, 0, 0);
+    const middle = context.getImageData(bitmap.width / 2 - 16, bitmap.height / 2 - 16, 32, 32).data;
+    const seen = new Set();
+    for (let index = 0; index < middle.length; index += 4) seen.add(middle.slice(index, index + 3).join());
+    return seen.size;
+  }, buffer.toString("base64"));
+  assert.ok(colours > 100, `${where}: the picture shows the board's image (${colours} colours in its middle)`);
+  console.log(`${where}: ${name} ${width}x${height}, ${buffer.length} bytes`);
+  return buffer;
 }
 
 async function hostForm(tab, name) {
@@ -176,6 +204,11 @@ try {
   const hana = await page(hostContext);
   await hostForm(hana, "Hana");
   const code = await createRoom(hana);
+  // Nothing on the board yet: no picture, and it says why.
+  await openPeople(hana);
+  await hana.click(".people-panel .export-png");
+  await waitText(hana, ".people-panel .form-error", /The board is empty, so there's no picture to make\./);
+  await hana.click(".people-panel header button");
   const bo = await join(guestContext, code, "Bo");
   await pasteImage(bo, 64);
   await stage(bo, "staged idea");
@@ -207,7 +240,7 @@ try {
   // Anyone exports, from the People panel.
   await openPeople(bo);
   await shot(bo, "people-export");
-  await bo.click(".people-panel .export-board button");
+  await bo.click(".people-panel .export-board .export-json");
   const exported = await lastDownload(bo, 1);
   assert.match(exported.name, new RegExp(`^riff-${code}-\\d{4}-\\d\\d-\\d\\d\\.json$`));
   assert.equal(exported.file.format, "riff-board");
@@ -218,6 +251,8 @@ try {
   assert.match(image.src, /^data:image\/png;base64,/);
   assert.equal(shapesOf(exported.file).filter((shape) => shape.type === "image").length, 1);
   console.log(`exported ${exported.name}: ${shapesOf(exported.file).length} shape, 1 image, 1 staged and 1 queued prompt`);
+  await bo.click(".people-panel .export-board .export-png");
+  const roomPicture = await checkPicture(bo, 2, code, "the room's People panel");
 
   // The guest's start page lists the board, and Open goes to the live room.
   await bo.goto(baseUrl, { waitUntil: "networkidle0" });
@@ -227,8 +262,13 @@ try {
   const shown = () => bo.$$eval(".your-rooms li .actions button, .your-rooms li summary", (elements) => elements.filter((element) => element.checkVisibility()).map((element) => element.textContent));
   assert.deepEqual(await shown(), ["Enter", "More"]);
   await bo.click(".your-rooms li summary");
-  assert.deepEqual(await shown(), ["Enter", "More", "Open", "Export board", "Leave room", "Delete"]);
+  assert.deepEqual(await shown(), ["Enter", "More", "Open", "Export board (JSON)", "Export board (PNG)", "Leave room", "Delete"]);
   await shot(bo, "row-more");
+  // A row has no board on the page: the picture comes from this browser's copy.
+  await clickText(bo, ".your-rooms li .actions button", /^Export board \(PNG\)$/);
+  const rowPicture = await checkPicture(bo, 1, code, "a row, from the copy");
+  assert.ok(rowPicture.equals(roomPicture), "the same picture as the room's: one renderer, the same board");
+  await bo.click(".your-rooms li summary");
   await bo.keyboard.press("Escape");
   assert.deepEqual(await shown(), ["Enter", "More"], "Escape closes the menu");
   await Promise.all([bo.waitForNavigation(), clickText(bo, ".your-rooms li .actions button", /^Enter$/)]);
@@ -253,6 +293,8 @@ try {
     assert.ok(await bo.$(".entry-card > nav"), "the forms stay beside the board");
     assert.equal(await bo.$(".board-peek .enter"), null, "no Enter for an ended room");
     await shot(bo, "board-peek");
+    await bo.click(".board-peek .export-png");
+    await checkPicture(bo, 1, code, "the board peek");
     await looksAround(bo, ".board-peek");
     await Promise.all([bo.waitForNavigation(), bo.click(".board-peek .full-page")]);
   } else {
@@ -274,6 +316,8 @@ try {
   const fromCopy = await lastDownload(bo, 1);
   assert.equal(assetsOf(fromCopy.file)[0].src, image.src, "the copy's image is the room's, byte for byte");
   assert.deepEqual(fromCopy.file.queue, []);
+  await bo.click(".copy-bar .copy-export-png");
+  await checkPicture(bo, 2, code, "the copy's page");
   console.log("room ended: the copy opens read-only with no server and exports the same board");
 
   // Deleting the copy takes this browser's place in the room with it.

@@ -22,6 +22,7 @@ import {
   BoardFileError, MAX_FILE_BYTES, ROOM_LIMIT_BYTES, type BoardFile, type FilePrompt, type ParsedBoard,
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
 } from "./boardFile";
+import { EMPTY_PICTURE, EmptyBoard, boardHasShapes, boardPicture, boardPictureName } from "./boardPicture";
 import { markAutoBoot } from "./autoBoot";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
 import { type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
@@ -99,13 +100,22 @@ function countdown(until: number, now: number) {
 
 // Export (docs/adr/0003, second amendment): the file is the whole board,
 // its images as they are, and the prompts.
-function downloadBoard(file: BoardFile) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(file)], { type: "application/json" }));
+function download(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = boardFileName(file.room.code, new Date(file.exportedAt));
+  link.download = name;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+function downloadBoard(file: BoardFile) {
+  download(new Blob([JSON.stringify(file)], { type: "application/json" }), boardFileName(file.room.code, new Date(file.exportedAt)));
+}
+
+// The board as a picture (boardPicture.ts), from the room's document.
+async function downloadPicture(code: string | null, doc: Y.Doc) {
+  download(await boardPicture(doc), boardPictureName(code ?? "board"));
 }
 
 // Only hosts have files: what the landing list says they are.
@@ -491,10 +501,11 @@ function copyDetail(copy: LocalCopy, listed: boolean) {
   return [role, `copy on this browser${copy.lastOpened ? `, ${shortDate(copy.lastOpened)}` : ""}`].filter(Boolean).join(" · ");
 }
 
-async function exportCopy(copy: LocalCopy) {
+async function exportCopy(copy: LocalCopy, as: "json" | "png" = "json") {
   const { doc, destroy } = await loadCopy(copy);
   try {
-    downloadBoard(exportBoard({ code: copy.code ?? "board", doc }));
+    if (as === "png") await downloadPicture(copy.code, doc);
+    else downloadBoard(exportBoard({ code: copy.code ?? "board", doc }));
   } finally {
     destroy();
   }
@@ -583,7 +594,7 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
     try {
       await action();
     } catch (failure) {
-      setError(failure instanceof ApiError ? problem(failure) : "Couldn't do that in this browser's storage. Try again.");
+      setError(failure instanceof ApiError ? problem(failure) : failure instanceof EmptyBoard ? failure.message : "Couldn't do that in this browser's storage. Try again.");
     }
     setAsking(null);
     setAlsoServer(false);
@@ -670,7 +681,8 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 {ended && <button className="link" disabled={asking === `reopening:${ended.id}`} onClick={() => ended.boardGone && !copy ? setAsking(`reopen:${ended.id}`) : void reopen(ended)}>{asking === `reopening:${ended.id}` ? "Reopening..." : "Reopen"}</button>}
                 {room && <button className="link" onClick={() => goToRoom(room.id)}>Enter</button>}
                 {copy && <button className="link" onClick={() => onOpen(copy)}>Open</button>}
-                {copy && <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>}
+                {copy && <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board (JSON)</button>}
+                {copy && <button className="link" onClick={() => void act(() => exportCopy(copy, "png"))}>Export board (PNG)</button>}
                 {workspace && <ExportFiles workspace={workspace} code={code ?? null} secrets={hostSecrets} />}
                 {workspace && <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>}
                 {room?.role === "participant" && <button className="link" onClick={() => setAsking(`leave:${room.id}`)}>Leave room</button>}
@@ -730,6 +742,21 @@ function PeekBoard({ doc }: { doc: Y.Doc }) {
   );
 }
 
+// "Export board (PNG)" for a copy's board, which doesn't change while it's
+// open: off, saying why, when there's nothing on it.
+function PictureButton({ className, code, doc }: { className: string; code: string | null; doc: Y.Doc | null }) {
+  const [state, setState] = useState<"idle" | "busy" | "failed">("idle");
+  const empty = doc !== null && !boardHasShapes(doc);
+  return (
+    <button className={className} disabled={!doc || empty || state === "busy"} title={empty ? EMPTY_PICTURE : undefined}
+      onClick={() => {
+        if (!doc) return;
+        setState("busy");
+        downloadPicture(code, doc).then(() => setState("idle"), () => setState("failed"));
+      }}>{state === "failed" ? "Couldn't make the PNG: try again" : "Export board (PNG)"}</button>
+  );
+}
+
 // A wide screen's look at a board, in place of the hero, with the forms
 // still beside it. From this browser's copy, so it's as of the last time
 // this browser had the room open.
@@ -760,7 +787,8 @@ function BoardPeek({ copy, room, onClose }: { copy: LocalCopy; room: ListedRoom 
         <span className="actions">
           {room && room.state !== "ended" && <button className="enter" onClick={() => goToRoom(room.id)}>Enter room</button>}
           <button className="full-page" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Full page</button>
-          <button disabled={!(opened instanceof Y.Doc)} onClick={() => opened instanceof Y.Doc && downloadBoard(exportBoard({ code: copy.code ?? "board", doc: opened }))}>Export</button>
+          <button className="export-json" disabled={!(opened instanceof Y.Doc)} onClick={() => opened instanceof Y.Doc && downloadBoard(exportBoard({ code: copy.code ?? "board", doc: opened }))}>Export board (JSON)</button>
+          <PictureButton className="export-png" code={copy.code} doc={opened instanceof Y.Doc ? opened : null} />
           <button className="close" aria-label="Close the board" onClick={onClose}>×</button>
         </span>
       </header>
@@ -1346,7 +1374,7 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
     try {
       await action();
     } catch (failure) {
-      setError(problem(failure));
+      setError(failure instanceof EmptyBoard ? failure.message : problem(failure));
     }
   }
 
@@ -1381,7 +1409,11 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
         {host && <button onClick={() => changeKeep(!room.keep)}>{room.keep ? "Stop keeping it" : "Keep it"}</button>}
       </div>
       {room.limitBytes && <p className="board-size">{room.full ? "Full: it holds" : "It holds"} {megabytes(bytes)} of the {megabytes(room.limitBytes)} a room can.</p>}
-      <p className="export-board"><button onClick={onExport}>Export the board</button><small>A file with the board, its images and the prompts. Anyone can start a new room from it.</small></p>
+      <p className="export-board">
+        <button className="export-json" onClick={onExport}>Export board (JSON)</button>
+        <button className="export-png" onClick={() => void act(() => downloadPicture(room.code, room.doc))}>Export board (PNG)</button>
+        <small>The JSON file has the board, its images and the prompts: anyone can start a new room from it. The PNG is a picture of the board.</small>
+      </p>
       {error && <p className="form-error" role="alert">{error}</p>}
       {host ? <EndRoom access={access} code={room.code} keep={room.keep} /> : <LeaveRoom roomId={access.room.id} />}
     </aside>
@@ -1793,7 +1825,8 @@ function CopyBoard({ copy, doc }: { copy: LocalCopy; doc: Y.Doc }) {
         </div>
         <span className="copy-actions">
           {prompts.length > 0 && <button className={`prompts-toggle${showPrompts ? " active" : ""}`} aria-pressed={showPrompts} onClick={() => setShowPrompts((open) => !open)}>Prompts <span>{prompts.length}</span></button>}
-          <button className="copy-export" onClick={() => downloadBoard(exportBoard({ code: copy.code ?? "board", doc }))}>Export</button>
+          <button className="copy-export" onClick={() => downloadBoard(exportBoard({ code: copy.code ?? "board", doc }))}>Export board (JSON)</button>
+          <PictureButton className="copy-export-png" code={copy.code} doc={doc} />
         </span>
       </div>
       <main className={`copy-board${showPrompts ? " with-prompts" : ""}`} aria-label={`Board of ${name}`}>
