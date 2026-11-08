@@ -73,7 +73,7 @@ try {
   await inputs[0].type("Ada");
   await inputs[2].type("sk-smoke-not-used");
   await Promise.all([page.waitForNavigation(), page.locator("form button.primary").click()]);
-  await page.waitForFunction(() => document.body.textContent?.includes("GitHub for pushing has expired"));
+  await page.waitForFunction(() => document.body.textContent?.includes("GitHub for pushing ended with your sign-in"));
   assert.deepEqual(calls.shift(), ["unwrap", "from-fragment"]);
   assert.equal(await stored(page), null);
   const roomUrl = new URL(page.url());

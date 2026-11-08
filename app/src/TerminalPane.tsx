@@ -109,6 +109,16 @@ function ParticipantTerminal({ subscribe, mode }: { subscribe: (listener: (event
   return <div className={`terminal-target readonly-terminal mirror-${mode}`} data-mode={mode} data-sequence="0" data-data-events="0" data-checkpoint-renders="0" ref={targetRef} />;
 }
 
+// What a refusal (401) means depends on the token. An OAuth app's token
+// never expires (Riff's app doesn't opt in to expiring tokens), so a refused
+// one was revoked; a pasted personal token can also reach its expiry date.
+// docs/adr/0005, "Why a push token stops working".
+export function githubRefusalText(token: string | undefined) {
+  return token?.startsWith("gho_")
+    ? "GitHub has revoked the token Riff connected for you, so git can't reach GitHub."
+    : "GitHub no longer accepts the token you pasted (it expired or was revoked), so git can't reach GitHub.";
+}
+
 export const TerminalPane = forwardRef<TerminalPaneHandle, {
   roomId: string;
   token: string | null;
@@ -291,7 +301,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
         <span>{facilitator ? "Terminal output is shared with everyone in this room. Only you can type or approve actions." : "Read-only mirror of the host's terminal. Only the host types or approves actions."}</span>
         {githubRefused && (
           <strong>
-            GitHub refused your token (expired or revoked), so git can't reach GitHub.{" "}
+            {githubRefusalText(config?.githubToken)}{" "}
             <a href="/?github=reconnect" target="_blank" rel="noopener">Connect GitHub again</a> in a new tab: Claude keeps running here and git picks the new token up.
           </strong>
         )}

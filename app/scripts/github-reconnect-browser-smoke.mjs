@@ -85,7 +85,7 @@ try {
   tab.on("pageerror", (error) => pageErrors.push(String(error)));
   await tab.goto(baseUrl, { waitUntil: "networkidle0" });
   // GitHub was connected once; the token has since been revoked.
-  await tab.evaluate((sealed) => localStorage.setItem("riff-github-push", sealed), seal(`ghp_riffSmokeRevoked${randomBytes(10).toString("hex")}`, session.tokenHash));
+  await tab.evaluate((sealed) => localStorage.setItem("riff-github-push", sealed), seal(`gho_riffSmokeRevoked${randomBytes(10).toString("hex")}`, session.tokenHash));
   await tab.reload({ waitUntil: "networkidle0" });
 
   // ---- host a room, Bash in it
@@ -112,7 +112,7 @@ try {
   const placeholderBefore = await run(tab, "printenv GITHUB_TOKEN");
   assert.match(placeholderBefore, /^riff-placeholder-github-[0-9a-f]{32}$/, "the guest holds a placeholder");
   assert.match(await run(tab, status), /GH-STATUS-401/, "GitHub refuses the revoked token");
-  await tab.waitForFunction(() => /GitHub refused your token/.test(document.querySelector(".terminal-note")?.textContent ?? ""), { timeout: 10_000, polling: 100 });
+  await tab.waitForFunction(() => /GitHub has revoked the token Riff connected for you/.test(document.querySelector(".terminal-note")?.textContent ?? ""), { timeout: 10_000, polling: 100 });
   const href = await tab.$eval(".terminal-note a", (a) => ({ href: a.getAttribute("href"), target: a.target }));
   assert.deepEqual(href, { href: "/?github=reconnect", target: "_blank" }, "the banner opens reconnecting in a new tab");
   console.log("refused:", await noteText(tab));
@@ -132,7 +132,7 @@ try {
   // ---- the room's tab swapped it in: same pod, same placeholder, now accepted
   await tab.bringToFront();
   await tab.waitForFunction(() => /GitHub connected again: git uses the new token/.test(document.querySelector(".terminal-note")?.textContent ?? ""), { timeout: 15_000, polling: 100 });
-  assert.doesNotMatch(await noteText(tab), /GitHub refused your token/, "the refusal banner is gone");
+  assert.doesNotMatch(await noteText(tab), /revoked the token/, "the refusal banner is gone");
   console.log("reconnected:", await noteText(tab));
   assert.equal(await run(tab, "printenv GITHUB_TOKEN"), placeholderBefore, "the guest kept its placeholder: nothing restarted");
   assert.match(await run(tab, status), /GH-STATUS-200/, "GitHub accepts the request now");

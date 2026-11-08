@@ -178,7 +178,9 @@ export function createAuth({ store, audit, origin, clientId, clientSecret, sessi
     const token = randomToken();
     const tokenHash = hashToken(token);
     s.insertSession.run(tokenHash, user.id, now, now, now + SESSION_DAYS * DAY_MS);
-    audit.record({ userId: user.id, login: user.login }, "sign-in", { purpose: flow.purpose });
+    // The scope GitHub granted, which it decides: a flow asking for none
+    // gets every scope this user already granted the app (docs/adr/0005).
+    audit.record({ userId: user.id, login: user.login }, "sign-in", { purpose: flow.purpose, scope: typeof grant.scope === "string" ? grant.scope : "" });
 
     // The identity token is dropped here. A push token goes back sealed, in
     // the fragment, which never reaches a server or a log.

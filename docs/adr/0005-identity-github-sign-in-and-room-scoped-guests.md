@@ -108,6 +108,39 @@ app is pending; pulling from org repos already works.
   or a reload in another browser, the host clicks "Connect GitHub" again.
   GitHub skips the consent screen for an app it has already approved, so
   it's one redirect.
+- **Why a push token stops working** (8 Nov, from GitHub's docs: "Token
+  expiration and revocation" and "Authorizing OAuth apps"). Riff's are
+  OAuth app tokens, and the app doesn't opt in to expiring ones (no
+  `offline_access`, no refresh token in the exchange), so **they don't
+  expire**. GitHub stops accepting one (401) only when it is revoked:
+  - by the user, revoking Riff under Settings → Applications (all of
+    Riff's tokens for them go);
+  - by GitHub after **a year unused**;
+  - by GitHub when it is **pushed to a public repository or gist**
+    (secret scanning), or reported through the credential-revocation API;
+  - by GitHub when the app holds **more than ten tokens for the same user
+    and scope set**: minting an eleventh revokes the least recently used
+    (or the oldest never used). Every Riff sign-in mints a token, identity
+    ones included, and nothing revokes the identity ones; GitHub gives a
+    flow that asks for no scope every scope the user already granted. So a
+    host who connected pushing once may have each later sign-in, on any
+    device, mint another `repo` token, and ten sign-ins can retire the
+    push token another browser still holds. This is the likeliest cause at
+    the week-12 crit, and a **hypothesis**: since 8 Nov the sign-in log
+    records the scope GitHub granted (`sign-in purpose=… scope=…`), which
+    will show whether identity tokens really come back with `repo`.
+  - by the app's owner (us) through the OAuth applications API.
+  A pasted personal token can also **expire**, on the date set when it
+  was made. Separately from GitHub, **an org that restricts OAuth apps**
+  (the course org) refuses Riff's token on that org's repositories only
+  (403, not 401); the token still works elsewhere.
+  Riff's own causes are not GitHub refusing anything: the sealed copy
+  opens only for the session it was connected in, so signing out, 30 days
+  without using Riff, a new sign-in in that browser (each issues a new
+  session) or a changed `SESSION_SECRET` lose it. Then unwrap fails before
+  the pod boots, and the room says GitHub for pushing ended with the
+  sign-in. The refusal banner (week 12) says "revoked" for an OAuth token
+  and "expired or was revoked" only for a pasted one.
 - **Code running on our own origin can still get the push token** by
   calling unwrap with the host's cookie. Storing plaintext would have handed
   it the token directly. The host's preview frame is such code: Claude
