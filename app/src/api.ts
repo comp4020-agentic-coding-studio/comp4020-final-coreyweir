@@ -172,6 +172,27 @@ export function endRoom(access: Access) {
   return call<{ state: "ended" }>(`/api/rooms/${access.room.id}/end`, { method: "POST", body: {}, token: access.token });
 }
 
+// Host only: bring an ended room back (docs/adr/0003, "Reopening").
+// Anyone else is refused and the room stays ended.
+export function reopenRoom(roomId: string) {
+  return call<{ room: RoomInfo }>(`/api/rooms/${encodeURIComponent(roomId)}/reopen`, { method: "POST", body: {}, token: storedSecret(roomId) });
+}
+
+// A member (never the host) drops their own place: like being removed,
+// but the code or an invite brings them back (docs/adr/0008, "Leaving").
+// A guest's secret is worth nothing afterwards, so it's forgotten.
+export async function leaveRoom(roomId: string) {
+  await call<void>(`/api/rooms/${encodeURIComponent(roomId)}/leave`, { method: "POST", body: {}, token: storedSecret(roomId) });
+  forget(roomId);
+}
+
+// Host only: the room off the server, live or ended, for good; members
+// keep only their own browsers' copies (docs/adr/0003).
+export async function deleteRoomFromServer(roomId: string) {
+  await call<void>(`/api/rooms/${encodeURIComponent(roomId)}`, { method: "DELETE", token: storedSecret(roomId) });
+  forget(roomId);
+}
+
 // Your rooms, invites and colleagues (docs/adr/0008).
 
 export type PendingInvite = { githubId: number; login: string };
@@ -187,6 +208,19 @@ export type ListedRoom = {
   locked: boolean;
   // Only in the host's own entry.
   invites?: PendingInvite[];
+} | EndedRoom;
+// A room you hosted that has ended, which only you can reopen
+// (docs/adr/0003, "Reopening"). Participants' lists leave these out.
+export type EndedRoom = {
+  id: string;
+  code: string;
+  role: "host";
+  state: "ended";
+  endedAt: number;
+  keep: boolean;
+  // the server no longer has the board: it wasn't kept, or was pruned
+  boardGone: boolean;
+  locked: boolean;
 };
 export type Invitation = { roomId: string; code: string; invitedBy: string; at: number };
 export type RoomList = { rooms: ListedRoom[]; invites: Invitation[] };

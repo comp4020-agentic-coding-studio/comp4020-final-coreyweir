@@ -117,10 +117,17 @@ export function createRiff({
       publishRoom(roomId);
       watch?.changed();
     },
-    onRemoved: (roomId, memberId) => {
-      collaboration.disconnectMember(memberId);
+    onRemoved: (roomId, memberId, reason) => {
+      collaboration.disconnectMember(memberId, reason);
       terminalRelay.disconnectMember(roomId, memberId);
       previewRelay.disconnectMember(roomId, memberId);
+    },
+    // Everyone, the host included, told in-band, then let go; the board's
+    // stored rows go whether or not it was kept.
+    onDeleted: (roomId, memberIds) => {
+      collaboration.forgetRoom(roomId, "room-deleted", { everyone: true });
+      terminalRelay.endRoom(roomId, { reason: "room-deleted", everyone: true });
+      for (const memberId of memberIds) previewRelay.disconnectMember(roomId, memberId);
     },
   });
 
@@ -247,6 +254,7 @@ export function createRiff({
   function publishRoom(roomId) {
     const { room, members } = rooms.summary(roomId);
     if (room.state === "ended" && (!room.keep || room.pruned)) return;
+    if (store.statements.roomById.get(roomId)?.deleted_at != null) return;
     collaboration
       .change(`room/${roomId}/control`, (document) => {
         const info = document.getMap("room");

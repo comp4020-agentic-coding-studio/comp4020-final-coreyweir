@@ -57,6 +57,10 @@
 .home>.your-rooms .workspace-note{margin:10px 0 0;color:#777;font-size:9px;line-height:1.45}
 .home>.your-rooms .actions{grid-area:actions;display:flex;align-items:center;gap:12px}
 .home>.your-rooms .actions.asking{grid-column:1/-1;grid-row:3;justify-content:flex-end;flex-wrap:wrap;padding:6px 0 2px;color:#444}
+/* the host's Delete: the question, "also from the server", and what that does, read top to bottom */
+.home>.your-rooms .asking .delete-question{flex:1 1 100%;display:grid;gap:6px;text-align:left}
+.home>.your-rooms .asking .also-server{display:flex;align-items:center;gap:6px;font-weight:600}
+.home>.your-rooms .asking .server-delete-note{color:#8b3e32}
 .home>.your-rooms .link{font-size:10px}
 .home>.your-rooms .delete-all{margin:10px 0 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;color:#444}
 .home>.your-rooms button.danger{padding:5px 9px;border:1px solid #b75243;border-radius:3px;background:#b75243;color:white;font-size:9px}

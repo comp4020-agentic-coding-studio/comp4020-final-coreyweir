@@ -373,7 +373,7 @@ export function createCollaboration({
   // refused, then close it; if their provider reconnects, `authorize`
   // refuses it again. The message matters: fly's proxy can hold the
   // browser's side of a closed socket open for seconds.
-  function disconnectMember(memberId) {
+  function disconnectMember(memberId, reason = "removed") {
     const ids = socketsByMember.get(memberId);
     if (!ids) return 0;
     // The bookkeeping is left to each socket's close handler, which also
@@ -383,9 +383,9 @@ export function createCollaboration({
       const websocket = socketsById.get(id);
       if (!websocket) continue;
       for (const documentName of documentsBySocket.get(id) ?? []) {
-        websocket.send(permissionDenied(documentName, "removed"));
+        websocket.send(permissionDenied(documentName, reason));
       }
-      hangUp(websocket, 4403, "removed");
+      hangUp(websocket, 4403, reason);
       closed += 1;
     }
     return closed;
@@ -429,12 +429,13 @@ export function createCollaboration({
   // and let go, and its stored rows are deleted. The host's sockets stay,
   // read-only: a host that reconnects revives the room, and their page is
   // leaving anyway.
-  function forgetRoom(roomId, reason = "room-ended") {
+  // Deleting the room (`everyone`) lets the host's sockets go too.
+  function forgetRoom(roomId, reason = "room-ended", { everyone = false } = {}) {
     setAccess(roomId, () => true);
     const names = roomDocuments(roomId);
     let closed = 0;
     for (const [socketId, documents] of documentsBySocket) {
-      if (whoBySocket.get(socketId)?.role === "host") continue;
+      if (!everyone && whoBySocket.get(socketId)?.role === "host") continue;
       const mine = names.filter((name) => documents.has(name));
       const websocket = socketsById.get(socketId);
       if (mine.length === 0 || !websocket) continue;

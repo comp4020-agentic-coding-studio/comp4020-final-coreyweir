@@ -227,7 +227,7 @@ try {
   const shown = () => bo.$$eval(".your-rooms li .actions button, .your-rooms li summary", (elements) => elements.filter((element) => element.checkVisibility()).map((element) => element.textContent));
   assert.deepEqual(await shown(), ["Enter", "More"]);
   await bo.click(".your-rooms li summary");
-  assert.deepEqual(await shown(), ["Enter", "More", "Open", "Export board", "Delete"]);
+  assert.deepEqual(await shown(), ["Enter", "More", "Open", "Export board", "Leave room", "Delete"]);
   await shot(bo, "row-more");
   await bo.keyboard.press("Escape");
   assert.deepEqual(await shown(), ["Enter", "More"], "Escape closes the menu");
@@ -279,7 +279,7 @@ try {
   // Deleting the copy takes this browser's place in the room with it.
   await bo.goto(baseUrl, { waitUntil: "networkidle0" });
   await clickText(bo, ".your-rooms li .actions button", /^Delete$/);
-  await waitText(bo, ".your-rooms .asking", /and its place in the room/);
+  await waitText(bo, ".your-rooms .asking", /forget that you're in this room\. If the host reopens it/);
   await shot(bo, "delete-confirm");
   await bo.click(".your-rooms .asking button.danger");
   await bo.waitForFunction(() => !document.querySelector(".your-rooms"), { timeout: 10_000, polling: 100 });
