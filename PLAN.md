@@ -730,7 +730,7 @@ auto-release at the latest.
   (the guest is uid 0 already) would be cheap, but it pretends, so it's a
   call for Corey.
 
-- **MCP servers for the host's Claude** (ADR 0012; Corey, 9 Nov). An
+- ~~**MCP servers for the host's Claude**~~ (ADR 0012; Corey, 9 Nov). An
   "MCPs" button in the host's terminal controls: GitHub's MCP server (read
   only or read and write, toolsets), then custom servers (name, https URL,
   one header). Tokens as `mcp` placeholders, each sent only to its server's
@@ -742,7 +742,14 @@ auto-release at the latest.
   the placeholder in Claude's config, the refusal path, Apply on a running
   Claude carrying the conversation, and the dialog at W x H; with
   `GITHUB_TOKEN` set, GitHub's tools listed (27 read only, 44 read and
-  write with the default toolsets). Next: custom servers.
+  write with the default toolsets). Custom servers done 9 Nov: the same
+  smoke runs a local mock MCP server (its token swapped in only for it, no
+  placeholder ever leaving the browser, one credential per server), one
+  that refuses its token (an MCP notice naming it), Jina's open server
+  when reachable (12 tools), the form's checks, and Apply straight after
+  Claude starts (which hung once: Claude drops an /exit typed while it is
+  still drawing; Apply now asks again, then stops it). `npm run test:mcp`
+  checks the form's rules and the config.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own

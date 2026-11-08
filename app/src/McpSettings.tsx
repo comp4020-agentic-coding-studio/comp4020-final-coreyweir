@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ClaudePodController } from "./claudePod";
 import type { ClaudeState } from "./queueRelease";
-import { GITHUB_TOOLSETS, loadMcp, saveMcp, type McpSettings } from "./mcp";
+import { GITHUB_TOOLSETS, customProblem, loadMcp, saveMcp, serverName, type CustomMcp, type McpSettings } from "./mcp";
 import "./mcp.css";
 
 // The host's MCP servers for this room (docs/adr/0012): a button in the
@@ -21,6 +21,8 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
   const [applying, setApplying] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<CustomMcp | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const saved = loadMcp(roomId);
   const count = (saved.github.on && hasGithub ? 1 : 0) + saved.custom.length;
@@ -36,6 +38,8 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
 
   function show() {
     setSettings(loadMcp(roomId));
+    setDraft(null);
+    setDraftError(null);
     setDone(null);
     setError(null);
     setOpen(true);
@@ -61,7 +65,20 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
     }
   }
 
+  function addDraft() {
+    if (!draft) return;
+    const entry = { name: draft.name.trim(), url: draft.url.trim(), header: draft.header.trim(), value: draft.value };
+    // plain http only where the page itself is (the dev server)
+    const problem = customProblem(entry, settings.custom, location.protocol === "http:");
+    if (problem) return setDraftError(problem);
+    setSettings((current) => ({ ...current, custom: [...current.custom, entry] }));
+    setDraft(null);
+    setDraftError(null);
+    setDone(null);
+  }
+
   const github = settings.github;
+  const editDraft = (field: keyof CustomMcp) => (event: { target: { value: string } }) => setDraft((current) => current && { ...current, [field]: event.target.value });
   const setGithub = (next: Partial<McpSettings["github"]>) => setSettings((current) => ({ ...current, github: { ...current.github, ...next } }));
   return (
     <>
@@ -99,6 +116,33 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
               )}
             </fieldset>
 
+            <fieldset className="mcp-custom">
+              <legend>Other servers</legend>
+              {settings.custom.length > 0 && (
+                <ul className="mcp-custom-list">
+                  {settings.custom.map((entry, index) => (
+                    <li key={`${entry.name}-${index}`}>
+                      <span><strong>{serverName(entry.name)}</strong><small>{entry.url}{entry.header ? ` · token in ${entry.header}` : " · no token"}</small></span>
+                      <button className="link" disabled={applying} onClick={() => setSettings((current) => ({ ...current, custom: current.custom.filter((_, at) => at !== index) }))}>Remove</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {draft ? (
+                <form className="mcp-add" aria-label="Add an MCP server" onSubmit={(event) => { event.preventDefault(); addDraft(); }}>
+                  <label>Name<input value={draft.name} onChange={editDraft("name")} placeholder="e.g. jina" autoComplete="off" autoCapitalize="none" /></label>
+                  <label>URL<input type="url" value={draft.url} onChange={editDraft("url")} placeholder="https://mcp.example.com/mcp" autoComplete="off" /></label>
+                  <label>Header <small>Optional</small><input value={draft.header} onChange={editDraft("header")} placeholder="e.g. Authorization" autoComplete="off" autoCapitalize="none" /></label>
+                  <label>Value <small>The token, as the header takes it</small><input type="password" value={draft.value} onChange={editDraft("value")} placeholder="e.g. Bearer sk-..." autoComplete="off" /></label>
+                  <p className="ws-export-quiet">Riff sends the token only to this server's address, in that one header; Claude sees a stand-in. The server must accept requests from a browser (CORS), and servers that sign you in through their own page (OAuth) won't connect. Many need no token at all.</p>
+                  {draftError && <p className="form-error" role="alert">{draftError}</p>}
+                  <span className="mcp-add-actions"><button type="submit">Add</button><button type="button" className="link" onClick={() => { setDraft(null); setDraftError(null); }}>Cancel</button></span>
+                </form>
+              ) : (
+                <button className="mcp-add-open" disabled={applying} onClick={() => setDraft({ name: "", url: "", header: "", value: "" })}>Add custom MCP</button>
+              )}
+            </fieldset>
+
             <p className="ws-export-quiet">{!running
               ? "Claude uses these when it starts."
               : busy ? "Claude is working: apply when it has finished, since applying restarts it."
@@ -106,7 +150,7 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
             {error && <p className="form-error" role="alert">{error}</p>}
             {done && <p className="mcp-done" role="status">{done}</p>}
             <span className="ws-export-actions">
-              <button className="ws-export-go" disabled={applying || (running && busy)} onClick={() => void apply()}>{applying ? "Applying..." : "Apply"}</button>
+              <button className="ws-export-go" disabled={applying || (running && busy) || draft !== null} title={draft ? "Add the server, or cancel it, first" : undefined} onClick={() => void apply()}>{applying ? "Applying..." : "Apply"}</button>
               <button disabled={applying} onClick={close}>{done ? "Close" : "Cancel"}</button>
             </span>
           </section>
