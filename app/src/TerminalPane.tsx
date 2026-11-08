@@ -1,11 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import type { ClaudePodController, HostConfig } from "./claudePod";
+import type { ClaudeEvent } from "./queueRelease";
 import { useTerminalChannel, type TerminalEvent } from "./terminalChannel";
 import { usePreviewHostChannel } from "./previewChannel";
 import "./terminal-stream.css";
 
-export type TerminalPaneHandle = { loadPrompt: (prompt: string) => boolean };
+export type TerminalPaneHandle = { sendPrompt: (prompt: string) => boolean };
 
 function ParticipantTerminal({ subscribe }: { subscribe: (listener: (event: TerminalEvent) => void) => () => void }) {
   const targetRef = useRef<HTMLDivElement>(null);
@@ -66,7 +67,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   facilitator: boolean;
   config: HostConfig | null;
   onPreviewUrlChange: (url: string | null, generation: number) => void;
-}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange }, ref) {
+  /** What Claude is doing, from its hooks (docs/adr/0004). Host only. */
+  onClaudeEvent?: (event: ClaudeEvent) => void;
+}>(function TerminalPane({ roomId, token, facilitator, config, onPreviewUrlChange, onClaudeEvent }, ref) {
   const targetRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ClaudePodController | null>(null);
   const previewChangeRef = useRef(onPreviewUrlChange);
@@ -82,13 +85,15 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const publishPreview = usePreviewHostChannel(roomId, token, facilitator, controllerRef);
 
   previewChangeRef.current = onPreviewUrlChange;
+  const claudeEventRef = useRef(onClaudeEvent);
+  claudeEventRef.current = onClaudeEvent;
 
   useImperativeHandle(ref, () => ({
-    loadPrompt(prompt) {
-      const loaded = controllerRef.current?.loadPrompt(prompt) === true;
-      if (!loaded) setError("Start Claude before loading a queued prompt.");
+    sendPrompt(prompt) {
+      const sent = controllerRef.current?.sendPrompt(prompt) === true;
+      if (!sent) setError("Start Claude before sending a queued prompt.");
       else setError(null);
-      return loaded;
+      return sent;
     },
   }), []);
 
@@ -146,6 +151,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
             }, 16);
           },
         );
+        controller.onClaudeEvent = (event) => claudeEventRef.current?.(event);
         controllerRef.current = controller;
         await controller.boot();
         controller.attach(targetRef.current);
