@@ -495,9 +495,17 @@ auto-release at the latest.
     the room's state arrived, and Yjs kept the old page's value); the page
     now publishes only once synced. After a reload Claude starts a new
     session: the turn that was running is gone, though its transcript is in
-    the saved `/home/user/.claude`. Not handled: a Send typed while Claude
-    shows a dialog mid-turn (a question or plan approval) goes into the
-    dialog; Claude's `Notification` hook could tell Riff about one.
+    the saved `/home/user/.claude`.
+  - Dialogs mid-turn (9 Nov): a Send while Claude asked a question or
+    showed a permission prompt went into the dialog. Now hooks
+    (`PermissionRequest`, `Elicitation`, a late `Notification`) mark Claude
+    as asking: Send is off and says why, auto waits, the room sees
+    "Claude is asking the host"; an answer's `PostToolUse`, Esc, or the
+    turn's end clear it, and since a No to a permission prompt fires no
+    hook, the host's answer key does (ADR 0004). Checked by
+    `test:queue-release` and a question step in
+    `test:queue-release-browser`. Left: live, and a real permission prompt
+    or plan approval through the room (measured only on a bare controller).
 - ~~**Images into the host's Claude**~~ (8 Nov, `d07ddcc`). xterm reads
   only text from the clipboard, so a pasted screenshot did nothing. Claude
   Code 2.1.221 attaches an image itself when its absolute path is pasted

@@ -19,7 +19,7 @@ import { attachNetGatewayBrowser, type NetGatewayBrowserHandle } from "./netGate
 import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
 import { createRiffHook, promptKeystrokes, riffHookSettings, RIFF_HOOK_COMMAND } from "./claudeHooks";
-import { isInterruptKey, type ClaudeEvent } from "./queueRelease";
+import { isAnswerKey, isInterruptKey, type ClaudeEvent } from "./queueRelease";
 import { RIFF_MODEL, riffModelsUrl } from "./api";
 import { deniedWebTools, WEB_MCP_PATH, WEB_MCP_SOURCE, webMcpServers } from "./webTools";
 import { createImagePaster, installImagePaste, modelReadsImages, PASTE_DIR } from "./imagePaste";
@@ -656,6 +656,7 @@ export class ClaudePodController {
     this.rawInput?.dispose();
     this.rawInput = xterm.onData((data: string) => {
       if (isInterruptKey(data)) this.onClaudeEvent({ event: "Interrupt" });
+      else if (isAnswerKey(data)) this.onClaudeEvent({ event: "AnswerKey" });
       process.write(data);
     });
     this.onClaudeEvent({ event: "Started" });

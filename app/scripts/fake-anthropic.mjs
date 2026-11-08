@@ -5,7 +5,8 @@
 // gets its reply after SLOW_MS, so a smoke can send while Claude is busy;
 // one containing "fail" gets a 400, so a turn ends in an API error. One
 // containing "webfetch <url>" or "websearch <query>" gets that tool call
-// ("mcpfetch"/"mcpsearch" call Riff's web MCP server's tools instead). Image
+// ("mcpfetch"/"mcpsearch" call Riff's web MCP server's tools instead; "askuser"
+// calls AskUserQuestion, a dialog mid-turn). Image
 // blocks reaching the model are recorded per turn. It also answers Claude Code's
 // remote-session web routes (`/v1/code/sessions/<id>/worker/web-fetch` and
 // `web-search`) with a canned page or result, recorded in `workerCalls`.
@@ -132,7 +133,7 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
         res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-cache" });
         send("message_start", { type: "message_start", message: { ...message, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } });
         send("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: `toolu_${Date.now()}`, name: "Bash", input: {} } });
-        send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify({ command: "sleep 3", description: "Wait" }) } });
+        send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(blocks.some((text) => text.includes("touchtool")) ? { command: "touch riff-probe.txt", description: "Create a file" } : { command: "sleep 3", description: "Wait" }) } });
         send("content_block_stop", { type: "content_block_stop", index: 0 });
         send("message_delta", { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 5 } });
         send("message_stop", { type: "message_stop" });
@@ -157,10 +158,14 @@ export async function startFakeAnthropic({ reply = "Done." } = {}) {
       }
       // "webfetch <url>" and "websearch <query>" get that tool call first.
       // "mcpfetch <url>" and "mcpsearch <query>" call Riff's web MCP server.
-      const webCall = isTurn && !answered && blocks.map((text) => /\b(web|mcp)(fetch|search) (\S+)/.exec(text)).find(Boolean);
+      // "askuser" gets an AskUserQuestion tool call: a dialog in Claude's
+      // terminal, mid-turn, waiting for the host's answer.
+      const webCall = isTurn && !answered && blocks.map((text) => /\b(web|mcp)(fetch|search) (\S+)|\b(askuser)\b/.exec(text)).find(Boolean);
       if (webCall) {
-        const [, kind, what, arg] = webCall;
-        const [name, input] = kind === "mcp"
+        const [, kind, what, arg, ask] = webCall;
+        const [name, input] = ask
+          ? ["AskUserQuestion", { questions: [{ question: "Which colour should the button be?", header: "Colour", multiSelect: false, options: [{ label: "Teal", description: "The room's accent" }, { label: "Plum", description: "Something new" }] }] }]
+          : kind === "mcp"
           ? [`mcp__web__${what}`, what === "fetch" ? { url: arg } : { query: arg.replace(/\+/g, " "), max_results: 3 }]
           : what === "fetch"
             ? ["WebFetch", { url: arg, prompt: "What is this page's title?" }]
