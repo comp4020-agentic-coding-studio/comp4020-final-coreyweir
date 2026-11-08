@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Quickdraw, useQuickdrawStore, type ShapeRecord } from "@quickdrawjs/react";
+import { Quickdraw, useQuickdrawStore, type QuickdrawRef, type ShapeRecord } from "@quickdrawjs/react";
 import { addPrompt, replaceYText, saveName, savedName, snapshotPrompts, type PromptSnapshot, type QueuedPrompt, type RoomMember, useRoom } from "./room";
 import {
   type Access, ApiError, createRoom, currentUser, endRoom, enterRoom, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
@@ -148,7 +148,7 @@ function Account({ user, onColleagues }: { user: User | null | undefined; onColl
   return (
     <p className="account">
       {user.avatarUrl && <img src={user.avatarUrl} alt="" width={20} height={20} crossOrigin="anonymous" />}
-      <span>Signed in as <strong>@{user.login}</strong></span>
+      <span><span className="signed-in-as">Signed in as </span><strong>@{user.login}</strong></span>
       {onColleagues && <button className="link" onClick={onColleagues}>Colleagues</button>}
       <button className="link" onClick={() => void startSignOut()}>Sign out</button>
       {leaving !== null && (
@@ -244,14 +244,13 @@ function hostPresence(room: ListedRoom, now: number) {
   return room.role === "host" ? `You host it · ${away}` : `Host ${away}`;
 }
 
-// Invites first, then the rooms you're in: by GitHub account when signed
-// in, by this browser's guest secrets otherwise. Never anyone else's.
-function YourRooms({ name, list }: { name: string; list: RoomList | null }) {
-  const now = useNow();
+// Invites to rooms, on top of the card: accepting joins under the name in
+// the form, and asks for another if that one's taken in the room.
+function Invites({ name, list }: { name: string; list: RoomList | null }) {
   const [renaming, setRenaming] = useState<{ roomId: string; name: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  if (!list || (!list.rooms.length && !list.invites.length)) return null;
+  if (!list?.invites.length) return null;
 
   async function accept(roomId: string, chosen?: string) {
     setBusy(roomId);
@@ -276,8 +275,7 @@ function YourRooms({ name, list }: { name: string; list: RoomList | null }) {
   }
 
   return (
-    <section className="your-rooms" aria-label="Your rooms">
-      <h2>Your rooms</h2>
+    <section className="invites" aria-label="Invites">
       {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
         {list.invites.map((invite) => (
@@ -294,12 +292,6 @@ function YourRooms({ name, list }: { name: string; list: RoomList | null }) {
                 <button className="link" onClick={() => void decline(invite.roomId)}>Decline</button>
               </span>
             )}
-          </li>
-        ))}
-        {list.rooms.map((room) => (
-          <li key={room.id}>
-            <button className="room-link" onClick={() => goToRoom(room.id)}>Room <code>{room.code}</code></button>
-            <small><i className={room.state}></i>{hostPresence(room, now)}</small>
           </li>
         ))}
       </ul>
@@ -364,25 +356,64 @@ function ColleaguesPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-// Every board this browser keeps a copy of (docs/adr/0003, second
-// amendment). Open goes to the room while you're in it, and otherwise to
-// the copy alone, read-only. Delete takes the copy and this browser's
+// One row per room: the rooms you're in, as the server lists them (by
+// GitHub account when signed in, by this browser's guest secrets
+// otherwise; never anyone else's, docs/adr/0008), merged with every board
+// this browser keeps a copy of (docs/adr/0003, second amendment). A live
+// room enters; a copy opens read-only, beside the forms on a wide screen
+// and as its own page on a phone. Delete takes the copy and this browser's
 // place in the room with it.
-function LocalBoards({ list }: { list: RoomList | null }) {
-  const [copies, setCopies] = useState<LocalCopy[] | null>(null);
+type RoomRow = { key: string; room: ListedRoom | null; copy: LocalCopy | null; code: string | null };
+
+function roomRows(rooms: ListedRoom[], copies: LocalCopy[]): RoomRow[] {
+  const copyOf = new Map(copies.flatMap((copy) => copy.roomId ? [[copy.roomId, copy] as const] : []));
+  const rows: RoomRow[] = rooms.map((room) => ({ key: room.id, room, copy: copyOf.get(room.id) ?? null, code: room.code }));
+  const listed = new Set(rooms.map((room) => room.id));
+  for (const copy of copies) {
+    if (!copy.roomId || !listed.has(copy.roomId)) rows.push({ key: copy.database, room: null, copy, code: copy.code });
+  }
+  return rows;
+}
+
+function useNarrow() {
+  const query = "(max-width: 780px)";
+  const [narrow, setNarrow] = useState(() => matchMedia(query).matches);
+  useEffect(() => {
+    const media = matchMedia(query);
+    const update = () => setNarrow(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return narrow;
+}
+
+function copyDetail(copy: LocalCopy, listed: boolean) {
+  const role = listed ? null : copy.host === null ? null : copy.host ? "you hosted" : copy.hostName ? `joined ${copy.hostName}'s room` : "joined";
+  return [role, `copy on this browser${copy.lastOpened ? `, ${shortDate(copy.lastOpened)}` : ""}`].filter(Boolean).join(" · ");
+}
+
+async function exportCopy(copy: LocalCopy) {
+  const { doc, destroy } = await loadCopy(copy);
+  try {
+    downloadBoard(exportBoard({ code: copy.code ?? "board", doc }));
+  } finally {
+    destroy();
+  }
+}
+
+function RoomsList({ list, copies, peeking, onOpen, onChanged }: {
+  list: RoomList | null;
+  copies: LocalCopy[] | null;
+  peeking: string | null;
+  onOpen: (copy: LocalCopy) => void;
+  onChanged: () => Promise<unknown>;
+}) {
+  const now = useNow();
   const [asking, setAsking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const refresh = () => listCopies().then(setCopies, () => setCopies([]));
-  useEffect(() => {
-    void refresh();
-  }, []);
-  if (!copies?.length) return null;
-  const inRooms = new Set(list?.rooms.map((room) => room.id));
-
-  function open(copy: LocalCopy) {
-    if (copy.roomId && inRooms.has(copy.roomId)) goToRoom(copy.roomId);
-    else location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`);
-  }
+  const rows = roomRows(list?.rooms ?? [], copies ?? []);
+  if (!rows.length) return null;
+  const copyCount = copies?.length ?? 0;
 
   async function act(action: () => Promise<unknown>) {
     setError(null);
@@ -392,28 +423,22 @@ function LocalBoards({ list }: { list: RoomList | null }) {
       setError("Couldn't do that in this browser's storage. Try again.");
     }
     setAsking(null);
-    await refresh();
-  }
-
-  async function exportCopy(copy: LocalCopy) {
-    const { doc, destroy } = await loadCopy(copy);
-    try {
-      downloadBoard(exportBoard({ code: copy.code ?? "board", doc }));
-    } finally {
-      destroy();
-    }
+    await onChanged();
   }
 
   return (
-    <section className="local-boards" aria-label="Boards on this browser">
-      <h2>Boards on this browser</h2>
+    <section className="your-rooms" aria-label="Your rooms">
+      <h2>Your rooms</h2>
       {error && <p className="form-error" role="alert">{error}</p>}
       <ul>
-        {copies.map((copy) => (
-          <li key={copy.database}>
-            <span className="copy-name">{copy.code ? <>Room <code>{copy.code}</code></> : "A room"}</span>
-            <small>{[copy.host === null ? null : copy.host ? "hosted" : "joined", copy.lastOpened ? shortDate(copy.lastOpened) : null].filter(Boolean).join(" · ")}</small>
-            {asking === copy.database ? (
+        {rows.map(({ key, room, copy, code }) => (
+          <li key={key} className={copy && copy.database === peeking ? "peeking" : undefined}>
+            <button className="room-link" onClick={() => room ? goToRoom(room.id) : copy && onOpen(copy)}>{code ? <>Room <code>{code}</code></> : "A room"}</button>
+            <span className="room-state">
+              {room ? <><i className={room.state}></i>{hostPresence(room, now)} · {room.keep ? "board kept" : "board not kept"}</> : <><i className="gone"></i>Not live</>}
+            </span>
+            {copy && <small>{copyDetail(copy, Boolean(room))}</small>}
+            {copy && asking === copy.database ? (
               <span className="actions asking">
                 <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}?</span>
                 <button className="danger" onClick={() => void act(() => deleteCopy(copy))}>Delete</button>
@@ -421,21 +446,81 @@ function LocalBoards({ list }: { list: RoomList | null }) {
               </span>
             ) : (
               <span className="actions">
-                <button className="link" onClick={() => open(copy)}>Open</button>
-                <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export</button>
-                <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>
+                {room && <button className="link" onClick={() => goToRoom(room.id)}>Enter</button>}
+                {copy && <>
+                  <button className="link" onClick={() => onOpen(copy)}>Open</button>
+                  <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export</button>
+                  <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>
+                </>}
               </span>
             )}
           </li>
         ))}
       </ul>
-      {copies.length > 1 && (asking === "all" ? (
+      {copyCount > 1 && (asking === "all" ? (
         <p className="delete-all asking">
-          <span>Delete all {copies.length} copies, and this browser's place in every room?</span>
+          <span>Delete all {copyCount} copies on this browser, and its place in every room?</span>
           <button className="danger" onClick={() => void act(deleteAllCopies)}>Delete all</button>
           <button className="link" onClick={() => setAsking(null)}>Cancel</button>
         </p>
-      ) : <p className="delete-all"><button className="link" onClick={() => setAsking("all")}>Delete all</button></p>)}
+      ) : <p className="delete-all"><button className="link" onClick={() => setAsking("all")}>Delete all copies</button></p>)}
+    </section>
+  );
+}
+
+// The whole board in view: quickdraw fits on mount, before the records
+// are in, so fit again once useBoardSync (synchronous) has put them there.
+function PeekBoard({ doc }: { doc: Y.Doc }) {
+  const store = useQuickdrawStore();
+  const board = useRef<QuickdrawRef>(null);
+  useBoardSync(doc, store);
+  useEffect(() => {
+    board.current?.editor?.fitContent({ margin: 32, maxZoom: 1 });
+  }, [doc]);
+  return (
+    <section className="board-wrap">
+      <div className="board-actions"><span>This browser's copy: look, but not change.</span></div>
+      <Quickdraw ref={board} className="quickdraw-surface" store={store} grid="dots" theme="light" readonly autoFit themeToggle={false} watermark={false} />
+    </section>
+  );
+}
+
+// A wide screen's look at a board, in place of the hero, with the forms
+// still beside it. From this browser's copy, so it's as of the last time
+// this browser had the room open.
+function BoardPeek({ copy, room, onClose }: { copy: LocalCopy; room: ListedRoom | null; onClose: () => void }) {
+  const [opened, setOpened] = useState<Y.Doc | "failed" | null>(null);
+  useEffect(() => {
+    let gone = false;
+    let destroy: (() => void) | null = null;
+    setOpened(null);
+    loadCopy(copy).then((loaded) => {
+      if (gone) return loaded.destroy();
+      destroy = loaded.destroy;
+      setOpened(loaded.doc);
+    }, () => !gone && setOpened("failed"));
+    return () => {
+      gone = true;
+      destroy?.();
+    };
+  }, [copy.database]);
+  const asOf = copy.lastOpened && new Date(copy.lastOpened).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  return (
+    <section className="board-peek" aria-label="Board">
+      <header>
+        <div>
+          <strong>{copy.code ? <>Room <code>{copy.code}</code></> : "A room"}</strong>
+          <small>{asOf ? `As of ${asOf}, ` : ""}from this browser's copy</small>
+        </div>
+        <span className="actions">
+          {room && <button className="enter" onClick={() => goToRoom(room.id)}>Enter room</button>}
+          <button className="full-page" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Full page</button>
+          <button disabled={!(opened instanceof Y.Doc)} onClick={() => opened instanceof Y.Doc && downloadBoard(exportBoard({ code: copy.code ?? "board", doc: opened }))}>Export</button>
+          <button className="close" aria-label="Close the board" onClick={onClose}>×</button>
+        </span>
+      </header>
+      {opened instanceof Y.Doc ? <PeekBoard key={copy.database} doc={opened} />
+        : <p className="peek-note">{opened === "failed" ? "Couldn't open this browser's copy." : "Opening the copy..."}</p>}
     </section>
   );
 }
@@ -504,6 +589,20 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
   const [colleagues, setColleagues] = useState(false);
   const [imported, setImported] = useState<ParsedBoard | null>(null);
   const list = useRoomList();
+  const [copies, setCopies] = useState<LocalCopy[] | null>(null);
+  const refreshCopies = () => listCopies().then(setCopies, () => setCopies([]));
+  useEffect(() => {
+    void refreshCopies();
+  }, []);
+  const [peek, setPeek] = useState<string | null>(null);
+  const narrow = useNarrow();
+  const peeked = narrow ? undefined : copies?.find((copy) => copy.database === peek);
+  useEffect(() => {
+    if (!colleagues) return;
+    const close = (event: KeyboardEvent) => event.key === "Escape" && setColleagues(false);
+    addEventListener("keydown", close);
+    return () => removeEventListener("keydown", close);
+  }, [colleagues]);
   const riffModels = useRiffModels();
   const useRiff = riffModels === true && config.models === "riff";
   // Signed in, your GitHub login is the default name.
@@ -526,19 +625,18 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
   }
 
   return (
-    <main className="landing">
-      <header><strong className="brand">riff</strong><span>Collaborative design crits</span></header>
+    <main className="landing home">
+      <header><strong className="brand">riff</strong><span>Collaborative design crits</span><Account user={user} onColleagues={() => setColleagues((open) => !open)} /></header>
+      {peeked ? <BoardPeek copy={peeked} room={list?.rooms.find((room) => room.id === peeked.roomId) ?? null} onClose={() => setPeek(null)} /> : (
       <section className="landing-copy">
         <span className="overline">A shared studio for small groups</span>
         <h1>Look together.<br />Make a suggestion.<br />Try it live.</h1>
         <p>Sketch ideas, shape prompts, follow the agent’s work, and discuss the site as it changes.</p>
       </section>
+      )}
       <section className="entry-card">
-        <Account user={user} onColleagues={() => setColleagues((open) => !open)} />
         {ended && <p className="ended-note" role="status">Room <code>{ended}</code> has ended.</p>}
-        {colleagues ? <ColleaguesPanel onClose={() => setColleagues(false)} /> : <>
-        <YourRooms name={shownName} list={list} />
-        <LocalBoards list={list} />
+        <Invites name={shownName} list={list} />
         <nav><button className={mode === "join" ? "active" : ""} onClick={() => setMode("join")}>Join</button><button className={mode === "host" ? "active" : ""} onClick={() => setMode("host")}>Host</button></nav>
         {mode === "join" ? (
           <form onSubmit={(event) => {
@@ -585,8 +683,16 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
             <button className="primary" disabled={busy || riffModels === null}>{busy ? "Creating..." : "Create room"}</button>
           </form>
         )}
-        </>}
       </section>
+      <RoomsList list={list} copies={copies} peeking={peeked?.database ?? null} onChanged={refreshCopies} onOpen={(copy) => {
+        if (narrow) location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`);
+        else setPeek((current) => current === copy.database ? null : copy.database);
+      }} />
+      {colleagues && (
+        <div className="overlay" onClick={(event) => event.target === event.currentTarget && setColleagues(false)}>
+          <div role="dialog" aria-modal="true" aria-label="Colleagues"><ColleaguesPanel onClose={() => setColleagues(false)} /></div>
+        </div>
+      )}
     </main>
   );
 }

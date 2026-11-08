@@ -434,13 +434,23 @@ auto-release at the latest.
   client from reloading the pages) was red before on both counts.
   - Needs live: a `flyctl deploy` with a host idle on Claude and a
     participant joining after it.
-- **Redesign the landing page.** Sign-in, "Your rooms", "Boards on this
-  browser", colleagues and both forms all sit in one card, which grew taller
-  than the window and hid Create room (found by hand on live, 19 Oct). The
-  stop-gap: the card stops at the window's height, everything below the
-  Join | Host tabs scrolls, and the whole card scrolls if what's above the
-  tabs is too tall on its own. Now that there are accounts, colleagues and
-  past rooms, not everything needs to be on the landing page.
+- ~~**Redesign the landing page.**~~ (8 Nov.) Sign-in, "Your rooms", "Boards on this
+  browser", colleagues and both forms all sat in one card, which grew taller
+  than the window and hid Create room (found by hand on live, 19 Oct; the
+  stop-gap made the card scroll). Corey chose "two zones" from a sketch:
+  the card holds only what you do now (invites on top, then Join | Host,
+  the forms unchanged, so joining is still a name and a code and hosting
+  gains no step); the account moves to the header and colleagues open over
+  the page; beside the card on a wide screen, below it on a phone, one row
+  per room, merging the server's list with this browser's copies (Enter,
+  Open, Export, Delete). Open shows the copy's board in place of the hero
+  with the forms still beside it, "as of" when this browser last had it
+  open (Full page for the prompts too); on a phone it goes to the copy's
+  own page. Checked by `test:rooms-browser` (invites, the colleagues
+  overlay leaving the forms, a room and its copy as one row) and
+  `test:boards-browser` (Enter, the peek on a wide screen, the copy page,
+  Delete), both at 1920×1080 and 390×844 on dev. On a phone the line
+  about why to sign in is hidden for room.
 
 ### P3: if there's time
 - **A mode with no API key.** Decided 19 Oct (ADR 0009): Riff's own
