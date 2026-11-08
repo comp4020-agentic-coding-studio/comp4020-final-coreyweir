@@ -24,6 +24,7 @@ import {
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
 import { type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
 import { ImportWorkspace, type PickedWorkspace, seedFromExport } from "./ImportWorkspace";
+import { ExportFiles } from "./ExportFiles";
 
 type View = "board" | "room" | "preview";
 // models: "riff" is Riff's own free models through the server
@@ -36,6 +37,12 @@ const DEFAULT_HOST_CONFIG: SavedHostConfig = {
   repo: "",
   models: "riff",
 };
+
+// The real tokens this browser holds for hosting, for an export to make
+// sure none of them travels (ADR 0007).
+async function hostSecrets() {
+  return [savedHostConfig().token, await unwrapPushToken().catch(() => null) ?? ""].filter(Boolean);
+}
 
 function savedHostConfig(): SavedHostConfig {
   try {
@@ -552,8 +559,9 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 {room && <button className="link" onClick={() => goToRoom(room.id)}>Enter</button>}
                 {copy && <>
                   <button className="link" onClick={() => onOpen(copy)}>Open</button>
-                  <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export</button>
+                  <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>
                 </>}
+                {workspace && <ExportFiles workspace={workspace} code={code ?? null} secrets={hostSecrets} />}
                 {workspace && <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>}
                 {copy && <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>}
               </span>

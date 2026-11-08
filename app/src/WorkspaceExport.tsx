@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ClaudePodController } from "./claudePod";
-import type { Manifest } from "./workspaceExport";
+import type { ExportOptions, ExportResult, Manifest } from "./workspaceExport";
 
 // The host's way out with their workspace (README: no lock-in for the
 // filesystem). A button in the terminal controls opens this; what the zip
@@ -51,7 +51,11 @@ function Summary({ name, bytes, manifest }: { name: string; bytes: number; manif
 
 // ready: the workspace has booted. The controller exists from the moment
 // booting starts, so it can't be the test: an export then has no files yet.
-export function WorkspaceExport({ getController, ready }: { getController: () => ClaudePodController | null; ready: boolean }) {
+// exporter: where the zip comes from instead of the running pod (the landing
+// page's "Export files" reads the saved workspace); label and className are
+// its button's.
+type Exporter = (options: Omit<ExportOptions, "secrets">) => Promise<ExportResult>;
+export function WorkspaceExport({ getController, ready, exporter, label = "Export", className, note }: { getController?: () => ClaudePodController | null; ready: boolean; exporter?: Exporter; label?: string; className?: string; note?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [transcripts, setTranscripts] = useState(true);
   const [dependencies, setDependencies] = useState(false);
@@ -74,14 +78,15 @@ export function WorkspaceExport({ getController, ready }: { getController: () =>
   }
 
   async function run() {
-    const controller = getController();
-    if (!controller) return;
+    const controller = getController?.();
+    const make: Exporter | undefined = exporter ?? (controller ? (options) => controller.exportWorkspace(options) : undefined);
+    if (!make) return;
     setBusy(true);
     setError(null);
     setDone(null);
     setProgress(0);
     try {
-      const result = await controller.exportWorkspace({ transcripts, dependencies, onProgress: ({ files }) => setProgress(files) });
+      const result = await make({ transcripts, dependencies, onProgress: ({ files }) => setProgress(files) });
       download(result.blob, result.name);
       setDone({ name: result.name, bytes: result.blob.size, manifest: result.manifest });
     } catch (failure) {
@@ -94,13 +99,14 @@ export function WorkspaceExport({ getController, ready }: { getController: () =>
 
   return (
     <>
-      <button ref={opener} disabled={!ready} title={ready ? "Download the workspace as a zip" : "There's a workspace to export once Claude or Bash has started"} onClick={() => setOpen(true)}>Export</button>
+      <button ref={opener} className={className} disabled={!ready} title={ready ? "Download the workspace as a zip" : "There's a workspace to export once Claude or Bash has started"} onClick={() => setOpen(true)}>{label}</button>
       {/* In the body, not here: the terminal header's own styles would reach it. */}
       {open && createPortal(
         <div className="ws-export-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) close(); }}>
           <section className="ws-export" role="dialog" aria-modal="true" aria-labelledby="ws-export-title">
             <h2 id="ws-export-title">Export workspace</h2>
             <p>A zip of the workspace folder (<code>/work/repo</code>). It includes <code>.git</code>, so commits you haven't pushed are in it, and it unzips into an ordinary project folder.</p>
+            {note && <p>{note}</p>}
             <label className="ws-export-option">
               <input type="checkbox" checked={transcripts} disabled={busy} onChange={(event) => setTranscripts(event.target.checked)} />
               <span>Include Claude's session transcripts<small>Everything typed to Claude in this room, and what its tools printed. Anyone who gets the file can read it.</small></span>

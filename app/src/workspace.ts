@@ -440,6 +440,28 @@ export async function deleteAllWorkspaces() {
   return all.length;
 }
 
+// ---- reading a saved workspace without booting it ----
+
+/**
+ * A saved workspace as it is in OPFS, for exporting it from the landing
+ * page without a pod. Only while no tab has it open: a tab that has it is
+ * saving into it, and loading sweeps blobs no manifest names yet, which
+ * would be that tab's save in progress. So this takes the room's lock if
+ * it's free and never steals it; a room open in another tab is exported
+ * from that tab.
+ */
+export async function readSavedWorkspace<T>(room: string, use: (manifest: WorkspaceManifest, files: Map<string, ArrayBuffer>) => Promise<T>): Promise<T> {
+  const held = navigator.locks ? await requestLock(room, { ifAvailable: true }) : null;
+  if (navigator.locks && !held) throw new WorkspaceBusyError("This room's files are open in another tab of this browser. Export them there, from the workspace's Export.");
+  try {
+    const loaded = await call<{ manifest: WorkspaceManifest | null; files: Array<{ path: string; data: ArrayBuffer }> }>({ op: "load", room });
+    if (!loaded.manifest) throw new Error("This browser has no saved files for that room.");
+    return await use(loaded.manifest, new Map(loaded.files.map((file) => [file.path, file.data])));
+  } finally {
+    held?.release();
+  }
+}
+
 // ---- seeding a new room's workspace from an export ----
 
 export class WorkspaceExistsError extends Error {}
