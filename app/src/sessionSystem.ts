@@ -101,14 +101,18 @@ exec cat -- "\${files[@]}"
 // The session's one user already has uid 0, so sudo has nothing to grant: it
 // runs the command. Habits (`sudo npm i -g`, a README's `sudo make install`)
 // then work instead of ending in "command not found". Options that keep that
-// meaning are accepted; any other (another user, a login shell, -s, -v...)
-// would pretend to do something the session can't, so it says so.
+// meaning are accepted, and -v/-k/-K do nothing (there's no password); any
+// other (another user, a root shell with -s/-i) would pretend to do
+// something the session can't, so it says so.
 const SUDO = `#!/bin/bash
 # Riff: you are the session's only user and already have uid 0, so sudo
 # just runs the command.
+noop=
 while [ $# -gt 0 ]; do
   case $1 in
     -n|-E|-H|--non-interactive|--preserve-env|--set-home) shift ;;
+    # No password, so nothing to validate or forget.
+    -v|-k|-K|--validate|--reset-timestamp|--remove-timestamp) noop=1; shift ;;
     -u|--user) case $2 in root|user|0|"#0") shift 2 ;; *) echo "sudo: Riff's terminal has one user ('user', already root); it can't run as '$2'" >&2; exit 1 ;; esac ;;
     -uroot|-uuser|--user=root|--user=user) shift ;;
     --) shift; break ;;
@@ -117,6 +121,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 if [ $# -eq 0 ]; then
+  [ -n "$noop" ] && exit 0
   echo "usage: sudo [-n] [-E] [-H] [-u root] [--] command [args...]" >&2
   exit 1
 fi

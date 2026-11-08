@@ -222,7 +222,7 @@ try {
             // The session's user and host (sessionSystem.ts): libc reads /etc.
             identity: 'whoami && id && hostname && echo ~',
             helpers: 'which node; man ls 2>&1; echo "man=$?"; clear | od -An -c | tr -s " "; echo a | less',
-            sudo: 'sudo -n -E -u root -- whoami; sudo -u bob true; echo "bob=$?"',
+            sudo: 'sudo -v && sudo -n -E -u root -- whoami; sudo -u bob true; echo "bob=$?"',
             // No stdin crosses the bridge: a bridged reader gets end of input
             // at once (it used to hang, even under < /dev/null). Only a
             // terminal reader is told why (wasix-terminal smoke).

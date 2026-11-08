@@ -763,7 +763,8 @@ auto-release at the latest.
   hypothesis: its line buffer is dropped when readline takes the terminal).
   `sudo` (9 Nov, Corey's call: "just run the command"): the guest is uid 0
   already, so it runs the command. `-n -E -H -u root|user --` are accepted;
-  any other user or option (`-s`, `-i`, `-v`...) is refused with a line
+  `-v -k -K` do nothing (no password); any other user or option (a root
+  shell with `-s`/`-i`, ...) is refused with a line
   saying sudo here only runs the command. Checked by
   `test:wasix-claude-bash-browser`.
 
