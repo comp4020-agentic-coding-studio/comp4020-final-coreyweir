@@ -178,6 +178,9 @@ try {
   // 2. The room.
   const context = await browser.createBrowserContext();
   const host = await context.newPage();
+  // How each restart stopped Claude (claudePod.ts restartClaude).
+  const restarts = [];
+  host.on("console", (message) => /^\[restart\]/.test(message.text()) && restarts.push(message.text()));
   host.on("pageerror", (error) => pageErrors.push(String(error)));
   await host.setViewport(viewport);
   // Stand in for the sealed push token and Riff's own GitHub check, so the
@@ -233,12 +236,14 @@ try {
   const applyInView = await host.$eval(".mcp-settings .ws-export-go", (button) => { const box = button.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight; });
   assert.ok(applyInView, "Apply is in reach without scrolling the dialog");
   await shot(host, "github");
+  const githubApplyAt = Date.now();
   await host.click(".mcp-settings .ws-export-go");
   await waitRows(host, ".mcp-settings .mcp-done", /Claude restarted on the same conversation/, 60_000);
   await shot(host, "applied");
   await host.click(".mcp-settings .ws-export-actions button:not(.ws-export-go)");
   assert.equal(await host.$eval(".mcp-open", (button) => [button.textContent, button.getAttribute("aria-label")].join("|")), "MCPs1|MCPs, 1 added");
   await host.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "idle", { timeout: 60_000, polling: 200 });
+  console.log(`room: GitHub's Apply, Claude idle again in ${Date.now() - githubApplyAt} ms (${restarts.at(-1)})`);
   await waitRows(host, ".terminal-note", /MCP server "github" refused its token/, 60_000);
   assert.doesNotMatch(await rows(host, ".terminal-note"), /no longer accepts/, "GitHub's MCP refusing isn't GitHub refusing");
   assert.equal(await host.evaluate(() => Object.keys(localStorage).some((key) => key.startsWith("riff-mcp:"))), true, "kept in this browser");
@@ -279,12 +284,18 @@ try {
   await waitRows(host, ".mcp-custom-list", /mock.*token in Authorization/, 5_000);
   const custFits = await host.$eval(".mcp-settings", (element) => { const box = element.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; });
   assert.ok(custFits, "the dialog with the form fits the window's width");
+  const applyAt = Date.now();
   await host.click(".mcp-settings .ws-export-go");
   await waitRows(host, ".mcp-settings .mcp-done", /Claude restarted on the same conversation/, 60_000);
   await shot(host, "custom-applied");
   await host.click(".mcp-settings .ws-export-actions button:not(.ws-export-go)");
   assert.equal(await host.$eval(".mcp-open", (button) => button.getAttribute("aria-label")), "MCPs, 2 added");
   await host.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "idle", { timeout: 60_000, polling: 200 });
+  console.log(`room: the custom Apply, Claude idle again in ${Date.now() - applyAt} ms (${restarts.at(-1)})`);
+  // /exit stops it, if need be with the background checks it was still
+  // waiting on; signals mean a restart took 16 s or more (measured 8 Nov).
+  assert.equal(restarts.length, 2, `two restarts: ${restarts.join("; ")}`);
+  for (const line of restarts) assert.match(line, /^\[restart\] Claude stopped after \/exit/, line);
   const reached = Date.now() + 60_000;
   while (!roomMock.seen.some((request) => request.carried === SECRET)) {
     if (Date.now() > reached) throw new Error(`the room's custom server never got its token: ${JSON.stringify(roomMock.seen)}`);
