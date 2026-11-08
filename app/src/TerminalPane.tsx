@@ -138,6 +138,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const outputTimerRef = useRef(0);
   const [status, setStatus] = useState(facilitator ? "Not started" : "Waiting for host");
   const [starting, setStarting] = useState(false);
+  const [report, setReport] = useState<string | null>(null);
   const [attached, setAttached] = useState(false);
   const [outputSize, setOutputSize] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -257,7 +258,15 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
         const { ClaudePodController } = await import("./claudePod");
         controller = new ClaudePodController(
           { ...config, workspaceRoom: roomId },
-          setStatus,
+          // Bridge and bash diagnostics ("[bridge] pid=2 node -e ...") are
+          // for debugging, not the room: they go to the console and a data
+          // attribute, and the header keeps saying what state it's in.
+          (next) => {
+            if (/^\[(bridge|bash)\] /.test(next) && !/failed/.test(next)) {
+              console.info(next);
+              setReport(next);
+            } else setStatus(next);
+          },
           (url) => previewChangeRef.current(url, publishPreview(Boolean(url))),
           (data) => {
             pendingOutputRef.current += data;
@@ -307,7 +316,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const participantStatus = participantLive ? "Host terminal live" : channel.hostConnected ? "Host connected" : "Waiting for host";
   return (
     <article className="terminal-pane">
-      <header className="section-title terminal-heading">
+      <header className="section-title terminal-heading" data-report={report ?? undefined}>
         <div><h2>Workspace</h2><span className={facilitator && (status === "Claude running" || status === "WASIX Bash ready") || !facilitator && participantLive ? "live-dot" : "idle-dot"}>{facilitator ? status : participantStatus}</span></div>
         {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : controllerRef.current ? "Start Claude" : "Boot Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} ready={attached} /></div>}
         {!facilitator && <div className="terminal-controls"><button className="mirror-mode" aria-pressed={mirrorMode === "actual"} title={mirrorMode === "fit" ? "Show the host's terminal at its own text size, and scroll" : "Shrink or grow the host's terminal to fit this box"} onClick={() => {

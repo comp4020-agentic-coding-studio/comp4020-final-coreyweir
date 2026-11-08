@@ -43,7 +43,7 @@ try {
   });
   try {
     await page.waitForFunction(
-      () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
+      () => (document.querySelector(".terminal-heading")?.textContent ?? "") + " " + (document.querySelector(".terminal-heading")?.dataset.report ?? "")?.includes("WASIX Bash ready"),
       { timeout: 120_000 },
     );
   } catch (error) {
@@ -99,7 +99,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 4000));
 
   const snapshot = await page.evaluate(() => ({
-    heading: document.querySelector(".terminal-heading")?.textContent,
+    heading: (document.querySelector(".terminal-heading")?.textContent ?? "") + " " + (document.querySelector(".terminal-heading")?.dataset.report ?? ""),
     terminal: document.querySelector(".terminal-target .xterm-rows")?.textContent,
   }));
   console.log(JSON.stringify(snapshot, null, 2));
@@ -117,9 +117,10 @@ try {
   await page.keyboard.type("node -e 'setTimeout(()=>console.log(\"bridge-bg-survived\"),2500)' & while true; do sleep 1; done");
   await page.keyboard.press("Enter");
   await page.waitForFunction(
-    () => document.querySelector(".terminal-heading")?.textContent?.includes("[bridge] pid="),
+    () => (document.querySelector(".terminal-heading")?.textContent ?? "") + " " + (document.querySelector(".terminal-heading")?.dataset.report ?? "")?.includes("[bridge] pid="),
     { timeout: 10_000 },
   );
+  assert.doesNotMatch(await page.$eval(".terminal-heading", (element) => element.textContent), /\[bridge\]/, "bridge diagnostics stay out of the header the room sees");
   await page.keyboard.down("Control");
   await page.keyboard.press("KeyC");
   await page.keyboard.up("Control");
@@ -130,7 +131,7 @@ try {
     );
   } catch (error) {
     const diagnostics = await page.evaluate(() => ({
-      heading: document.querySelector(".terminal-heading")?.textContent,
+      heading: (document.querySelector(".terminal-heading")?.textContent ?? "") + " " + (document.querySelector(".terminal-heading")?.dataset.report ?? ""),
       terminal: document.querySelector(".terminal-target .xterm-rows")?.textContent,
     }));
     throw new Error(`background bridge did not survive: ${JSON.stringify(diagnostics)}`, { cause: error });
