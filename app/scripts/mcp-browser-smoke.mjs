@@ -216,8 +216,13 @@ try {
   await guest.waitForSelector(".terminal-heading");
   assert.equal(await guest.$(".mcp-open"), null, "only the host has MCPs");
 
+  // Riff's own web server is listed, not counted: the button counts what
+  // the host added (none yet).
+  assert.equal(await rows(host, ".mcp-open"), "MCPs", "nothing added, no count");
   await host.click(".mcp-open");
   await host.waitForSelector(".mcp-settings");
+  assert.match(await rows(host, ".mcp-builtin"), /web\s*\(built in\).*Jina Reader/);
+  assert.equal(await host.$(".mcp-builtin input"), null, "the built-in server isn't a switch");
   const githubBox = ".mcp-github .ws-export-option input";
   assert.equal(await host.$eval(githubBox, (input) => input.disabled || input.checked), false, "GitHub is there to turn on, off by default");
   await host.click(githubBox);
@@ -230,7 +235,7 @@ try {
   await waitRows(host, ".mcp-settings .mcp-done", /Claude restarted on the same conversation/, 60_000);
   await shot(host, "applied");
   await host.click(".mcp-settings .ws-export-actions button:not(.ws-export-go)");
-  assert.match(await rows(host, ".mcp-open"), /MCPs 1/);
+  assert.equal(await host.$eval(".mcp-open", (button) => [button.textContent, button.getAttribute("aria-label")].join("|")), "MCPs1|MCPs, 1 added");
   await host.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "idle", { timeout: 60_000, polling: 200 });
   await waitRows(host, ".terminal-note", /MCP server "github" refused its token/, 60_000);
   assert.doesNotMatch(await rows(host, ".terminal-note"), /no longer accepts/, "GitHub's MCP refusing isn't GitHub refusing");
@@ -249,6 +254,10 @@ try {
   await host.click(".mcp-add-actions button[type=submit]");
   await waitRows(host, ".mcp-add .form-error", /GitHub's own server/, 5_000);
   await host.click(field(1), { clickCount: 3 });
+  await host.type(field(1), "web");
+  await host.click(".mcp-add-actions button[type=submit]");
+  await waitRows(host, ".mcp-add .form-error", /"web" is Riff's own server/, 5_000);
+  await host.click(field(1), { clickCount: 3 });
   await host.type(field(1), "Mock");
   await host.type(field(4), SECRET);
   await host.click(".mcp-add-actions button[type=submit]");
@@ -264,7 +273,7 @@ try {
   await waitRows(host, ".mcp-settings .mcp-done", /Claude restarted on the same conversation/, 60_000);
   await shot(host, "custom-applied");
   await host.click(".mcp-settings .ws-export-actions button:not(.ws-export-go)");
-  assert.match(await rows(host, ".mcp-open"), /MCPs 2/);
+  assert.equal(await host.$eval(".mcp-open", (button) => button.getAttribute("aria-label")), "MCPs, 2 added");
   await host.waitForFunction(() => document.querySelector(".claude-state")?.dataset.state === "idle", { timeout: 60_000, polling: 200 });
   const reached = Date.now() + 60_000;
   while (!roomMock.seen.some((request) => request.carried === SECRET)) {

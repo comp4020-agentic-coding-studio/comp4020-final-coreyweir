@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { ClaudePodController } from "./claudePod";
 import type { ClaudeState } from "./queueRelease";
 import { GITHUB_TOOLSETS, customProblem, loadMcp, saveMcp, serverName, type CustomMcp, type McpSettings } from "./mcp";
+import { WEB_MCP_NAME } from "./webTools";
 import "./mcp.css";
 
 // The host's MCP servers for this room (docs/adr/0012): a button in the
@@ -82,12 +83,17 @@ export function McpSettingsButton({ roomId, getController, hasGithub, claudeStat
   const setGithub = (next: Partial<McpSettings["github"]>) => setSettings((current) => ({ ...current, github: { ...current.github, ...next } }));
   return (
     <>
-      <button ref={opener} className="mcp-open" title="MCP servers Claude can use in this room" onClick={show}>MCPs{count ? ` ${count}` : ""}</button>
+      {/* The count is the servers the host added; Riff's own web server is always there and not counted. */}
+      <button ref={opener} className="mcp-open" title={count ? `MCP servers: ${count} you added, plus Riff's built-in web search` : "MCP servers: Riff's built-in web search, and any you add"} aria-label={count ? `MCPs, ${count} added` : "MCPs"} onClick={show}>MCPs{count ? <span className="mcp-count">{count}</span> : null}</button>
       {open && createPortal(
         <div className="ws-export-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !applying) close(); }}>
           <section className="ws-export mcp-settings" role="dialog" aria-modal="true" aria-labelledby="mcp-title">
             <h2 id="mcp-title">MCP servers</h2>
             <p>Tools Claude can use in this room, from servers you choose. Only you see this, and it stays in this browser. Tokens go only to their own server; Claude sees a stand-in.</p>
+
+            <ul className="mcp-builtin" aria-label="Built in">
+              <li><strong>{WEB_MCP_NAME}</strong> <span>(built in)</span><small>Search, and read pages through Jina Reader, from this browser. Always there.</small></li>
+            </ul>
 
             <fieldset className="mcp-github">
               <label className="ws-export-option">

@@ -27,3 +27,8 @@
 .mcp-add-actions{display:flex;align-items:center;gap:12px}
 .mcp-add-actions button[type=submit],.mcp-add-open{justify-self:start;padding:6px 12px;border:1px solid #d5d5cf;border-radius:4px;background:white;font-size:13px}
 @media(max-width:780px){.mcp-add input{font-size:16px}}
+.mcp-builtin{margin:0;padding:10px 12px;list-style:none;border:1px solid #e3e3de;border-radius:5px;background:#f7f7f4}
+.mcp-builtin li{display:grid;grid-template-columns:auto 1fr;column-gap:6px;align-items:baseline}
+.mcp-builtin span{color:#777;font-size:12px}
+.mcp-builtin small{grid-column:1/-1;color:#777;font-size:12px}
+.mcp-count{margin-left:6px;min-width:18px;padding:0 5px;display:inline-block;border-radius:9px;background:#3a3c36;color:#f2f2ea;font-size:11px;line-height:18px;text-align:center}
