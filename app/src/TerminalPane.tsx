@@ -126,6 +126,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const outputTimerRef = useRef(0);
   const [status, setStatus] = useState(facilitator ? "Not started" : "Waiting for host");
   const [starting, setStarting] = useState(false);
+  const [attached, setAttached] = useState(false);
   const [outputSize, setOutputSize] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mirrorMode, setMirrorMode] = useState<MirrorMode>(savedMirrorMode);
@@ -213,6 +214,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
         controllerRef.current = controller;
         await controller.boot();
         controller.attach(targetRef.current);
+        setAttached(true);
       }
       lastCheckpointAtRef.current = Date.now();
       if (mode === "claude") await controller.startClaude();
@@ -222,6 +224,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       setStatus("Could not start");
       await controllerRef.current?.dispose();
       controllerRef.current = null;
+      setAttached(false);
     } finally {
       setStarting(false);
     }
@@ -244,7 +247,17 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
           }
         }}>{mirrorMode === "fit" ? "Actual size" : "Fit to box"}</button></div>}
       </header>
-      {facilitator ? <div className="terminal-target" data-output-size={outputSize} ref={targetRef} /> : <ParticipantTerminal subscribe={channel.subscribe} mode={mirrorMode} />}
+      <div className="terminal-stage">
+        {facilitator ? <div className="terminal-target" data-output-size={outputSize} ref={targetRef} /> : <ParticipantTerminal subscribe={channel.subscribe} mode={mirrorMode} />}
+        {/* Until there's a screen, say what's happening where people look. */}
+        {(facilitator ? !attached : !participantLive) && (
+          <p className="terminal-empty" role="status">
+            {facilitator
+              ? starting ? status : "Boot Claude to start Claude Code in this tab. Everyone in the room sees this terminal."
+              : channel.hostConnected ? "Nothing on the host's terminal yet. It appears here when they start Claude." : "Waiting for the host. Their terminal appears here."}
+          </p>
+        )}
+      </div>
       <footer className="terminal-note">
         <span>{facilitator ? "Terminal output is shared with everyone in this room. Only you can type or approve actions." : "Read-only mirror of the host's terminal. Only the host types or approves actions."}</span>
         {(error || channel.error) && <strong>{error ?? channel.error}</strong>}
