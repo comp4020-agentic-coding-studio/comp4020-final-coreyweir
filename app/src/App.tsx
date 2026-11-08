@@ -23,6 +23,7 @@ import {
 } from "./boardFile";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
 import { SAVED_SUMMARY, type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
+import { ImportWorkspace, type PickedWorkspace, seedFromExport } from "./ImportWorkspace";
 
 type View = "board" | "room" | "preview";
 // models: "riff" is Riff's own free models through the server
@@ -707,6 +708,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imported, setImported] = useState<ParsedBoard | null>(null);
+  const [workspaceExport, setWorkspaceExport] = useState<PickedWorkspace | null>(null);
   const list = useRoomList();
   const [copies, setCopies] = useState<LocalCopy[] | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
@@ -775,6 +777,8 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
             void submit(async () => {
               const access = await createRoom(shownName.trim(), keepBoard);
               if (imported) await seedCopy(access.room.id, (doc) => applyBoardFile(doc, imported));
+              // the real tokens, so none of them goes into the guest (ADR 0007)
+              if (workspaceExport) await seedFromExport(access.room.id, workspaceExport, [config.token, await unwrapPushToken().catch(() => null) ?? ""]);
               return access;
             });
           }}>
@@ -793,6 +797,7 @@ function Landing({ code: sharedCode = "", keep: sharedKeep }: { code?: string; k
             <label>Git repository <small>Optional</small><input value={config.repo} onChange={(event) => updateConfig("repo", event.target.value)} placeholder="https://github.com/group/project.git" /></label>
             <GitHubPush user={user} back="/?setup=host" beforeLeaving={() => { saveName(name); localStorage.setItem("riff-host-config", JSON.stringify(config)); }} />
             <ImportBoard imported={imported} onChange={setImported} />
+            <ImportWorkspace picked={workspaceExport} repo={config.repo} onChange={setWorkspaceExport} />
             <label className="check"><input type="checkbox" checked={keepBoard} onChange={(event) => setKeepBoard(event.target.checked)} /><span>Keep the board after the room ends<small>{keepBoard ? "Kept on the server while space allows, read-only. Everyone who joins is told." : "Deleted from the server when the room ends. Everyone who joins is told."}</small></span></label>
             <p className="local-note">These settings stay in this browser and are never included in the room link.</p>
             {error && <p className="form-error" role="alert">{error}</p>}
