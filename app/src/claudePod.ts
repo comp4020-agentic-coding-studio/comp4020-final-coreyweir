@@ -452,6 +452,11 @@ export class ClaudePodController {
           // (2.1.221). Not in the saved workspace (ADR 0010): written here
           // every boot.
           skipDangerousModePermissionPrompt: true,
+          // WebFetch first asks claude.ai whether the domain is blocked; from
+          // the browser that request is refused by CORS, so every fetch failed
+          // with "check failed". A settings key in 2.1.221 (read through the
+          // merged settings, not ~/.claude.json).
+          skipWebFetchPreflight: true,
           // Turn start and end reach the page through riff-hook (docs/adr/0004).
           hooks: riffHookSettings(),
         }),
