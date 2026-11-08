@@ -209,8 +209,8 @@ rooms counting as away from then. This part adds keeping and ending.
 - **Reviving.** The host opening an ended room (its documents or
   `GET /api/rooms/:id/me`) revives it, as decided. For a not-kept room the
   server starts empty; the host's own browser copy (IndexedDB) then syncs
-  back into it, the exception "Local copies" allows. That last step is by
-  design but **not measured in a browser** yet.
+  back into it, the exception "Local copies" allows. Measured in a browser
+  on 8 Nov (see "Reopening" below).
 - **Client** (`8066106`). The host form has "Keep the board after the room
   ends", ticked by default. A share link's join form says what happens to
   the board before anyone joins, and inside the room the top bar (desktop)
@@ -250,6 +250,54 @@ Checked:
 
 Not built: pruning and the size cap (their numbers aren't decided), local
 copy lists, export and import.
+
+### Reopening (2026-11-08)
+
+The host had no way back into an ended room from Riff itself: "Your
+rooms" left ended rooms out, so the row (from the browser's copy) said
+"Not live" and couldn't tell an ended room from one this browser was
+removed from. Built on the decision above (only the host revives; ending
+deletes invites), so nothing new about who sees what:
+
+- **The host's list** (`listFor`, `app/server/rooms.mjs`) now carries the
+  rooms they hosted that have ended: the last 10, ended within 30 days,
+  with when it ended and whether the server still has the board
+  (`boardGone`: not kept, or pruned). By account for a signed-in host, by
+  the browser's room secret for a guest host. Participants' lists still
+  leave ended rooms out; they keep their copy's row.
+- **`POST /api/rooms/:id/reopen`**, host only: revives the room, as
+  opening it would. A participant gets 403 and a stranger 401, and the
+  room stays ended. Reopening a room that hasn't ended changes nothing.
+  The log's `room.revive` says `via=reopen` or `via=open` (the page
+  opened it, from an old link or a reload); a refusal is `denied
+  what=room.reopen`.
+- **The row** says "Ended just now" or "Ended 8 Nov", and "board kept on
+  server" or "board deleted on server". Its first action is Reopen, which
+  goes in as host; Enter is gone from ended rows and from the board peek,
+  because the host entering would revive the room unasked. If the server
+  deleted the board and this browser has no copy, Reopen first says the
+  room comes back with an empty board.
+- **What comes back.** The room is away, then live once the host's page
+  connects: same id and code, so joining by code works again, members'
+  rows go live, and members' open pages get write access back. Invites
+  don't come back (ending deleted them); the host invites again.
+  Participants' own copies sync back too once they reconnect, which adds
+  nothing they didn't already see.
+
+Checked: `spec/rooms.test.ts` ("reopening an ended room", guests: listed
+for the host alone, refused for a participant, another room's host and
+no credential, the room still ended after each, then reopened by its host
+and back in the participant's list and by code; red with the host check
+removed), `npm run test:rooms` (a signed-in host's list from another
+browser, a participant refused, the log's `via=reopen` and the denial;
+the 10-room and 30-day limits), and `npm run test:reopen-browser` on dev
+at 1920x1080 and 390x844: a kept room ended, its row, Reopen, the board
+back and the participant's open page writing again without a reload; a
+not-kept room ended (board deleted on the server), reopened, the board
+back from the host's copy, and a newcomer in a third browser, with no
+copy, reading it from the server. The smoke can't tell Reopen's request
+from the page opening the room, which revives it too; `test:rooms` and
+the spec cover the request.
 
 ## Amendment (2026-10-18): pruning and the size cap
 
