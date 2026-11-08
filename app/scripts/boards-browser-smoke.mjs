@@ -227,7 +227,7 @@ try {
   const shown = () => bo.$$eval(".your-rooms li .actions button, .your-rooms li summary", (elements) => elements.filter((element) => element.checkVisibility()).map((element) => element.textContent));
   assert.deepEqual(await shown(), ["Enter", "More"]);
   await bo.click(".your-rooms li summary");
-  assert.deepEqual(await shown(), ["Enter", "More", "Open", "Export board", "Delete"]);
+  assert.deepEqual(await shown(), ["Enter", "More", "Open", "Export board", "Leave room", "Delete"]);
   await shot(bo, "row-more");
   await bo.keyboard.press("Escape");
   assert.deepEqual(await shown(), ["Enter", "More"], "Escape closes the menu");

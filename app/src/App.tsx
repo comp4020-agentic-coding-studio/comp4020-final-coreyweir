@@ -4,7 +4,7 @@ import { addPrompt, replaceYText, saveName, savedName, snapshotPrompts, type Pro
 import { QueuePanel, useQueueRelease } from "./QueuePanel";
 import { canSend, type ClaudeState } from "./queueRelease";
 import {
-  type Access, ApiError, createRoom, currentUser, endRoom, enterRoom, reopenRoom, storedSecret, storedSecrets, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
+  type Access, ApiError, createRoom, currentUser, deleteRoomFromServer, endRoom, enterRoom, leaveRoom, reopenRoom, storedSecret, storedSecrets, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
   acceptInvite, addColleague, cancelInvite, declineInvite, inviteToRoom, listColleagues, removeColleague, watchRooms,
   type Colleagues, type EndedRoom, type ListedRoom, type RoomInfo, type RoomList,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
@@ -507,12 +507,13 @@ async function exportCopy(copy: LocalCopy) {
 // place in the room (a guest's secret; a GitHub member keeps theirs
 // through the account), and the files. For a guest host the secret is the
 // only thing that makes them host, so it says what they lose.
-function deleteQuestion(copy: LocalCopy, listed: ListedRoom | null, files: boolean) {
+function deleteQuestion(copy: LocalCopy, listed: ListedRoom | null, files: boolean, fromServer: boolean) {
   const secret = copy.roomId ? storedSecret(copy.roomId) : null;
   const host = listed ? listed.role === "host" : copy.host === true;
   const sentences = ["Delete this browser's copy of the board?"];
   if (listed?.state === "ended" && listed.boardGone) sentences.push("The server no longer has this board, so this may be the last copy.");
-  if (secret && host) sentences.push("This browser will also forget that you host this room, so you can't go back in as host, end it or reopen it.");
+  if (fromServer) { /* the room itself goes, so there's no place to keep */ }
+  else if (secret && host) sentences.push("This browser will also forget that you host this room, so you can't go back in as host, end it or reopen it.");
   else if (secret) sentences.push(`This browser will also forget that you're in this room. ${listed ? "To go back in, you'd join again" : "If the host reopens it, you'd have to join again"} with the code, under a different name.`);
   else if (listed) sentences.push("The room stays in your list, because you're in it through GitHub.");
   if (files) sentences.push("The files go too: anything not pushed to GitHub is lost.");
@@ -567,6 +568,8 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
 }) {
   const now = useNow();
   const [asking, setAsking] = useState<string | null>(null);
+  // the host's "also delete the room from the server", while asking
+  const [alsoServer, setAlsoServer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const rows = roomRows(list?.rooms ?? [], copies ?? [], workspaces);
   if (!rows.length) return null;
@@ -577,10 +580,11 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
     setError(null);
     try {
       await action();
-    } catch {
-      setError("Couldn't do that in this browser's storage. Try again.");
+    } catch (failure) {
+      setError(failure instanceof ApiError ? problem(failure) : "Couldn't do that in this browser's storage. Try again.");
     }
     setAsking(null);
+    setAlsoServer(false);
     await onChanged();
   }
 
@@ -608,6 +612,10 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
           // host would bring it back anyway (docs/adr/0003)
           const ended = listed?.state === "ended" ? listed : null;
           const room = ended ? null : listed as Exclude<ListedRoom, EndedRoom> | null;
+          // the host may delete the room from the server too (docs/adr/0003)
+          const roomId = listed?.id ?? copy?.roomId ?? null;
+          const hosting = roomId && (listed ? listed.role === "host" : copy?.host === true && Boolean(storedSecret(roomId))) ? roomId : null;
+          const fromServer = hosting && (alsoServer || !copy);
           return (
           <li key={key} className={copy && copy.database === peeking ? "peeking" : undefined}>
             {room || copy
@@ -629,10 +637,24 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 <button className="danger" onClick={() => void act(() => deleteWorkspace(workspace.room))}>Delete files</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
-            ) : copy && asking === copy.database ? (
+            ) : (copy || hosting) && asking === `delete:${key}` ? (
               <span className="actions asking">
-                <span>{deleteQuestion(copy, listed, Boolean(workspace))}</span>
-                <button className="danger" onClick={() => void act(() => deleteCopy(copy))}>Delete</button>
+                <span className="delete-question">
+                  <span>{copy ? deleteQuestion(copy, listed, Boolean(workspace), Boolean(fromServer)) : `Delete room ${code} from the server?`}</span>
+                  {hosting && copy && <label className="also-server"><input type="checkbox" checked={alsoServer} onChange={(event) => setAlsoServer(event.target.checked)} /><span>Also delete the room from the server</span></label>}
+                  {fromServer && <span className="server-delete-note">{serverDeleteNote(listed)}</span>}
+                </span>
+                <button className="danger" onClick={() => void act(async () => {
+                  if (fromServer) await deleteRoomFromServer(hosting);
+                  if (copy) await deleteCopy(copy);
+                  else if (workspace) await deleteWorkspace(workspace.room);
+                })}>Delete</button>
+                <button className="link" onClick={() => { setAsking(null); setAlsoServer(false); }}>Cancel</button>
+              </span>
+            ) : room && asking === `leave:${room.id}` ? (
+              <span className="actions asking">
+                <span>{LEAVE_QUESTION}</span>
+                <button className="danger" onClick={() => void act(() => leaveRoom(room.id))}>Leave</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
             ) : ended && asking === `reopen:${ended.id}` ? (
@@ -649,7 +671,8 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 {copy && <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>}
                 {workspace && <ExportFiles workspace={workspace} code={code ?? null} secrets={hostSecrets} />}
                 {workspace && <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>}
-                {copy && <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>}
+                {room?.role === "participant" && <button className="link" onClick={() => setAsking(`leave:${room.id}`)}>Leave room</button>}
+                {(copy || hosting) && <button className="link" onClick={() => setAsking(`delete:${key}`)}>Delete</button>}
               </RowActions>
             )}
           </li>
@@ -666,6 +689,12 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
       ) : <p className="delete-all"><button className="link" onClick={() => setAsking("all")}>Delete all</button></p>)}
     </section>
   );
+}
+
+// What deleting from the server does, beside this browser's own copy.
+function serverDeleteNote(listed: ListedRoom | null) {
+  const live = listed && listed.state !== "ended";
+  return `${live ? "The room ends for everyone now, and" : "The room"} is gone from the server for good: nobody can open it again, you included. Members keep any copy of the board their own browsers have.`;
 }
 
 function deleteAllQuestion(copies: number, files: number, rows: RoomRow[]) {
@@ -1241,6 +1270,37 @@ function EndRoom({ access, code, keep }: { access: Access; code: string; keep: b
   );
 }
 
+// A member leaves by themselves (docs/adr/0008, "Leaving"): their place
+// goes on every browser; the code or an invite brings them back.
+function LeaveRoom({ roomId }: { roomId: string }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function leave() {
+    setBusy(true);
+    setError(null);
+    try {
+      await leaveRoom(roomId);
+      location.assign(location.pathname);
+    } catch (failure) {
+      setError(problem(failure));
+      setBusy(false);
+    }
+  }
+
+  if (!asking) return <div className="leave-room"><button onClick={() => setAsking(true)}>Leave room</button></div>;
+  return (
+    <div className="leave-room asking">
+      <p>{LEAVE_QUESTION}</p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <span><button className="danger" disabled={busy} onClick={() => void leave()}>{busy ? "Leaving..." : "Leave"}</button><button disabled={busy} onClick={() => setAsking(false)}>Cancel</button></span>
+    </div>
+  );
+}
+
+const LEAVE_QUESTION = "Leave this room? It goes from your rooms on every browser. To come back, you'd need the code or an invite from the host. This browser keeps its copy of the board until you delete it.";
+
 // About what the server stores for the room: both documents, as this page
 // has them. Recounted at most once a second while they change.
 function useRoomBytes(docs: Y.Doc[]) {
@@ -1315,7 +1375,7 @@ function PeoplePanel({ access, room, onClose, onExport }: { access: Access; room
       {room.limitBytes && <p className="board-size">{room.full ? "Full: it holds" : "It holds"} {megabytes(bytes)} of the {megabytes(room.limitBytes)} a room can.</p>}
       <p className="export-board"><button onClick={onExport}>Export the board</button><small>A file with the board, its images and the prompts. Anyone can start a new room from it.</small></p>
       {error && <p className="form-error" role="alert">{error}</p>}
-      {host && <EndRoom access={access} code={room.code} keep={room.keep} />}
+      {host ? <EndRoom access={access} code={room.code} keep={room.keep} /> : <LeaveRoom roomId={access.room.id} />}
     </aside>
   );
 }
@@ -1373,17 +1433,17 @@ function RoomClosed({ reason, roomId }: { reason: string; roomId?: string }) {
   const ended = reason === "room-ended" || reason === "board-pruned";
   const [copy, setCopy] = useState<LocalCopy | null>(null);
   useEffect(() => {
-    if (ended && roomId) findCopy(`room/${roomId}/shared`).then(setCopy, () => {});
-  }, [ended, roomId]);
+    if ((ended || reason === "room-deleted") && roomId) findCopy(`room/${roomId}/shared`).then(setCopy, () => {});
+  }, [ended, reason, roomId]);
   // A page of its own, with the start page's header: the participant
   // didn't choose to leave, so it says why before anything else.
   return (
     <main className="landing closed">
       <header><strong className="brand">riff</strong><span>Collaborative design crits</span></header>
       <section className="entry-card">
-        <h2>{ended ? "This room has ended" : reason === "removed" ? "The host removed you from this room" : "You're no longer in this room"}</h2>
+        <h2>{ended ? "This room has ended" : reason === "removed" ? "The host removed you from this room" : reason === "room-deleted" ? "The host deleted this room" : reason === "left" ? "You left this room" : "You're no longer in this room"}</h2>
         {ended && copy?.code && <p className="closed-room">Room <code>{copy.code}</code>{copy.hostName ? `, hosted by ${copy.hostName}` : ""}</p>}
-        <p>{reason === "board-pruned" ? "The server deleted this board to make space." : ended ? "The server doesn't keep this board." : reason === "removed" ? "You can't open it again unless they invite you back." : "The host removed you, or the room has ended."}</p>
+        <p>{reason === "board-pruned" ? "The server deleted this board to make space." : ended ? "The server doesn't keep this board." : reason === "removed" ? "You can't open it again unless they invite you back." : reason === "room-deleted" ? "It's gone from the server for good." : reason === "left" ? "To go back in, join with the code, or ask the host to invite you." : "The host removed you, or the room has ended."}</p>
         {copy && <p>This browser kept its own copy of the board, which you can still look at and export.</p>}
         <div className="closed-actions">
           {copy && <button className="primary" onClick={() => location.assign(`${location.pathname}?${new URLSearchParams({ copy: copy.database })}`)}>Open this browser's copy</button>}

@@ -178,6 +178,21 @@ export function reopenRoom(roomId: string) {
   return call<{ room: RoomInfo }>(`/api/rooms/${encodeURIComponent(roomId)}/reopen`, { method: "POST", body: {}, token: storedSecret(roomId) });
 }
 
+// A member (never the host) drops their own place: like being removed,
+// but the code or an invite brings them back (docs/adr/0008, "Leaving").
+// A guest's secret is worth nothing afterwards, so it's forgotten.
+export async function leaveRoom(roomId: string) {
+  await call<void>(`/api/rooms/${encodeURIComponent(roomId)}/leave`, { method: "POST", body: {}, token: storedSecret(roomId) });
+  forget(roomId);
+}
+
+// Host only: the room off the server, live or ended, for good; members
+// keep only their own browsers' copies (docs/adr/0003).
+export async function deleteRoomFromServer(roomId: string) {
+  await call<void>(`/api/rooms/${encodeURIComponent(roomId)}`, { method: "DELETE", token: storedSecret(roomId) });
+  forget(roomId);
+}
+
 // Your rooms, invites and colleagues (docs/adr/0008).
 
 export type PendingInvite = { githubId: number; login: string };
