@@ -279,7 +279,7 @@ try {
   // Deleting the copy takes this browser's place in the room with it.
   await bo.goto(baseUrl, { waitUntil: "networkidle0" });
   await clickText(bo, ".your-rooms li .actions button", /^Delete$/);
-  await waitText(bo, ".your-rooms .asking", /and its place in the room/);
+  await waitText(bo, ".your-rooms .asking", /forget that you're in this room\. If the host reopens it/);
   await shot(bo, "delete-confirm");
   await bo.click(".your-rooms .asking button.danger");
   await bo.waitForFunction(() => !document.querySelector(".your-rooms"), { timeout: 10_000, polling: 100 });

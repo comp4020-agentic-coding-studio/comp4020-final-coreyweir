@@ -4,7 +4,7 @@ import { addPrompt, replaceYText, saveName, savedName, snapshotPrompts, type Pro
 import { QueuePanel, useQueueRelease } from "./QueuePanel";
 import { canSend, type ClaudeState } from "./queueRelease";
 import {
-  type Access, ApiError, createRoom, currentUser, endRoom, enterRoom, reopenRoom, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
+  type Access, ApiError, createRoom, currentUser, endRoom, enterRoom, reopenRoom, storedSecret, storedSecrets, joinRoom, removeMember, roomByCode, rotateCode, setKeep, setLocked,
   acceptInvite, addColleague, cancelInvite, declineInvite, inviteToRoom, listColleagues, removeColleague, watchRooms,
   type Colleagues, type EndedRoom, type ListedRoom, type RoomInfo, type RoomList,
   forgetPushToken, hasPushToken, sealPastedToken, signInUrl, signOut, unwrapPushToken, type User,
@@ -503,6 +503,22 @@ async function exportCopy(copy: LocalCopy) {
 // stays one line of buttons at 390px however many a room collects. A
 // native <details>: keyboard and screen readers get a disclosure for free;
 // a click outside, Escape or choosing an action closes it.
+// What a row's Delete takes, said plainly: the board copy, this browser's
+// place in the room (a guest's secret; a GitHub member keeps theirs
+// through the account), and the files. For a guest host the secret is the
+// only thing that makes them host, so it says what they lose.
+function deleteQuestion(copy: LocalCopy, listed: ListedRoom | null, files: boolean) {
+  const secret = copy.roomId ? storedSecret(copy.roomId) : null;
+  const host = listed ? listed.role === "host" : copy.host === true;
+  const sentences = ["Delete this browser's copy of the board?"];
+  if (listed?.state === "ended" && listed.boardGone) sentences.push("The server no longer has this board, so this may be the last copy.");
+  if (secret && host) sentences.push("This browser will also forget that you host this room, so you can't go back in as host, end it or reopen it.");
+  else if (secret) sentences.push(`This browser will also forget that you're in this room. ${listed ? "To go back in, you'd join again" : "If the host reopens it, you'd have to join again"} with the code, under a different name.`);
+  else if (listed) sentences.push("The room stays in your list, because you're in it through GitHub.");
+  if (files) sentences.push("The files go too: anything not pushed to GitHub is lost.");
+  return sentences.join(" ");
+}
+
 function RowActions({ label, children }: { label: string; children: React.ReactNode }) {
   const actions = Children.toArray(children).filter(Boolean);
   const more = useRef<HTMLDetailsElement>(null);
@@ -615,7 +631,7 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
               </span>
             ) : copy && asking === copy.database ? (
               <span className="actions asking">
-                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}{workspace ? ", and the files (anything not pushed is lost)" : ""}?</span>
+                <span>{deleteQuestion(copy, listed, Boolean(workspace))}</span>
                 <button className="danger" onClick={() => void act(() => deleteCopy(copy))}>Delete</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
@@ -643,13 +659,26 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
       {workspaces.length > 0 && <p className="workspace-note"><small>{FILES_NOTE}</small></p>}
       {deletable > 1 && (asking === "all" ? (
         <p className="delete-all asking">
-          <span>Delete all {copyCount} copies{workspaces.length ? ` and ${workspaces.length === 1 ? "the files" : `${workspaces.length} rooms' files`}` : ""} on this browser, and its place in every room?</span>
+          <span>{deleteAllQuestion(copyCount, workspaces.length, rows)}</span>
           <button className="danger" onClick={() => void act(deleteAllCopies)}>Delete all</button>
           <button className="link" onClick={() => setAsking(null)}>Cancel</button>
         </p>
       ) : <p className="delete-all"><button className="link" onClick={() => setAsking("all")}>Delete all</button></p>)}
     </section>
   );
+}
+
+function deleteAllQuestion(copies: number, files: number, rows: RoomRow[]) {
+  const sentences = [`Delete ${copies === 1 ? "the board copy" : `all ${copies} board copies`} on this browser?`];
+  if (files) sentences.push(`The files for ${files === 1 ? "a room" : `${files} rooms`} go too: anything not pushed to GitHub is lost.`);
+  const held = new Set(storedSecrets().map(({ roomId }) => roomId));
+  const hosted = rows.filter(({ room, copy }) => {
+    const id = room?.id ?? copy?.roomId;
+    return id && held.has(id) && (room ? room.role === "host" : copy?.host === true);
+  }).length;
+  if (hosted) sentences.push(`This browser will also forget every room it's in, including ${hosted === 1 ? "one you host" : `${hosted} you host`}: you couldn't go back in as host, end ${hosted === 1 ? "it" : "them"} or reopen ${hosted === 1 ? "it" : "them"}.`);
+  else if (held.size) sentences.push("This browser will also forget every room it's in. To go back into one, you'd join again with its code, under a different name.");
+  return sentences.join(" ");
 }
 
 // The whole board in view: quickdraw fits on mount, before the records

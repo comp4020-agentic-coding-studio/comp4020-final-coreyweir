@@ -127,6 +127,16 @@ try {
   await waitText(bo, ".room-banner.ended", /has ended/);
   await endedRow(kept.tab, kept.code, /board kept on server/);
   await shot(kept.tab, "ended-row-kept");
+  // Delete says that a guest host deleting this browser's copy loses the
+  // room: the secret is all that makes them its host.
+  await kept.tab.evaluate((room) => {
+    const li = [...document.querySelectorAll(".your-rooms li")].find((row) => row.textContent.includes(`Room ${room}`));
+    li.querySelector("details.row-more").open = true;
+    [...li.querySelectorAll(".row-menu button")].find((button) => button.textContent === "Delete").click();
+  }, kept.code);
+  await waitText(kept.tab, ".your-rooms .asking", /forget that you host this room, so you can't go back in as host, end it or reopen it/);
+  await shot(kept.tab, "delete-question-host");
+  await kept.tab.evaluate(() => [...document.querySelectorAll(".your-rooms .asking button")].find((button) => button.textContent === "Cancel").click());
   await reopen(kept.tab, kept.code);
   await seesPrompt(kept.tab, "kept prompt");
   // the participant's open page comes back to life without a reload
@@ -162,6 +172,13 @@ try {
   await seesPrompt(cyBack, "from the host's copy");
   await shot(dee, "reopened-not-kept-newcomer");
   console.log(`unkept room ${unkept.code}: ended (board deleted), reopened, the host's copy restored it on the server`);
+
+  // Delete all says the same for every room this browser hosts.
+  await unkept.tab.goto(baseUrl, { waitUntil: "networkidle0" });
+  await unkept.tab.waitForSelector(".your-rooms .delete-all button");
+  await unkept.tab.click(".your-rooms .delete-all button");
+  await waitText(unkept.tab, ".your-rooms .delete-all.asking", /Delete all 2 board copies on this browser\? .*including 2 you host: you couldn't go back in as host, end them or reopen them\./);
+  await shot(unkept.tab, "delete-all-question");
 
   assert.deepEqual(pageErrors, []);
   console.log(`Reopening in the browser passed at ${viewport.width}x${viewport.height}.`);
