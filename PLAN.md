@@ -902,6 +902,16 @@ auto-release at the latest.
   preview is local again. Designed, not built (ADR 0011, "2b"): about
   4–6 h, after measuring that Chrome lets the sandboxed cross-site frame's
   worker control its navigations.
+- **`npx http-server` can't serve in Nodepod** (9 Nov, measured on dev).
+  `npx http-server -p 3001` used to install a package named "3001": npx
+  read `-p` after the command as its own `--package` (fixed, Nodepod
+  riff.49). It now starts and prints its banner, but every request to it
+  hangs, even from inside its own process. A request from the preview or
+  curl crashed the host's tab once in four probes. The cause is somewhere in
+  its `union`/`ecstatic` stream stack (a minimal legacy `Stream#pipe` works).
+  Not fixed. `npx serve` and a `node:http` server.js do work, and Python's
+  message points at the latter. Next: bisect `union`'s request/response
+  streams against Nodepod's `http` polyfill.
 - **Phone hosts and the 5-minute grace.** Android suspends background tabs,
   and how soon may vary by device and settings. Worth measuring on the
   Pixel before settling on 5 minutes; not urgent.
