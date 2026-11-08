@@ -2,7 +2,7 @@
 // npm run test:queue-release
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease.ts";
+import { isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease.ts";
 import { parseHookInput, promptKeystrokes, riffHookSettings } from "./claudeHooks.ts";
 
 const run = (events: ClaudeEvent[], from: ClaudeState = "off") => events.reduce(nextClaudeState, from);
@@ -26,6 +26,18 @@ test("an interrupt or an API error pauses auto until a turn ends or auto is turn
   assert.equal(run([{ event: "AutoOn" }], "paused"), "idle");
   assert.equal(run([{ event: "AutoOn" }], "working"), "working");
   assert.equal(run([{ event: "UserPromptSubmit", prompt: "x" }, { event: "Stop", stopHookActive: false }], "paused"), "idle");
+});
+
+test("a slash command pauses auto, since most fire no hook; /clear and a finished turn resume it", () => {
+  assert.equal(run([{ event: "SentCommand" }], "idle"), "paused");
+  assert.equal(run([{ event: "SentCommand" }], "working"), "working");
+  assert.equal(run([{ event: "SessionStart", source: "clear" }], "paused"), "idle");
+  assert.equal(run([{ event: "SessionStart", source: "compact" }], "paused"), "idle");
+  assert.equal(run([{ event: "SessionStart", source: "compact" }], "working"), "working");
+  assert.equal(isSlashCommand("/cost"), true);
+  assert.equal(isSlashCommand("  /model sonnet"), true);
+  assert.equal(isSlashCommand("/usr/bin is a path"), false);
+  assert.equal(isSlashCommand("fix /about page"), false);
 });
 
 test("a send counts as working before Claude's hook says so", () => {

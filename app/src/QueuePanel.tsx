@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type * as Y from "yjs";
 import type { QueuedPrompt, SentBy } from "./room";
 import type { TerminalPaneHandle } from "./TerminalPane";
-import { canSend, CLAUDE_STATE_LABEL, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease";
+import { canSend, CLAUDE_STATE_LABEL, isSlashCommand, nextClaudeState, shouldAutoSend, type ClaudeEvent, type ClaudeState } from "./queueRelease";
 
 /**
  * The host's side: follows Claude's events, publishes Claude's state to the
@@ -43,7 +43,7 @@ export function useQueueRelease({ facilitator, roomState, terminalRef, queued, a
   const send = useCallback((prompt: QueuedPrompt, by: SentBy) => {
     if (!canSend(stateRef.current)) return false;
     if (!terminalRef.current?.sendPrompt(prompt.text)) return false;
-    dispatch({ event: "Sent" });
+    dispatch({ event: isSlashCommand(prompt.text) ? "SentCommand" : "Sent" });
     onSend(prompt.id, by);
     return true;
   }, [dispatch, onSend, terminalRef]);
@@ -79,11 +79,12 @@ export function QueuePanel({ queued, facilitator, full, auto, claudeState, hostH
   const sendTitle = canSendNow
     ? claudeState === "working" ? "Claude is working: this goes in as a follow-up" : "Send to Claude"
     : claudeState === "starting" ? "Claude is still starting" : "Start Claude first";
+  const stateTitle = claudeState === "paused" ? "A turn was interrupted or failed, or a slash command ran: auto waits until Claude finishes a turn, or the host turns auto on again" : undefined;
   return (
     <article className="queue">
       <header className="section-title queue-heading">
         <h2>Up next</h2><span>{queued.length}</span>
-        <small className={`claude-state ${hostHere ? claudeState : "off"}`} data-state={hostHere ? claudeState : "away"}>{hostHere ? CLAUDE_STATE_LABEL[claudeState] : "Host away"}</small>
+        <small className={`claude-state ${hostHere ? claudeState : "off"}`} title={hostHere ? stateTitle : undefined} data-state={hostHere ? claudeState : "away"}>{hostHere ? CLAUDE_STATE_LABEL[claudeState] : "Host away"}</small>
         <label className="auto-release" title={facilitator ? "Send the next prompt each time Claude finishes a turn" : "Only the host can change this"}>
           <input type="checkbox" checked={auto} disabled={!editable} onChange={(event) => onAuto(event.target.checked)} />
           Auto

@@ -44,6 +44,7 @@ const PROMPTS = {
   autoFirst: "Auto, first (slow): sent as soon as auto went on.",
   autoSecond: "Auto, second:\nsent when the first turn ended.",
   autoLater: "Auto, later: queued while auto was on and Claude idle.",
+  afterCommand: "After a slash command, once the host resumed auto.",
   slow: "A slow one, so Claude is busy.",
   followUp: "A follow-up sent\nwhile Claude was busy.",
 };
@@ -106,7 +107,7 @@ try {
   });
 
   // The participant stages every prompt; the host queues them in order.
-  for (const text of Object.values(PROMPTS)) {
+  for (const text of [...Object.values(PROMPTS), "/cost"]) {
     await participant.evaluate((value) => {
       const textarea = document.querySelector(".new-prompt textarea");
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(textarea, value);
@@ -168,6 +169,24 @@ try {
   await until(async () => (await stateOn(host)) === "idle", "Claude idle after the auto turns");
   await queue(PROMPTS.autoLater);
   await until(() => fake.count(PROMPTS.autoLater) === 1, "the later prompt to reach the model");
+
+  // A slash command runs locally and fires no hook, so auto sends it and
+  // then pauses rather than type the next prompt into whatever it left
+  // open (/cost leaves a dialog). The host closes it and turns auto on
+  // again, and the next prompt goes.
+  await until(async () => (await stateOn(host)) === "idle", "Claude idle before the slash command");
+  await queue("/cost");
+  await until(async () => (await stateOn(participant)) === "paused", "the participant to see auto paused", 10_000);
+  await queue(PROMPTS.afterCommand);
+  await sleep(2_000);
+  assert.deepEqual(await queuedTexts(host), [PROMPTS.afterCommand], "auto waits after a slash command");
+  assert.equal(fake.count(PROMPTS.afterCommand), 0);
+  await host.click(".terminal-target .xterm");
+  await host.keyboard.press("Escape");
+  await host.click(".auto-release input");
+  await until(async () => !(await autoOn(host)), "auto off", 5_000);
+  await host.click(".auto-release input");
+  await until(() => fake.count(PROMPTS.afterCommand) === 1, "the prompt after the slash command to reach the model");
 
   // Auto off; a Send while Claude is busy goes in as a follow-up.
   await host.click(".auto-release input");

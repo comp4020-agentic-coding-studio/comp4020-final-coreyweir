@@ -13,9 +13,13 @@ import type { ClaudeHookEvent } from "./claudeHooks";
  *   keystrokes would land in a dialog. Nothing is sent.
  * - idle: Claude is waiting for a prompt.
  * - working: Claude is on a turn.
- * - paused: the turn ended without finishing: the host interrupted it
- *   (Claude fires no hook for that) or the API failed. Auto waits for a
- *   turn to finish normally, or for the host to turn auto on again.
+ * - paused: Claude is at its prompt, but auto shouldn't trust that: the
+ *   host interrupted a turn (Claude fires no hook for that), the API
+ *   failed, or the host sent a slash command. Most slash commands run
+ *   locally and fire no hook at all (measured on 2.1.221: /cost, /help,
+ *   /model, /compact with nothing to compact), and some leave a dialog
+ *   open that the next prompt would land in. Auto waits for a turn to
+ *   finish normally, `/clear`, or the host turning auto on again.
  */
 export const CLAUDE_STATES = ["off", "starting", "idle", "working", "paused"] as const;
 export type ClaudeState = (typeof CLAUDE_STATES)[number];
@@ -27,8 +31,10 @@ export type ClaudeEvent =
   /** Claude's process started or exited. */
   | { event: "Started" }
   | { event: "Exited" }
-  /** The host sent a prompt: working at once, so auto can't send a second before Claude's hook says so. */
+  /** A prompt was sent: working at once, so auto can't send a second before Claude's hook says so. */
   | { event: "Sent" }
+  /** A slash command was sent; it may never reach the model, so no hook may follow. */
+  | { event: "SentCommand" }
   /** The host turned auto on: after an interrupt or an API error Claude is at its prompt again. */
   | { event: "AutoOn" };
 
@@ -40,11 +46,15 @@ export function nextClaudeState(state: ClaudeState, event: ClaudeEvent): ClaudeS
     case "Exited":
       return "off";
     case "SessionStart":
-      // "compact" can come in the middle of a turn.
-      return event.source === "compact" ? state : "idle";
+      // An automatic compaction comes in the middle of a turn; a /compact
+      // the host sent ends one.
+      if (event.source === "compact") return state === "paused" ? "idle" : state;
+      return "idle";
     case "UserPromptSubmit":
     case "Sent":
       return "working";
+    case "SentCommand":
+      return state === "working" ? state : "paused";
     case "AutoOn":
       return state === "paused" ? "idle" : state;
     case "Stop":
@@ -71,8 +81,13 @@ export const CLAUDE_STATE_LABEL: Record<ClaudeState, string> = {
   starting: "Claude is starting",
   idle: "Claude is waiting",
   working: "Claude is working",
-  paused: "Claude stopped mid-turn",
+  paused: "Paused for the host",
 };
+
+/** A prompt Claude Code reads as a slash command. */
+export function isSlashCommand(prompt: string) {
+  return /^\/[\w:-]+(\s|$)/.test(prompt.trimStart());
+}
 
 /** Keys a host can press in Claude's terminal that interrupt a turn. */
 export function isInterruptKey(data: string) {
