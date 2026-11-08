@@ -393,6 +393,12 @@ auto-release at the latest.
   fields only, images byte for byte and checked (type, magic bytes,
   2048px, decodes). Checked by `npm run test:board-file` and
   `npm run test:boards-browser` (dev and live, both sizes).
+  - ~~The board as a picture~~ (Corey, 9 Nov; ADR 0003's "The board as a
+    picture"): every "Export board" is now "Export board (JSON)" with
+    "Export board (PNG)" after it, `riff-<code>-board.png`, drawn from the
+    room's document by quickdraw's own export, so a row renders from the
+    stored copy. Checked by `test:boards-browser` (dev, both sizes). Needs
+    live.
   - ~~Workspace export, a zip including Claude transcripts, never
     credentials.~~ Built 8 Nov (ADR 0003's third amendment): a host-only
     "Export" in the workspace controls, `app/src/workspaceExport.ts`
