@@ -16,6 +16,7 @@ import { attachNetGatewayBrowser, type NetGatewayBrowserHandle } from "./netGate
 import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
 import { SAVED_SUMMARY, Workspace, WorkspaceBusyError } from "./workspace";
+import { cloneRepository, githubRepoUrl } from "./repoClone";
 import { credentialFor, GITHUB_ORIGINS, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
 import interactiveBashUrl from "./assets/wasmer/bash-1.0.25-riff.webc?url";
@@ -407,7 +408,6 @@ export class ClaudePodController {
         "/opt/claude/shim.cjs": shim,
         "/opt/claude/run.cjs": run,
         "/opt/claude/claude-booted.patched.js": claude,
-        "/work/repo/.keep": "",
         "/home/user/.claude.json": JSON.stringify({
           firstStartTime: new Date().toISOString(),
           hasCompletedOnboarding: true,
@@ -470,13 +470,31 @@ export class ClaudePodController {
     }
   }
 
-  /** Before the first program starts: say what the workspace is. */
+  /**
+   * Before the first program starts: say what the workspace is, and clone
+   * the room's repository if /work/repo doesn't have one yet. An existing
+   * workspace is never re-cloned or pulled, which would overwrite unpushed
+   * work.
+   */
   private async prepareWorkspace() {
     if (this.workspacePrepared || !this.pod) return;
     this.workspacePrepared = true;
     const restored = this.workspace?.restored;
     if (restored) {
       this.terminalNote(`\x1b[38;5;244mRestored this room's workspace from this browser: ${restored.files} files, ${formatBytes(restored.bytes)}, saved ${new Date(restored.savedAt).toLocaleString()}.\x1b[0m`);
+    }
+    const url = githubRepoUrl(this.config.repo);
+    if (this.config.repo.trim() && !this.pod.volume.existsSync("/work/repo/.git")) {
+      if (!url) {
+        this.terminalNote(`\x1b[33mNot cloned: ${this.config.repo.trim()} isn't a GitHub repository. Ask Claude to fetch it.\x1b[0m`);
+      } else if (!this.githubCredential) {
+        this.terminalNote(`\x1b[33mNot cloned: cloning ${url} needs GitHub connected for pushing.\x1b[0m`);
+      } else {
+        this.report(`Cloning ${url}`);
+        this.terminalNote(`\x1b[38;5;244mCloning ${url} into /work/repo...\x1b[0m`);
+        const code = await cloneRepository(this.pod, url, "/work/repo", this.guestEnv, (text) => this.terminalNote(text, false));
+        if (code !== 0) this.terminalNote(`\x1b[33mThe clone failed (exit ${code}). Claude can try again with git.\x1b[0m`);
+      }
     }
     this.terminalNote(this.workspace && !this.workspaceUnsaved
       ? `\x1b[38;5;244m${SAVED_SUMMARY}\x1b[0m`
