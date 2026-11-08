@@ -22,7 +22,7 @@ import {
   applyBoardFile, boardBytes, boardFileName, dropUndecodableImages, exportBoard, parseBoardFile,
 } from "./boardFile";
 import { type LocalCopy, deleteAllCopies, deleteCopy, findCopy, listCopies, loadCopy, noteOpened, seedCopy } from "./copies";
-import { SAVED_SUMMARY, type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
+import { type WorkspaceSummary, deleteWorkspace, formatBytes, listWorkspaces } from "./workspace";
 
 type View = "board" | "room" | "preview";
 // models: "riff" is Riff's own free models through the server
@@ -95,6 +95,9 @@ function downloadBoard(file: BoardFile) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
+
+// Only hosts have files: what the landing list says they are.
+const FILES_NOTE = "Files: the /work and /home/user directories from the session, for continuation or export.";
 
 // What a read-only board says about itself: look around, don't change.
 const LOOK_HINT = "Look only: drag to move around, pinch or ctrl + scroll to zoom.";
@@ -436,7 +439,7 @@ function SiteAccount({ user }: { user: User | null | undefined }) {
 // files of every room hosted here (docs/adr/0010). A live room enters; a
 // copy opens read-only, beside the forms on a wide screen and as its own
 // page on a phone. Delete takes the copy, this browser's place in the
-// room and the host's files with it; Delete files takes the files alone.
+// room and the files with it; Delete files takes the files alone.
 type RoomRow = { key: string; room: ListedRoom | null; copy: LocalCopy | null; workspace: WorkspaceSummary | null; code: string | null };
 
 function roomRows(rooms: ListedRoom[], copies: LocalCopy[], workspaces: WorkspaceSummary[]): RoomRow[] {
@@ -533,13 +536,13 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
             </span>
             {workspace && asking === `workspace:${workspace.room}` ? (
               <span className="actions asking">
-                <span>Delete the host's files for this room from this browser? Anything not pushed is lost.</span>
+                <span>Delete the files for this room from this browser? Anything not pushed is lost.</span>
                 <button className="danger" onClick={() => void act(() => deleteWorkspace(workspace.room))}>Delete files</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
             ) : copy && asking === copy.database ? (
               <span className="actions asking">
-                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}{workspace ? ", and the host's files (anything not pushed is lost)" : ""}?</span>
+                <span>Delete this browser's copy{copy.roomId ? ", and its place in the room" : ""}{workspace ? ", and the files (anything not pushed is lost)" : ""}?</span>
                 <button className="danger" onClick={() => void act(() => deleteCopy(copy))}>Delete</button>
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
@@ -557,10 +560,10 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
           </li>
         ))}
       </ul>
-      {workspaces.length > 0 && <p className="workspace-note"><small>Files: what the host's terminal had, kept so a reload or crash loses nothing. {SAVED_SUMMARY}</small></p>}
+      {workspaces.length > 0 && <p className="workspace-note"><small>{FILES_NOTE}</small></p>}
       {deletable > 1 && (asking === "all" ? (
         <p className="delete-all asking">
-          <span>Delete all {copyCount} copies{workspaces.length ? ` and ${workspaces.length === 1 ? "the host's files" : `${workspaces.length} rooms' host files`}` : ""} on this browser, and its place in every room?</span>
+          <span>Delete all {copyCount} copies{workspaces.length ? ` and ${workspaces.length === 1 ? "the files" : `${workspaces.length} rooms' files`}` : ""} on this browser, and its place in every room?</span>
           <button className="danger" onClick={() => void act(deleteAllCopies)}>Delete all</button>
           <button className="link" onClick={() => setAsking(null)}>Cancel</button>
         </p>
@@ -631,7 +634,7 @@ function BoardPeek({ copy, room, onClose }: { copy: LocalCopy; room: ListedRoom 
 function WorkspaceMarker({ workspace }: { workspace: WorkspaceSummary }) {
   const saved = workspace.savedAt ? `saved ${shortDate(workspace.savedAt)} ${new Date(workspace.savedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : "not saved yet";
   return (
-    <small className="workspace-marker" title={SAVED_SUMMARY}>
+    <small className="workspace-marker" title={FILES_NOTE}>
       Files: {workspace.files.toLocaleString()} ({formatBytes(workspace.bytes)}), {saved}
     </small>
   );

@@ -272,7 +272,7 @@ try {
   assert.ok((await listed()).some((row) => /WSUI/.test(row) && /Files:/.test(row)));
   await clickIn("WSUI", "Delete");
   const asked = await other.$$eval(".your-rooms li", (rows) => rows.find((r) => r.textContent.includes("WSUI"))?.textContent ?? "");
-  assert.match(asked, /and the host's files/, "Delete says it takes the files too");
+  assert.match(asked, /and the files/, "Delete says it takes the files too");
   await clickIn("WSUI", "Delete");
   await other.waitForFunction(() => ![...document.querySelectorAll(".your-rooms li")].some((r) => r.textContent.includes("WSUI")), { polling: 100 });
   const deleted = await stored();
