@@ -156,4 +156,28 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(forward(event.request, placeholders));
 });
 
+// A page Claude wrote never runs as a document on Riff's origin, where it
+// could read the host's stored tokens, reach the host page and act as the
+// host (docs/adr/0011). Nodepod's worker would serve one to a navigation
+// under /__virtual__/ or /__preview__/, and to a frame navigating to a path
+// a preview claimed; Riff frames previews from their own origin instead,
+// so no navigation here is handed to the pod. Registered before Nodepod's
+// handler, so it runs first.
+self.addEventListener("fetch", (event) => {
+  if (event.request.mode !== "navigate") return;
+  event.stopImmediatePropagation();
+  if (/^\/__(?:virtual|preview)__\//.test(new URL(event.request.url).pathname)) {
+    event.respondWith(new Response("Previews open on their own origin.", {
+      status: 404,
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        // or Riff's isolated page shows Chrome's error page instead
+        "cross-origin-embedder-policy": "require-corp",
+        "cross-origin-resource-policy": "same-origin",
+      },
+    }));
+  }
+  // Anything else goes to the network, as if no worker were here.
+});
+
 importScripts("/__sw__.js");
