@@ -117,3 +117,16 @@
 .landing.join-link>.entry-card>form{padding-top:18px}
 .landing.join-link>.entry-card>button.link{margin:0 26px 22px}
 .landing.join-link>.entry-card>form{min-height:0}
+
+/* A row's actions: the first in sight, the rest in a More menu (App.tsx
+   RowActions), so the row is one line of buttons at any width. */
+.home>.your-rooms .actions>.link,.home>.your-rooms .row-more>summary{font-size:12px}
+.row-more{position:relative}
+.row-more>summary{list-style:none;cursor:pointer;color:#315efb;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+.row-more>summary::-webkit-details-marker{display:none}
+.row-more>summary::after{content:"";display:inline-block;margin-left:5px;vertical-align:2px;border:4px solid transparent;border-top-color:currentColor;border-bottom:0}
+.row-more[open]>summary::after{border-top:0;border-bottom:4px solid currentColor}
+.row-more>summary:focus-visible{outline:2px solid #315efb;outline-offset:2px;border-radius:2px}
+.row-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:25;min-width:160px;padding:5px;display:grid;border:1px solid #d3d3cd;border-radius:6px;background:white;box-shadow:0 10px 30px rgba(0,0,0,.12)}
+.home>.your-rooms .row-menu button{display:block;width:100%;padding:9px 10px;border:0;border-radius:4px;background:none;color:#191919;font-size:12px;text-align:left;text-decoration:none;white-space:nowrap}
+.home>.your-rooms .row-menu button:hover,.home>.your-rooms .row-menu button:focus-visible{background:#f2f2ee;outline:0}

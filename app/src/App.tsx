@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Children, useEffect, useRef, useState } from "react";
 import { Quickdraw, useQuickdrawStore, type QuickdrawRef, type ShapeRecord } from "@quickdrawjs/react";
 import { addPrompt, replaceYText, saveName, savedName, snapshotPrompts, type PromptSnapshot, type QueuedPrompt, type RoomMember, type SentBy, useRoom } from "./room";
 import { QueuePanel, useQueueRelease } from "./QueuePanel";
@@ -494,6 +494,47 @@ async function exportCopy(copy: LocalCopy) {
   }
 }
 
+// A row's first action stays in sight (Enter, or Open for a copy); the
+// rest go in a More menu once there are two or more of them, so a row
+// stays one line of buttons at 390px however many a room collects. A
+// native <details>: keyboard and screen readers get a disclosure for free;
+// a click outside, Escape or choosing an action closes it.
+function RowActions({ label, children }: { label: string; children: React.ReactNode }) {
+  const actions = Children.toArray(children).filter(Boolean);
+  const more = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const details = more.current;
+    if (!details) return;
+    const outside = (event: Event) => {
+      if (details.open && !details.contains(event.target as Node)) details.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !details.open) return;
+      details.open = false;
+      details.querySelector("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", outside);
+    details.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      details.removeEventListener("keydown", escape);
+    };
+  }, [actions.length]);
+  const [first, ...rest] = actions;
+  if (rest.length < 2) return <span className="actions">{actions}</span>;
+  return (
+    <span className="actions">
+      {first}
+      <details className="row-more" ref={more}>
+        <summary aria-label={`More for ${label}`}>More</summary>
+        <span className="row-menu" role="group" aria-label={`More for ${label}`} onClick={(event) => {
+          if ((event.target as HTMLElement).closest("button")) more.current!.open = false;
+        }}>{rest}</span>
+      </details>
+    </span>
+  );
+}
+
 function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChanged }: {
   list: RoomList | null;
   // the room this browser's host just ended, which says so quietly
@@ -555,16 +596,14 @@ function RoomsList({ list, copies, workspaces, peeking, endedNow, onOpen, onChan
                 <button className="link" onClick={() => setAsking(null)}>Cancel</button>
               </span>
             ) : (
-              <span className="actions">
+              <RowActions label={code ? `room ${code}` : "this room"}>
                 {room && <button className="link" onClick={() => goToRoom(room.id)}>Enter</button>}
-                {copy && <>
-                  <button className="link" onClick={() => onOpen(copy)}>Open</button>
-                  <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>
-                </>}
+                {copy && <button className="link" onClick={() => onOpen(copy)}>Open</button>}
+                {copy && <button className="link" onClick={() => void act(() => exportCopy(copy))}>Export board</button>}
                 {workspace && <ExportFiles workspace={workspace} code={code ?? null} secrets={hostSecrets} />}
                 {workspace && <button className="link" onClick={() => setAsking(`workspace:${workspace.room}`)}>Delete files</button>}
                 {copy && <button className="link" onClick={() => setAsking(copy.database)}>Delete</button>}
-              </span>
+              </RowActions>
             )}
           </li>
         ))}
