@@ -10,6 +10,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { honourClipboardWrites } from "./terminalClipboard";
+import { TERMINAL_THEME } from "./terminalTheme";
 import { createRiffWasmerProvider, type WasmerCommandProvider } from "./wasmerCommandProvider";
 import { loadClaudeBundle } from "./claudeBundle";
 import { SIGINT, WASIX_SESSION_CONTROL_DIR, WasixSession, type WasixSessionCommand } from "./wasixSession";
@@ -524,6 +525,7 @@ export class ClaudePodController {
         Terminal,
         FitAddon,
         SerializeAddon,
+        theme: TERMINAL_THEME,
         fontSize: 12,
         fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
         prompt: (cwd) => `\x1b[38;5;244mnodepod:${cwd}$\x1b[0m `,

@@ -6,6 +6,7 @@ import type { ClaudeEvent } from "./queueRelease";
 import { useTerminalChannel, type TerminalChannelEvent } from "./terminalChannel";
 import { usePreviewHostChannel } from "./previewChannel";
 import { ACTUAL_FONT_SIZE, fitMirror, type MirrorMode } from "./mirrorFit";
+import { TERMINAL_THEME } from "./terminalTheme";
 import "./terminal-stream.css";
 
 export type TerminalPaneHandle = { sendPrompt: (prompt: string) => boolean };
@@ -43,7 +44,8 @@ function ParticipantTerminal({ subscribe, mode }: { subscribe: (listener: (event
       fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
       fontSize: ACTUAL_FONT_SIZE,
       lineHeight: 1.1,
-      theme: { background: "#171816", foreground: "#e7e8df", cursor: "#171816" },
+      // the mirror takes no input, so its cursor is drawn in the background
+      theme: { ...TERMINAL_THEME, cursor: TERMINAL_THEME.background },
     });
     terminal.open(box);
     let frame = 0;
