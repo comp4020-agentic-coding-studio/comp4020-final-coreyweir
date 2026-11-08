@@ -20,15 +20,17 @@ Week 13, the last stretch before A3 (noon, 9 November). The crits are
 over. Built so far: identity, rooms and permissions with the who-did-what
 log (ADRs 0005, 0006), credentials kept out of the guest (0007), "Your
 rooms", invites and colleagues (0008), the room lifecycle, size cap,
-pruning, local copies and board export/import (0003), and Riff's own free
-models for hosts (0009).
+pruning, local copies, board export/import (JSON and PNG), reopening,
+leaving and deleting (0003), Riff's own free models for hosts (0009), the
+OPFS workspace with clone at boot, workspace export and import (0010,
+0003), queue auto-release (0004), the preview on its own origin (0011,
+2a), MCP servers for the host's Claude (0012), and the week-12 crit's
+bugs (`docs/week-12.md`).
 
-What's left is measured against `README.md`: the OPFS workspace and
-cloning the host's repo at boot (resilience), workspace export (no
-lock-in), queue auto-release (ADR 0004, not too opinionated), the bugs
-found at the week-12 crit (`docs/week-12.md`), and polish (see `PLAN.md`'s
-P2). These are being built in parallel, each in its own git worktree;
-only the main checkout deploys.
+What's left is measured against `README.md`: verification on live, the
+preview's 2b (ADR 0011, designed), and polish (see `PLAN.md`). Work is
+done in parallel, each in its own git worktree; only the main checkout
+deploys.
 
 Update this section at each crit. A harness describing last week's project
 steers the agent into last week's work.
@@ -147,8 +149,8 @@ same commit. Each README quality turns into what it means for a change:
   end them, so the board is deleted. Room creation is rate-limited per IP
   (60 per 10 minutes): many smoke runs against dev end in 429
   `slow_down`; restart the dev server.
-- The client still keeps its own IndexedDB copy of each room, listed under
-  "Boards on this browser" (`app/src/copies.ts`). "It persisted" has to say
+- The client still keeps its own IndexedDB copy of each room, listed on
+  the room's row in "Your rooms" (`app/src/copies.ts`). "It persisted" has to say
   which store it came from. Open a copy through `openCopy()`, never a bare
   `IndexeddbPersistence`, so deleting it from another tab doesn't break the
   tab that has it open.

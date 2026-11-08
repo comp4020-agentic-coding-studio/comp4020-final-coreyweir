@@ -1,6 +1,7 @@
 # 10. The host's workspace persists in this browser (OPFS), and the repository is cloned at boot
 
-- Status: accepted
+- Status: accepted, implemented 2026-11-08 (`16ee967` saving, `b77233a`
+  list and delete, `50bec09` clone at boot; see Checks)
 - Date: 2026-11-08
 
 ## Context
@@ -72,7 +73,8 @@ unsaved scratch workspace.
   `node_modules` and Claude's transcripts (`/resume` works after a
   reload). **Not saved:** what the boot writes fresh every time, because
   a stale copy could fight an upgrade: the Claude bundle (`/opt/claude`),
-  Riff's `.wasix-session` (bash's tools), Claude's settings and
+  Riff's session tools (bash's; `/opt/riff` since 8 Nov, out of the
+  workspace, `/work/repo/.wasix-session` before), Claude's settings and
   `.claude.json`; and everything outside those two directories (`/tmp`,
   Nodepod's caches). The UI says what is saved and what isn't, so a
   script left in `/tmp` isn't a surprise.
@@ -99,10 +101,10 @@ unsaved scratch workspace.
   workspace too, since Delete leaves nothing of the room on the machine
   (ADR 0003), and signing out offers to delete both. A workspace whose
   board copy the browser cleared gets a row of its own, so none is kept
-  silently. The planned signed-in page shows the
-  same marker on each room. Export is the workspace zip (P2, built
+  silently. Since the landing page's redesign (8 Nov) there is one list,
+  "Your rooms", and the marker is on the room's row. Export is the workspace zip (P2, built
   alongside); since 8 Nov the row has "Export files" beside "Export
-  board", which zips the saved workspace without booting it (ADR 0003,
+  board" ("Export board (JSON)" and "(PNG)" since 9 Nov), which zips the saved workspace without booting it (ADR 0003,
   "Export files from the landing page").
 - Only the host's browser has a workspace. Nothing about it reaches the
   server, the room, or other members.
