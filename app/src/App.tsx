@@ -12,7 +12,8 @@ import {
 } from "./api";
 import * as Y from "yjs";
 import { type BoardLimit, useBoardSync } from "./boardSync";
-import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
+import { TerminalPane, githubRefusalText, type TerminalPaneHandle } from "./TerminalPane";
+import { checkGitHubToken } from "./githubCheck";
 import type { HostConfig } from "./claudePod";
 import { previewRelayUrl } from "./previewChannel";
 import {
@@ -1270,7 +1271,7 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
 // connects: a shared link (?room=CODE) for someone already in the room goes
 // straight in; for anyone else it's the join form with the code filled in.
 function RoomGate({ roomId, code }: { roomId: string | null; code: string | null }) {
-  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean } | { join: string; keep?: boolean } | { error: string } | null>(null);
+  const [state, setState] = useState<{ access: Access; githubToken: string | null; pushLost: boolean; pushRevoked?: string } | { join: string; keep?: boolean } | { error: string } | null>(null);
   const [withoutGitHub, setWithoutGitHub] = useState(false);
   const user = useUser();
 
@@ -1285,9 +1286,17 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
         if (!roomId) history.replaceState(null, "", `${location.pathname}?${new URLSearchParams({ id: access.room.id })}`);
         // The host's pod gets the push token at boot, so open it first.
         const hadPush = hasPushToken();
-        const githubToken = access.member.host ? await unwrapPushToken() : null;
+        let githubToken = access.member.host ? await unwrapPushToken() : null;
+        // Asked of GitHub before the pod boots, so a revoked token is caught
+        // here rather than by the first git command (docs/adr/0005).
+        let pushRevoked: string | undefined;
+        if (githubToken && await checkGitHubToken(githubToken) === "refused") {
+          forgetPushToken();
+          pushRevoked = githubToken;
+          githubToken = null;
+        }
         if (!active) return;
-        setState({ access, githubToken, pushLost: access.member.host && hadPush && !githubToken });
+        setState({ access, githubToken, pushLost: access.member.host && hadPush && !githubToken && !pushRevoked, pushRevoked });
       } else {
         setState(code ? { join: code, keep: found?.keep } : { error: "This browser isn't in that room. Ask the host for the code." });
       }
@@ -1313,15 +1322,15 @@ function RoomGate({ roomId, code }: { roomId: string | null; code: string | null
   const { room: entered } = state.access;
   if (!facilitator && entered.state === "ended" && (!entered.keep || entered.pruned)) return <RoomClosed reason={entered.pruned ? "board-pruned" : "room-ended"} roomId={entered.id} />;
   const storedConfig = facilitator ? savedHostConfig() : null;
-  const { githubToken, pushLost } = state;
-  // A host who meant to push (a repository, or a token that has since
-  // expired with its session) is told before Claude starts without it.
-  if (storedConfig && !githubToken && (pushLost || storedConfig.repo) && !withoutGitHub) {
+  const { githubToken, pushLost, pushRevoked } = state;
+  // A host who meant to push (a repository, a token whose session has
+  // ended, or one GitHub has revoked) is told before Claude starts without it.
+  if (storedConfig && !githubToken && (pushLost || pushRevoked || storedConfig.repo) && !withoutGitHub) {
     return (
       <main className="landing">
         <section className="entry-card">
-          <h2>{pushLost ? "GitHub for pushing ended with your sign-in" : "Connect GitHub for pushing?"}</h2>
-          <p>{pushLost ? "Riff keeps it only for the sign-in it was connected in, and that sign-in has ended (you signed out, or didn't use Riff for 30 days). Connect again so Claude can push." : `This room works on ${storedConfig.repo}. Without GitHub, git in the room can't reach GitHub at all, public repositories included.`}</p>
+          <h2>{pushRevoked ? "GitHub no longer accepts Riff's token" : pushLost ? "GitHub for pushing ended with your sign-in" : "Connect GitHub for pushing?"}</h2>
+          <p>{pushRevoked ? `${githubRefusalText(pushRevoked)} Connect again so Claude can push.` : pushLost ? "Riff keeps it only for the sign-in it was connected in, and that sign-in has ended (you signed out, or didn't use Riff for 30 days). Connect again so Claude can push." : `This room works on ${storedConfig.repo}. Without GitHub, git in the room can't reach GitHub at all, public repositories included.`}</p>
           <GitHubPush user={user} back={`${location.pathname}${location.search}`} />
           <button className="link" onClick={() => setWithoutGitHub(true)}>Continue without GitHub</button>
         </section>

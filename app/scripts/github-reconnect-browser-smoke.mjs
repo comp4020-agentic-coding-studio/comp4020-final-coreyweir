@@ -77,46 +77,103 @@ async function run(tab, command) {
 const status = "node -e \"fetch('https://api.github.com/user',{headers:{authorization:'token '+process.env.GITHUB_TOKEN,'user-agent':'riff-smoke'}}).then(r=>console.log('GH-STATUS-'+r.status))\"";
 
 let tab;
-try {
+// A signed-in host whose stored push token is `token`, hosting a room from
+// the landing page. `answerChecks` stands in for GitHub's answer to the
+// page's own token checks (the guest's requests go through the service
+// worker, another target, and reach the real GitHub).
+async function hostWith(token, answerChecks) {
   const session = signIn(me.id, me.login);
   const context = await browser.createBrowserContext();
   await context.setCookie({ name: "__Host-riff-session", value: session.token, domain: "127.0.0.1", path: "/", secure: true, httpOnly: true, sameSite: "Lax" });
-  tab = await context.newPage();
-  tab.on("pageerror", (error) => pageErrors.push(String(error)));
-  await tab.goto(baseUrl, { waitUntil: "networkidle0" });
-  // GitHub was connected once; the token has since been revoked.
-  await tab.evaluate((sealed) => localStorage.setItem("riff-github-push", sealed), seal(`gho_riffSmokeRevoked${randomBytes(10).toString("hex")}`, session.tokenHash));
-  await tab.reload({ waitUntil: "networkidle0" });
-
-  // ---- host a room, Bash in it
-  await tab.click(".entry-card > nav button:nth-child(2)");
-  await tab.$(".model-choice label:nth-of-type(2) input").then((own) => own?.click());
-  const inputs = await tab.$$(".entry-card form input:not([type=radio]):not([type=checkbox])");
+  const opened = await context.newPage();
+  opened.on("pageerror", (error) => pageErrors.push(String(error)));
+  const checks = [];
+  if (answerChecks) {
+    const cdp = await opened.createCDPSession();
+    await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "https://api.github.com/user*", requestStage: "Request" }] });
+    cdp.on("Fetch.requestPaused", async ({ requestId, request }) => {
+      const auth = request.headers.Authorization ?? request.headers.authorization ?? "";
+      if (request.method === "OPTIONS" || !auth.includes(token)) return cdp.send("Fetch.continueRequest", { requestId });
+      const status = answerChecks();
+      checks.push(status);
+      await cdp.send("Fetch.fulfillRequest", {
+        requestId,
+        responseCode: status,
+        responseHeaders: [{ name: "content-type", value: "application/json" }, { name: "access-control-allow-origin", value: "*" }],
+        body: Buffer.from(JSON.stringify(status === 200 ? { login: me.login, id: me.id } : { message: "Bad credentials" })).toString("base64"),
+      });
+    });
+  }
+  await opened.goto(baseUrl, { waitUntil: "networkidle0" });
+  await opened.evaluate((sealed) => localStorage.setItem("riff-github-push", sealed), seal(token, session.tokenHash));
+  await opened.reload({ waitUntil: "networkidle0" });
+  await opened.click(".entry-card > nav button:nth-child(2)");
+  await opened.$(".model-choice label:nth-of-type(2) input").then((own) => own?.click());
+  const inputs = await opened.$$(".entry-card form input:not([type=radio]):not([type=checkbox])");
   for (const [index, value] of [[0, "Wren"], [1, `${baseUrl}/fake-anthropic`], [2, "invalid-reconnect-smoke-token"]]) {
     await inputs[index].click({ clickCount: 3 });
     await inputs[index].type(value);
   }
-  const keep = await tab.$(".entry-card form label.check input[type=checkbox]");
+  const keep = await opened.$(".entry-card form label.check input[type=checkbox]");
   if (keep && await keep.evaluate((element) => element.checked)) await keep.click();
-  await tab.click(".entry-card form .primary");
-  await tab.waitForFunction(() => location.search.startsWith("?id="), { timeout: 15_000 });
+  await opened.click(".entry-card form .primary");
+  await opened.waitForFunction(() => location.search.startsWith("?id="), { timeout: 15_000 });
+  return { context, tab: opened, checks };
+}
+
+async function endRoom(page) {
+  if (!(await page.$(".people-panel"))) await page.click(".participants");
+  await page.waitForSelector(".people-panel");
+  await page.click(".end-room > button");
+  await page.waitForSelector(".end-room.asking");
+  await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.click(".end-room button.danger")]);
+}
+
+try {
+  // ---- 1. Revoked before the room opens: the real GitHub says 401 to the
+  // page's check, and the host is told before anything boots.
+  const before = await hostWith(`gho_riffSmokeRevoked${randomBytes(10).toString("hex")}`, null);
+  await before.tab.waitForFunction(() => /GitHub no longer accepts Riff's token/.test(document.querySelector(".entry-card h2")?.textContent ?? ""), { timeout: 20_000, polling: 100 });
+  const gate = await before.tab.$eval(".entry-card", (e) => e.textContent.replace(/\s+/g, " "));
+  assert.match(gate, /GitHub has revoked the token Riff connected for you/);
+  assert.match(gate, /Connect GitHub/, "with a way to connect again");
+  assert.equal(await before.tab.evaluate(() => localStorage.getItem("riff-github-push")), null, "the revoked token is forgotten");
+  assert.equal(await before.tab.$(".terminal-target"), null, "nothing booted");
+  console.log("before boot:", gate.slice(0, 160));
+  await before.tab.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Continue without GitHub")?.click());
+  await before.tab.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 15_000, polling: 100 });
+  await endRoom(before.tab);
+  await before.context.close();
+
+  // ---- 2. Revoked while the room runs: the page's checks see it before any
+  // git command does.
+  const token = `gho_riffSmokeRevokedLater${randomBytes(10).toString("hex")}`;
+  let revoked = false;
+  const during = await hostWith(token, () => (revoked ? 401 : 200));
+  tab = during.tab;
   await tab.waitForFunction(() => document.querySelector(".room-name i")?.className === "connected", { timeout: 15_000, polling: 100 });
   const code = await tab.$eval(".room-name span", (element) => element.textContent.replace("Room ", ""));
+  assert.deepEqual(during.checks, [200], "the room checked the token once before booting");
   await tab.click(".topbar nav button:nth-child(2)");
   await tab.waitForSelector(".terminal-controls button", { timeout: 20_000 });
   await tab.$$eval(".terminal-controls button", (buttons) => buttons.find((b) => b.textContent === "Start Bash")?.click());
   await tab.waitForFunction(() => document.querySelector(".terminal-heading span")?.textContent === "WASIX Bash ready", { timeout: 240_000, polling: 200 });
   await tab.waitForFunction(() => /# $/m.test(document.querySelector(".terminal-target .xterm-rows")?.innerText.replace(/\u00a0/g, " ").trimEnd() + " "), { timeout: 30_000, polling: 100 });
+  const context = during.context;
 
-  // ---- the revoked token is refused, and the host is told where to fix it
+  revoked = true;
+  // The host comes back to the tab: no git command has run.
+  await tab.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await tab.waitForFunction(() => /GitHub has revoked the token Riff connected for you/.test(document.querySelector(".terminal-note")?.textContent ?? ""), { timeout: 10_000, polling: 100 });
+  assert.deepEqual(during.checks, [200, 401], "one more check, on focus");
+  assert.equal(await tab.evaluate(() => localStorage.getItem("riff-github-push")), null, "the refused token is forgotten");
+  const href = await tab.$eval(".terminal-note a", (a) => ({ href: a.getAttribute("href"), target: a.target }));
+  assert.deepEqual(href, { href: "/?github=reconnect", target: "_blank" }, "the banner opens reconnecting in a new tab");
+  console.log("refused, before any git command:", await noteText(tab));
+  // The guest agrees: the real GitHub refuses the token through the swap too.
   const placeholderBefore = await run(tab, "printenv GITHUB_TOKEN");
   assert.match(placeholderBefore, /^riff-placeholder-github-[0-9a-f]{32}$/, "the guest holds a placeholder");
   assert.match(await run(tab, status), /GH-STATUS-401/, "GitHub refuses the revoked token");
-  await tab.waitForFunction(() => /GitHub has revoked the token Riff connected for you/.test(document.querySelector(".terminal-note")?.textContent ?? ""), { timeout: 10_000, polling: 100 });
-  const href = await tab.$eval(".terminal-note a", (a) => ({ href: a.getAttribute("href"), target: a.target }));
-  assert.deepEqual(href, { href: "/?github=reconnect", target: "_blank" }, "the banner opens reconnecting in a new tab");
-  console.log("refused:", await noteText(tab));
-  assert.equal(await tab.evaluate(() => localStorage.getItem("riff-github-push")), null, "the refused token is forgotten");
 
   // ---- connect again in another tab: paste a token (the real page, the real check)
   const other = await context.newPage();
@@ -142,11 +199,7 @@ try {
   assert.deepEqual(pageErrors, []);
 
   // a board nobody needs afterwards: end the room, which deletes it
-  if (!(await tab.$(".people-panel"))) await tab.click(".participants");
-  await tab.waitForSelector(".people-panel");
-  await tab.click(".end-room > button");
-  await tab.waitForSelector(".end-room.asking");
-  await Promise.all([tab.waitForNavigation({ waitUntil: "networkidle0" }), tab.click(".end-room button.danger")]);
+  await endRoom(tab);
   console.log(`room ${code} ended`);
   console.log("github reconnect smoke passed");
 } catch (error) {

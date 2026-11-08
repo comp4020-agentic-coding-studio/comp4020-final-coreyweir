@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { WorkspaceExport } from "./WorkspaceExport";
 import { forgetPushToken, onPushTokenStored, unwrapPushToken } from "./api";
+import { checkGitHubToken, throttled } from "./githubCheck";
 import { Terminal } from "@xterm/xterm";
 import type { ClaudePodController, HostConfig } from "./claudePod";
 import type { ClaudeEvent } from "./queueRelease";
@@ -142,7 +143,10 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const [error, setError] = useState<string | null>(null);
   // GitHub refused the host's token; connecting again in another tab swaps
   // the new one into the running pod (no reload, Claude keeps running).
-  const [githubRefused, setGithubRefused] = useState(false);
+  // The refused token, so the banner can say what kind it was.
+  const [githubRefused, setGithubRefused] = useState<string | null>(null);
+  // The token the pod is using now (a reconnect replaces it).
+  const githubTokenRef = useRef(config?.githubToken);
   const [mirrorMode, setMirrorMode] = useState<MirrorMode>(savedMirrorMode);
   const channel = useTerminalChannel(roomId, token, facilitator);
   const publishPreview = usePreviewHostChannel(roomId, token, facilitator, controllerRef);
@@ -170,15 +174,45 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
     if (facilitator) previewChangeRef.current(null, publishPreview(false));
   }, [facilitator, publishPreview]);
 
+  // While hosting with GitHub, ask GitHub whether it still takes the token:
+  // when the host comes back to the tab (at most every 5 minutes) and every
+  // 30 minutes, so a revoked token shows here before git fails on it.
   useEffect(() => {
-    if (!githubRefused) return;
+    if (!facilitator || !attached || githubRefused !== null) return;
+    let active = true;
+    const check = throttled(() => {
+      const token = githubTokenRef.current;
+      if (!token) return;
+      void checkGitHubToken(token).then((state) => {
+        if (!active || state !== "refused" || token !== githubTokenRef.current) return;
+        forgetPushToken();
+        setGithubRefused(token);
+      });
+    }, 5 * 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = window.setInterval(check, 30 * 60_000);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(timer);
+    };
+  }, [facilitator, attached, githubRefused]);
+
+  useEffect(() => {
+    if (githubRefused === null) return;
     return onPushTokenStored(() => {
       void (async () => {
         const token = await unwrapPushToken();
         const controller = controllerRef.current;
         if (!token || !controller) return;
         const swapped = await controller.replaceGitHubToken(token);
-        setGithubRefused(false);
+        if (swapped) githubTokenRef.current = token;
+        setGithubRefused(null);
         setError(swapped
           ? "GitHub connected again: git uses the new token from now on, nothing restarted."
           : "GitHub connected again. Boot Claude again to give it the new token.");
@@ -244,7 +278,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
               // again starts from nothing and the next boot doesn't reuse it.
               forgetPushToken();
               setError(null);
-              setGithubRefused(true);
+              setGithubRefused(githubTokenRef.current ?? "");
             } else setError("Your model endpoint refused your token (expired or revoked). Check it in host setup.");
           },
         );
@@ -299,9 +333,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       </div>
       <footer className="terminal-note">
         <span>{facilitator ? "Terminal output is shared with everyone in this room. Only you can type or approve actions." : "Read-only mirror of the host's terminal. Only the host types or approves actions."}</span>
-        {githubRefused && (
+        {githubRefused !== null && (
           <strong>
-            {githubRefusalText(config?.githubToken)}{" "}
+            {githubRefusalText(githubRefused)}{" "}
             <a href="/?github=reconnect" target="_blank" rel="noopener">Connect GitHub again</a> in a new tab: Claude keeps running here and git picks the new token up.
           </strong>
         )}
