@@ -1579,6 +1579,12 @@ function RoomApp({ access, hostConfig }: { access: Access; hostConfig: HostConfi
       {facilitator && bootStatus && view !== "room" && (
         <p className="room-banner booting" role="status">Starting Claude for the room: {bootStatus}. <button className="link" onClick={() => setView("room")}>Watch</button></p>
       )}
+      {/* A reload (or Claude exiting) leaves Claude off, and only the Room
+          view used to say so. Not in a full room: it doesn't publish
+          Claude's state, and has its own banner. */}
+      {facilitator && hostConfig && !bootStatus && !room.full && room.controlSynced && room.claudeState === "off" && view !== "room" && (
+        <p className="room-banner booting claude-off" role="status">Claude isn't running in this tab, so queued prompts and Send board wait. <button className="link" onClick={() => terminalRef.current?.startClaude()}>Start Claude</button></p>
+      )}
       <main ref={workspaceRef} className={`workspace ${view === "preview" ? "preview-workspace" : ""}`}>
         {view === "board" && <BoardView store={store} selected={selected} readOnly={readOnly} notice={notice} onSelection={setSelected} onStageSelection={stageSelected} stageWhy={"why" in stageable ? stageable.why : null} sendBoard={facilitator ? sendBoard : undefined} prompts={room.promptSnapshots.length} />}
         {sendBoard.dialog}

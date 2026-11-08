@@ -138,7 +138,7 @@ try {
     await roomButton(host);
     await host.waitForSelector(".terminal-controls button", { timeout: 20_000 });
     await host.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((b) => b.textContent === "Start Bash")?.click());
-    await host.waitForFunction(() => document.querySelector(".terminal-heading span")?.textContent === "WASIX Bash ready", { timeout: 240_000, polling: 200 });
+    await host.waitForFunction(() => document.querySelector(".terminal-heading span")?.textContent === "Bash ready", { timeout: 240_000, polling: 200 });
     await host.waitForFunction(() => /\$ $|# $/m.test(document.querySelector(".terminal-target .xterm-rows")?.innerText.replace(/\u00a0/g, " ").trimEnd() + " "), { timeout: 30_000, polling: 100 });
     await run(host, "git init -q && git config user.email host@example.com && git config user.name Host");
     await run(host, "echo committed > notes.txt && printf '\\000\\001\\376\\377' > bytes.bin && git add notes.txt bytes.bin && git commit -q -m 'never pushed'");

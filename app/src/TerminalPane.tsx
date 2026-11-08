@@ -20,6 +20,8 @@ export type TerminalPaneHandle = {
   sendPrompt: (prompt: string) => boolean;
   /** The host's pod's files, null until it boots (SendBoard.tsx). */
   podFiles: () => PodFiles | null;
+  /** Boot the pod if needed and start Claude, as the button does. */
+  startClaude: () => void;
 };
 
 const MIRROR_MODE_KEY = "riff-mirror-mode";
@@ -119,6 +121,16 @@ function ParticipantTerminal({ subscribe, mode }: { subscribe: (listener: (event
   return <div className={`terminal-target readonly-terminal mirror-${mode}`} data-mode={mode} data-sequence="0" data-data-events="0" data-checkpoint-renders="0" ref={targetRef} />;
 }
 
+// The pod reports in its own terms ("WASIX" is the runtime Bash runs in);
+// the header says what the host can do with it.
+export function plainStatus(report: string) {
+  return report
+    .replace(/^Starting WASIX (session|Bash)$/, "Starting Bash")
+    .replace(/^WASIX Bash ready$/, "Bash ready")
+    .replace(/^WASIX input failed/, "Bash input failed")
+    .replace(/^WASIX interrupt failed/, "Interrupt failed");
+}
+
 // What a refusal (401) means depends on the token. An OAuth app's token
 // never expires (Riff's app doesn't opt in to expiring tokens), so a refused
 // one was revoked; a pasted personal token can also reach its expiry date.
@@ -154,6 +166,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   const pendingOutputRef = useRef("");
   const outputTimerRef = useRef(0);
   const [status, setStatus] = useState(facilitator ? "Not started" : "Waiting for host");
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const [starting, setStarting] = useState(false);
   const [report, setReport] = useState<string | null>(null);
   const [attached, setAttached] = useState(false);
@@ -181,6 +195,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
       return sent;
     },
     podFiles: () => controllerRef.current?.podFiles() ?? null,
+    startClaude: () => {
+      if (!controllerRef.current?.isRunning()) void startRef.current("claude");
+    },
   }), []);
 
   const podReadyRef = useRef(onPodReady);
@@ -255,7 +272,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
         setGithubRefused(null);
         setError(swapped
           ? "GitHub connected again: git uses the new token from now on, nothing restarted."
-          : "GitHub connected again. Boot Claude again to give it the new token.");
+          : "GitHub connected again. Start Claude again to give it the new token.");
       })().catch((failure) => setError(`GitHub connected, but Riff couldn't open the token: ${String(failure)}`));
     });
   }, [githubRefused]);
@@ -287,6 +304,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
     return () => clearInterval(timer);
   }, [channel.publish, facilitator, status]);
 
+  const startRef = useRef(start);
+  startRef.current = start;
   async function start(mode: "claude" | "bash") {
     if (!config || !targetRef.current) return;
     setStarting(true);
@@ -301,10 +320,17 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
           // for debugging, not the room: they go to the console and a data
           // attribute, and the header keeps saying what state it's in.
           (next) => {
-            if (/^\[(bridge|bash)\] /.test(next) && !/failed/.test(next)) {
+            // Claude's first Bash command boots the shared Bash session in
+            // the background: news for the console, not the header, which
+            // would otherwise say "starting" for the rest of the session.
+            const background = next === "Starting WASIX session" && statusRef.current === "Claude running";
+            if (background || /^\[(bridge|bash)\] /.test(next) && !/failed/.test(next)) {
               console.info(next);
               setReport(next);
-            } else setStatus(next);
+            } else {
+              statusRef.current = plainStatus(next);
+              setStatus(statusRef.current);
+            }
           },
           (url) => previewChangeRef.current(url, publishPreview(Boolean(url))),
           (data) => {
@@ -358,8 +384,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
   return (
     <article className="terminal-pane">
       <header className="section-title terminal-heading" data-report={report ?? undefined}>
-        <div><h2>Workspace</h2><span className={facilitator && (status === "Claude running" || status === "WASIX Bash ready") || !facilitator && participantLive ? "live-dot" : "idle-dot"}>{facilitator ? status : participantStatus}</span></div>
-        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : controllerRef.current ? "Start Claude" : "Boot Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} ready={attached} /><McpSettingsButton roomId={roomId} getController={() => controllerRef.current} hasGithub={Boolean(config?.githubToken)} claudeState={claudeState} /></div>}
+        <div><h2>Workspace</h2><span className={facilitator && (status === "Claude running" || status === "Bash ready") || !facilitator && participantLive ? "live-dot" : "idle-dot"}>{facilitator ? status : participantStatus}</span></div>
+        {facilitator && <div className="terminal-controls"><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("claude")}>{starting ? "Starting..." : "Start Claude"}</button><button disabled={starting || controllerRef.current?.isRunning()} onClick={() => start("bash")}>Start Bash</button><button disabled={!controllerRef.current?.isRunning()} onClick={() => controllerRef.current?.interrupt()}>Interrupt</button><WorkspaceExport getController={() => controllerRef.current} ready={attached} /><McpSettingsButton roomId={roomId} getController={() => controllerRef.current} hasGithub={Boolean(config?.githubToken)} claudeState={claudeState} /></div>}
         {!facilitator && <div className="terminal-controls"><button className="mirror-mode" aria-pressed={mirrorMode === "actual"} title={mirrorMode === "fit" ? "Show the host's terminal at its own text size, and scroll" : "Shrink or grow the host's terminal to fit this box"} onClick={() => {
           const next = mirrorMode === "fit" ? "actual" : "fit";
           setMirrorMode(next);
@@ -376,7 +402,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, {
         {(facilitator ? !attached : !participantLive) && (
           <p className="terminal-empty" role="status">
             {facilitator
-              ? starting ? status : "Boot Claude to start Claude Code in this tab. Everyone in the room sees this terminal."
+              ? starting ? status : "Start Claude to run Claude Code in this tab. Everyone in the room sees this terminal."
               : ended ? "This room has ended, so there's no terminal to watch." : channel.hostConnected ? "Nothing on the host's terminal yet. It appears here when they start Claude." : "Waiting for the host. Their terminal appears here."}
           </p>
         )}

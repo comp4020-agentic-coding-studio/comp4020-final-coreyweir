@@ -142,7 +142,7 @@ async function startBash(tab) {
   await view(tab, "Room");
   await tab.waitForSelector(".terminal-controls button", { timeout: 20_000 });
   await tab.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((b) => b.textContent === "Start Bash")?.click());
-  await tab.waitForFunction(() => document.querySelector(".terminal-heading span")?.textContent === "WASIX Bash ready", { timeout: 240_000, polling: 200 });
+  await tab.waitForFunction(() => document.querySelector(".terminal-heading span")?.textContent === "Bash ready", { timeout: 240_000, polling: 200 });
   await tab.waitForFunction(() => /\$ $|# $/m.test(document.querySelector(".terminal-target .xterm-rows")?.innerText.replace(/\u00a0/g, " ").trimEnd() + " "), { timeout: 30_000, polling: 100 });
 }
 
@@ -194,7 +194,7 @@ try {
     let button = await sendButton(tab);
     assert.equal(button.text, "Send board to Claude", say("the label"));
     assert.equal(button.disabled, true, say("disabled before the pod boots"));
-    assert.match(button.title, /Boot Claude/, say(`says why: ${button.title}`));
+    assert.match(button.title, /Start Claude first/, say(`says why: ${button.title}`));
     assert.ok(button.rect.right <= size.width && button.rect.width > 0, say(`the button is on screen: ${JSON.stringify(button.rect)}`));
 
     await startBash(tab);

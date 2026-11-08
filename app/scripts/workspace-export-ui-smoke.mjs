@@ -97,7 +97,7 @@ try {
 
     const startBash = async () => {
       await host.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((b) => b.textContent === "Start Bash")?.click());
-      await host.waitForFunction(() => /WASIX Bash ready/.test(document.querySelector(".terminal-heading")?.textContent ?? ""), { timeout: 180_000 });
+      await host.waitForFunction(() => /Bash ready/.test(document.querySelector(".terminal-heading")?.textContent ?? ""), { timeout: 180_000 });
     };
     // While it boots there's a controller but no files yet: still off.
     await host.evaluate(() => [...document.querySelectorAll(".terminal-controls button")].find((b) => b.textContent === "Start Bash")?.click());
