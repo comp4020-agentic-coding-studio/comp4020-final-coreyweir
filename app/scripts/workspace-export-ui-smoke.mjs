@@ -127,15 +127,16 @@ try {
     await run("mkdir -p 'src/deep er' && echo nested > 'src/deep er/nü.txt'");
     await run(": > empty.txt");
     await run("head -c 3000 /dev/urandom > random.bin && sha256sum random.bin");
+    // Read it now: on a phone's short screen the commands after it scroll
+    // it away. A long line wraps there, so match with the whitespace gone.
+    const sha = (await rows(host)).replace(/\s+/g, "").match(/([0-9a-f]{64})random\.bin/)?.[1];
+    assert.ok(sha, say("bash printed the file's hash"));
     await run("mkdir -p node_modules/x && echo dep > node_modules/x/index.js");
     await run("git init -q && git config user.email host@example.com && git config user.name Host");
     await run(`git remote add origin https://x-access-token:${TOKEN}@github.com/o/r.git`);
     await run("git add src empty.txt random.bin && git commit -m 'unpushed work'");
     await run(`echo "my token: ${TOKEN}" > notes.txt`);
     await run(`mkdir -p ~/.claude/projects/-work-repo && echo "tool printed ${TOKEN}" > ~/.claude/projects/-work-repo/smoke.jsonl`);
-    // On the phone a long line wraps, so match with the whitespace gone.
-    const sha = (await rows(host)).replace(/\s+/g, "").match(/([0-9a-f]{64})random\.bin/)?.[1];
-    assert.ok(sha, say("bash printed the file's hash"));
 
     // Sizes, so we can wait until OPFS holds exactly those. Two are known here;
     // the git store's is bash's to say. (No $(...) in these lines: a command
