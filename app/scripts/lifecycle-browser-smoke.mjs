@@ -86,6 +86,10 @@ async function stage(tab, text) {
   await tab.waitForFunction((value) => [...document.querySelectorAll(".prompt-card textarea")].some((element) => element.value === value), { timeout: 10_000 }, text);
 }
 
+async function showView(tab, label) {
+  await tab.evaluate((text) => [...document.querySelectorAll(".topbar nav button")].find((button) => button.textContent === text).click(), label);
+}
+
 async function openPeople(tab) {
   if (!(await tab.$(".people-panel"))) await tab.click(".participants");
   await tab.waitForSelector(".people-panel");
@@ -124,6 +128,9 @@ try {
   await kept.tab.close();
   await waitText(bo, ".room-banner.away", /room ends in [0-4]:\d\d/);
   await shot(bo, "host-away");
+  await showView(bo, "Preview");
+  await waitText(bo, ".preview-empty h3", /The host is away/);
+  await showView(bo, "Board");
   console.log(`kept room ${kept.code}: host left, guest sees "${await textOf(bo, ".room-banner")}"`);
   const back = await page(hostContext);
   await back.goto(kept.url, { waitUntil: "networkidle0" });
@@ -146,6 +153,11 @@ try {
   assert.match(await textOf(bo, ".terminal-heading"), /Room ended/);
   assert.equal(await bo.$(".terminal-note strong"), null, "no raw relay error code");
   assert.match(await textOf(bo, ".claude-state"), /Room ended/);
+  // and so does the preview, never a frame of the relay's refusal
+  await showView(bo, "Preview");
+  await waitText(bo, ".preview-empty h3", /The room has ended/);
+  assert.equal(await bo.$(".preview-frame"), null, "no frame in an ended room");
+  await showView(bo, "Board");
   console.log("kept room ended: guest's board read-only, still there after a reload, the room says it ended");
   await bo.close();
   await back.close();

@@ -52,7 +52,7 @@ try {
   });
   try {
     await page.waitForFunction(
-      () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
+      () => document.querySelector(".terminal-heading")?.textContent?.includes("Bash ready"),
       { timeout: 120_000 },
     );
   } catch (error) {
@@ -252,11 +252,11 @@ try {
     button.click();
   });
   await page.waitForFunction(
-    () => document.querySelector(".terminal-heading")?.textContent?.includes("Starting WASIX Bash"),
+    () => document.querySelector(".terminal-heading")?.textContent?.includes("Starting Bash"),
     { timeout: 30_000 },
   );
   await page.waitForFunction(
-    () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
+    () => document.querySelector(".terminal-heading")?.textContent?.includes("Bash ready"),
     { timeout: 120_000 },
   );
   await page.locator(".terminal-target textarea").click();
@@ -286,11 +286,11 @@ try {
     button.click();
   });
   await page.waitForFunction(
-    () => document.querySelector(".terminal-heading")?.textContent?.includes("Starting WASIX Bash"),
+    () => document.querySelector(".terminal-heading")?.textContent?.includes("Starting Bash"),
     { timeout: 30_000 },
   );
   await page.waitForFunction(
-    () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
+    () => document.querySelector(".terminal-heading")?.textContent?.includes("Bash ready"),
     { timeout: 120_000 },
   );
   await page.locator(".terminal-target textarea").click();
@@ -363,7 +363,7 @@ try {
   });
   try {
     await page.waitForFunction(
-      () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
+      () => document.querySelector(".terminal-heading")?.textContent?.includes("Bash ready"),
       { timeout: 120_000 },
     );
   } catch (error) {
@@ -396,7 +396,7 @@ try {
     }));
     throw new Error(`SIGINT did not return to Bash: ${JSON.stringify(diagnostics)}`, { cause: error });
   }
-  assert.match(await page.$eval(".terminal-heading", (element) => element.textContent ?? ""), /WASIX Bash ready/);
+  assert.match(await page.$eval(".terminal-heading", (element) => element.textContent ?? ""), /Bash ready/);
   assert.doesNotMatch(await page.$eval(".terminal-target .xterm-rows", (element) => element.textContent ?? ""), /restarting session/);
   await page.keyboard.type("test \"$INTERRUPT_STATE\" = preserved && printf 'interrupt-signal-%s\\n' preserved-shell-state");
   await page.keyboard.press("Enter");
@@ -442,7 +442,7 @@ try {
     }));
     throw new Error(`SIGINT did not stop mixed foreground/background loops: ${JSON.stringify(diagnostics)}`, { cause: error });
   }
-  assert.match(await page.$eval(".terminal-heading", (element) => element.textContent ?? ""), /WASIX Bash ready/);
+  assert.match(await page.$eval(".terminal-heading", (element) => element.textContent ?? ""), /Bash ready/);
   assert.doesNotMatch(await page.$eval(".terminal-target .xterm-rows", (element) => element.textContent ?? ""), /restarting session/);
   const afterPrompt = await page.evaluate(() => ({ ...window.__riffMixedSequences }));
   // A foreground sample whose sleep completed concurrently with SIGINT can

@@ -35,7 +35,7 @@ try {
     button.click();
   });
   await page.waitForFunction(
-    () => document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready"),
+    () => document.querySelector(".terminal-heading")?.textContent?.includes("Bash ready"),
     { timeout: 120_000 },
   );
   await page.locator(".terminal-target textarea").click();
@@ -54,7 +54,7 @@ try {
     await page.waitForFunction(
       () => {
         const rows = [...document.querySelectorAll(".terminal-target .xterm-rows > div")];
-        return document.querySelector(".terminal-heading")?.textContent?.includes("WASIX Bash ready")
+        return document.querySelector(".terminal-heading")?.textContent?.includes("Bash ready")
           && rows.some((row) => row.textContent?.trim().endsWith("user@riff:/work/repo$"));
       },
       { timeout: 10_000 },
@@ -67,7 +67,7 @@ try {
     }));
     throw new Error(`Mixed interrupt did not return to Bash: ${JSON.stringify({ ...diagnostics, browserMessages })}`, { cause: error });
   }
-  assert.match(await page.$eval(".terminal-heading", (element) => element.textContent ?? ""), /WASIX Bash ready/);
+  assert.match(await page.$eval(".terminal-heading", (element) => element.textContent ?? ""), /Bash ready/);
   assert.doesNotMatch(await page.$eval(".terminal-target .xterm-rows", (element) => element.textContent ?? ""), /restarting session/);
 
   const afterPrompt = await page.evaluate(() => {

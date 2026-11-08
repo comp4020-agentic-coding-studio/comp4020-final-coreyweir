@@ -13,13 +13,17 @@ export type Credential = {
 
 export const GITHUB_ORIGINS = ["https://api.github.com", "https://github.com", "https://uploads.github.com"];
 
-export function makePlaceholder(kind: "model" | "github") {
+/** model: the model API's token; github: git and the GitHub API; mcp: an
+ * MCP server's (docs/adr/0012), refusals of which are that server's news. */
+export type CredentialKind = "model" | "github" | "mcp";
+
+export function makePlaceholder(kind: CredentialKind) {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `riff-placeholder-${kind}-${hex}`;
 }
 
-export function credentialFor(kind: "model" | "github", value: string, origins: string[]): Credential {
+export function credentialFor(kind: CredentialKind, value: string, origins: string[]): Credential {
   return { placeholder: makePlaceholder(kind), value, origins };
 }
 
@@ -31,8 +35,13 @@ export function credentialFor(kind: "model" | "github", value: string, origins: 
  */
 export async function replaceCredential(credential: Credential, value: string): Promise<void> {
   credential.value = value;
+  await forgetCredentials([credential.placeholder]);
+}
+
+/** Make the service worker drop the values it cached for these placeholders. */
+export async function forgetCredentials(placeholders: string[]): Promise<void> {
   const worker = "serviceWorker" in navigator ? navigator.serviceWorker.controller : null;
-  if (!worker) return;
+  if (!worker || !placeholders.length) return;
   const channel = new MessageChannel();
   const forgotten = new Promise<void>((resolve) => {
     channel.port1.onmessage = () => resolve();
@@ -40,7 +49,7 @@ export async function replaceCredential(credential: Credential, value: string): 
     // worker wakes for this message anyway; the timer only bounds a hang.
     setTimeout(resolve, 2000);
   });
-  worker.postMessage({ type: "riff-credential-forget", placeholders: [credential.placeholder] }, [channel.port2]);
+  worker.postMessage({ type: "riff-credential-forget", placeholders }, [channel.port2]);
   await forgotten;
   channel.port1.close();
 }
@@ -49,11 +58,12 @@ export async function replaceCredential(credential: Credential, value: string): 
  * Answer the service worker's requests for these credentials until the
  * returned function is called. Only the service worker can post to
  * `navigator.serviceWorker`'s message event, so guest code (workers, preview
- * iframes) can't ask.
+ * iframes) can't ask. The list is read at each request, so a caller may add
+ * and remove credentials in place (MCP servers applied to a running pod).
  */
 export function serveCredentials(credentials: Credential[], onRefused?: (credential: Credential) => void): () => void {
   if (!("serviceWorker" in navigator)) return () => {};
-  const byPlaceholder = new Map(credentials.map((credential) => [credential.placeholder, credential]));
+  const byPlaceholder = { get: (placeholder: string) => credentials.find((credential) => credential.placeholder === placeholder) };
   const onMessage = (event: MessageEvent) => {
     // The service worker saw the endpoint answer 401 to a real value.
     if (event.data?.type === "riff-credential-refused") {
@@ -74,7 +84,7 @@ export function serveCredentials(credentials: Credential[], onRefused?: (credent
     navigator.serviceWorker.removeEventListener("message", onMessage);
     navigator.serviceWorker.controller?.postMessage({
       type: "riff-credential-forget",
-      placeholders: [...byPlaceholder.keys()],
+      placeholders: credentials.map((credential) => credential.placeholder),
     });
   };
 }
