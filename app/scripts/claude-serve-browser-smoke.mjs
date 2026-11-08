@@ -134,7 +134,8 @@ try {
   if (process.env.PYTHON === "1") {
     const python = await run("bash: python3 -m http.server 8002; echo status=$?");
     assert.match(python, /can't be reached/, python);
-    assert.match(python, /npx serve/, python);
+    assert.match(python, /node server\.js/, python);
+    assert.doesNotMatch(python, /npx serve/, python);
     assert.match(python, /status=1/, python);
     console.log("python3 -m http.server says why it can't serve and what to use");
   }

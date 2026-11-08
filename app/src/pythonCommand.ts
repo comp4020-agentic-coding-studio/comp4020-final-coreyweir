@@ -49,9 +49,14 @@ const SITE_DIR = "python";
 // and Python's own client all failed to connect). So listen() fails, saying
 // why and what works instead, rather than a server that looks up but is
 // never reachable.
+//
+// The hint names a server written with node:http, not `npx serve`: on live
+// (2026-11-09) the host's tab crashed twice within a minute of Claude
+// running `npx serve -l 3000`, while a node:http server.js in the same room
+// came up and showed in the participant's preview.
 export const PYTHON_LISTEN_REFUSED =
   "Riff: a server started from Python can't be reached here, not by curl and not by the room's preview. " +
-  "Serve with Node instead, e.g. `npx serve -l 8000` for static files or `node server.js`.";
+  "Serve with Node instead: a small `node server.js` using node:http.";
 
 const SITECUSTOMIZE = `import os, sys
 os.chdir(os.getcwd())
