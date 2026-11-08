@@ -15,7 +15,7 @@ import { SIGINT, WASIX_SESSION_CONTROL_DIR, WasixSession, type WasixSessionComma
 import { attachNetGatewayBrowser, type NetGatewayBrowserHandle } from "./netGatewayBrowser";
 import { createCertificateAuthority } from "lemon-tls/browser/x509";
 import { Osc133Parser } from "./osc133";
-import { SAVED_SUMMARY, Workspace, WorkspaceBusyError } from "./workspace";
+import { SAVED_SUMMARY, Workspace, WorkspaceBusyError, formatBytes } from "./workspace";
 import { cloneRepository, githubRepoUrl } from "./repoClone";
 import { credentialFor, GITHUB_ORIGINS, serveCredentials, type Credential } from "./credentials";
 import { bridgeRootOf, bridgeServeAll, sessionBridge, type BridgeHostHandler, type BridgeProcessRegistration, type BridgeRequest } from "./wasixBridge";
@@ -1039,9 +1039,4 @@ export class ClaudePodController {
     this.modelCredential = null;
     this.githubCredential = null;
   }
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

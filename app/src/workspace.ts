@@ -22,6 +22,11 @@ export type { WorkspaceSummary } from "./workspaceFormat";
 export const SAVED_DIRS = ["/work", "/home/user"] as const;
 export const SAVED_SUMMARY = "Saved in this browser: everything under /work and /home/user, node_modules and .git included. Not saved: /tmp and the rest of the filesystem, Claude's settings, and bash's tools (the boot writes those fresh).";
 
+export function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 /** Whether a path is part of the saved workspace. */
 export function isSaved(path: string) {
   const under = SAVED_DIRS.some((dir) => path === dir || path.startsWith(`${dir}/`));

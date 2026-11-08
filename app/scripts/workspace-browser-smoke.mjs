@@ -8,7 +8,9 @@
 // or an accidental reload would. A fresh pod for the same room must have
 // everything under /work and /home/user back, byte for byte, and nothing
 // outside them. Then a second tab takes the workspace over and the first
-// stops saving, and Delete leaves nothing in OPFS.
+// stops saving. The landing page lists the room's files on its board row:
+// "Delete files" takes them alone, and the row's Delete takes them with
+// the board copy, leaving nothing in OPFS.
 //
 // With CLONE_TOKEN (a GitHub token; it stays in the page, the guest gets
 // a placeholder) it also clones CLONE_REPO (default octocat/Hello-World)
@@ -213,18 +215,66 @@ try {
   assert.equal(takenOver.late, false, "the first tab no longer writes the workspace");
   assert.match(takenOver.commit, /unpushed work/);
 
-  // ---- delete ----
-  const deleted = await other.evaluate(async (room) => {
+  // ---- listed on the landing page, and deleted from there ----
+  // The room gets a board copy too, as hosting it would have kept.
+  await other.evaluate(async (room) => {
     await window.__controller.dispose();
-    const { deleteWorkspace, listWorkspaces } = await import("/src/workspace.ts");
-    const before = (await listWorkspaces()).some((w) => w.room === room);
-    await deleteWorkspace(room);
+    const { noteOpened, seedCopy } = await import("/src/copies.ts");
+    await seedCopy(room, (doc) => doc.getMap("smoke").set("a", 1));
+    noteOpened({ roomId: room, code: "WSUI", host: true, hostName: "smoke" });
+  }, room);
+  const listed = async () => {
+    await other.goto(`${baseUrl}/`, { waitUntil: "networkidle0" });
+    await other.waitForSelector(".local-boards li");
+    return other.$$eval(".local-boards li", (rows) => rows.map((row) => row.textContent));
+  };
+  const clickIn = async (rowText, label) => {
+    const clicked = await other.$$eval(".local-boards li", (rows, rowText, label) => {
+      const row = rows.find((r) => r.textContent.includes(rowText));
+      const button = [...(row?.querySelectorAll("button") ?? [])].find((b) => b.textContent.trim() === label);
+      button?.click();
+      return !!button;
+    }, rowText, label);
+    assert.ok(clicked, `${label} in the row for ${rowText}`);
+  };
+  const stored = () => other.evaluate(async (room) => {
+    const { listWorkspaces } = await import("/src/workspace.ts");
+    const { listCopies } = await import("/src/copies.ts");
     const root = await navigator.storage.getDirectory();
     const left = await root.getDirectoryHandle("riff-workspaces").then((d) => d.getDirectoryHandle(room)).then(() => true, () => false);
-    return { before, after: (await listWorkspaces()).some((w) => w.room === room), left };
+    return {
+      workspace: (await listWorkspaces()).some((w) => w.room === room),
+      left,
+      copy: (await listCopies()).some((c) => c.roomId === room),
+    };
   }, room);
+  const rows = await listed();
+  console.log("listed", JSON.stringify(rows));
+  assert.ok(rows.some((row) => /WSUI/.test(row) && /Files: \d+ \(/.test(row)), "the room's row says this browser has its files");
+  assert.ok(await other.$eval(".workspace-note", (n) => n.textContent.includes("Not saved: /tmp")), "the list says what is saved");
+  // "Delete files" takes the workspace and leaves the board copy
+  await clickIn("WSUI", "Delete files");
+  await clickIn("WSUI", "Delete files");
+  await other.waitForFunction(() => ![...document.querySelectorAll(".local-boards li")].some((r) => r.textContent.includes("Files:")), { polling: 100 });
+  const filesDeleted = await stored();
+  console.log("delete files", JSON.stringify(filesDeleted));
+  assert.deepEqual(filesDeleted, { workspace: false, left: false, copy: true });
+  // the row's Delete takes both
+  await bootPod(other);
+  await other.evaluate(async () => {
+    await window.__run("bash", ["-c", "echo again > /work/repo/again.txt"]);
+    await window.__waitSaved(["/work/repo/again.txt"]);
+    await window.__controller.dispose();
+  });
+  assert.ok((await listed()).some((row) => /WSUI/.test(row) && /Files:/.test(row)));
+  await clickIn("WSUI", "Delete");
+  const asked = await other.$$eval(".local-boards li", (rows) => rows.find((r) => r.textContent.includes("WSUI"))?.textContent ?? "");
+  assert.match(asked, /and the host's files/, "Delete says it takes the files too");
+  await clickIn("WSUI", "Delete");
+  await other.waitForFunction(() => ![...document.querySelectorAll(".local-boards li")].some((r) => r.textContent.includes("WSUI")), { polling: 100 });
+  const deleted = await stored();
   console.log("delete", JSON.stringify(deleted));
-  assert.deepEqual(deleted, { before: true, after: false, left: false });
+  assert.deepEqual(deleted, { workspace: false, left: false, copy: false });
   await page.close();
   await other.close();
 

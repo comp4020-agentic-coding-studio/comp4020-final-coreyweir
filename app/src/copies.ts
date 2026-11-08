@@ -7,6 +7,7 @@
 import * as Y from "yjs";
 import { IndexeddbPersistence, clearDocument } from "y-indexeddb";
 import { forget, storedSecrets } from "./api";
+import { deleteAllWorkspaces, deleteWorkspace } from "./workspace";
 
 const NOTES_KEY = "riff-boards";
 
@@ -127,12 +128,14 @@ export async function loadCopy(copy: LocalCopy) {
   };
 }
 
-// The copy, and this browser's membership of the room with it: nothing of
-// the room stays on this machine. (A member by GitHub account stays a
-// member through the account; the server keeps that, not this browser.)
+// The copy, this browser's membership of the room, and the host's
+// workspace for it (docs/adr/0010): nothing of the room stays on this
+// machine. (A member by GitHub account stays a member through the account;
+// the server keeps that, not this browser.)
 export async function deleteCopy(copy: LocalCopy) {
   await clearDocument(copy.database);
   if (copy.roomId) {
+    await deleteWorkspace(copy.roomId);
     forget(copy.roomId);
     const notes = readNotes();
     delete notes[copy.roomId];
@@ -140,10 +143,12 @@ export async function deleteCopy(copy: LocalCopy) {
   }
 }
 
-// Every copy, and every room membership this browser holds, copy or not.
+// Every copy, every workspace, and every room membership this browser
+// holds, copy or not.
 export async function deleteAllCopies() {
   const copies = await listCopies();
   for (const copy of copies) await deleteCopy(copy);
+  await deleteAllWorkspaces();
   for (const { roomId } of storedSecrets()) forget(roomId);
   writeNotes({});
   return copies.length;

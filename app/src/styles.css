@@ -77,6 +77,8 @@
 .local-boards li small{color:#777;font-size:9px}
 .local-boards .actions{margin-left:auto;display:flex;align-items:center;gap:10px}
 .local-boards .actions.asking{flex-basis:100%;justify-content:flex-end;padding-bottom:6px;color:#444}
+.local-boards li small.workspace-marker{color:#3a6b3a}
+.local-boards .workspace-note{margin:6px 0 0;color:#777;line-height:1.4}
 .local-boards .link,.signing-out .link,.room-banner .link,.entry-card p .link{padding:0;border:0;background:none;color:#315efb;font:inherit;text-decoration:underline}
 .local-boards button.danger,.signing-out button:not(.link){padding:5px 9px;border:1px solid #d5d5cf;border-radius:3px;background:white;font-size:9px}
 .local-boards button.danger{border-color:#b75243;background:#b75243;color:white}
