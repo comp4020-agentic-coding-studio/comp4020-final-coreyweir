@@ -401,10 +401,30 @@ auto-release at the latest.
     bracketed paste and a separate enter.
   - Either way, `riff-hook` is the channel to the page, as a Nodepod
     `externalCommands` entry.
-- **Clipboard.** Claude Code copies a selection with OSC 52, which xterm.js
-  ignores. Load `@xterm/addon-clipboard`. Fallback: `copyOnSelect: false` in
-  `/home/user/.claude.json` and Shift+drag. Check the participants' mirror
-  too.
+- ~~**Terminals the same size**~~ (crit 11; 8 Nov). The mirror already took
+  the host's columns and rows, but at a fixed 12px, so a phone watching a
+  desktop host saw the first 390px of a 1368px screen. Now the font follows
+  the participant's box ("fit", the default) and the grid stays the host's;
+  "Actual size" keeps the host's font and scrolls (`src/mirrorFit.ts`).
+  Checked by `npm run test:terminal-size-browser` (dev): desktop host and
+  phone participant and the reverse, the host resized mid-way, the screens
+  equal row by row and inside the box. Red before (cut off), and red if the
+  mirror stops taking the host's size.
+  - Still open: the host's terminal keeps its own size. A desktop host's
+    190 columns fit a phone at about 3px a character, which is a thumbnail
+    (pinch-zoom or Actual size to read). Capping the host's columns would
+    help phones and cost the host width; Corey's call.
+- ~~**Clipboard.**~~ (8 Nov.) Claude Code 2.1.221 copies with OSC 52 (`]52;c;`,
+  read from the bundle), which xterm.js ignores. The host's terminal now
+  honours copies, never queries (`src/terminalClipboard.ts`, our own OSC
+  handler, not `@xterm/addon-clipboard`: the addon answers every query, if
+  only with an empty clipboard, and the answer lands in the program's input,
+  where bash took it for typing). The participants' mirror ignores OSC 52,
+  or the host's output would write to everyone's clipboard. Checked by
+  `npm run test:terminal-clipboard-browser` (dev, two browsers): a copy
+  reaches the host's clipboard, a query gets no answer, the participant's
+  clipboard is untouched. Red with the handler removed, and red with it on
+  the mirror. Not driven: Claude's own copy (a printf sends the same bytes).
 - **Terminal redeploy gap** (ADR 0001): forget the host's last snapshot when
   the relay accepts the host again.
 - **Redesign the landing page.** Sign-in, "Your rooms", "Boards on this

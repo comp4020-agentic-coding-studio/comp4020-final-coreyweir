@@ -9,6 +9,7 @@ import {
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
+import { honourClipboardWrites } from "./terminalClipboard";
 import { createRiffWasmerProvider, type WasmerCommandProvider } from "./wasmerCommandProvider";
 import { loadClaudeBundle } from "./claudeBundle";
 import { SIGINT, WASIX_SESSION_CONTROL_DIR, WasixSession, type WasixSessionCommand } from "./wasixSession";
@@ -220,6 +221,7 @@ export class ClaudePodController {
   private rawInput: { dispose: () => void } | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private fitTimers: number[] = [];
+  private clipboardLoaded = false;
   private previewServers = new Map<string, NodepodServerInfo>();
   private activePreview: NodepodServerInfo | null = null;
   private onServerListen = (server: NodepodServerInfo) => {
@@ -454,6 +456,10 @@ export class ClaudePodController {
 
     this.terminal.attach(target);
     this.terminal.xterm.options.lineHeight = 1.1;
+    if (!this.clipboardLoaded) {
+      honourClipboardWrites(this.terminal.xterm);
+      this.clipboardLoaded = true;
+    }
     let lastShiftEnter = 0;
     this.terminal.xterm.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if (event.key !== "Enter" || !event.shiftKey) return true;
