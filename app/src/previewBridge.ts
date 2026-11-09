@@ -13,9 +13,9 @@ import type { ClaudePodController } from "./claudePod";
 const READY_MS = 8000;
 const STRIPPED = new Set(["authorization", "cookie", "host", "proxy-authorization", "connection", "content-length"]);
 
-/** Off by default until it has been checked on live (docs/adr/0011, 2b);
- * a browser turns it on with `localStorage["riff-preview-bridge"] = "on"`
- * (or off with "off"), so it can be tried without a deploy. */
+/** On by default since Corey checked it on live (docs/adr/0011, 2b); a
+ * browser turns it off with `localStorage["riff-preview-bridge"] = "off"`,
+ * and any failure falls back to the relay. */
 export function previewBridgeEnabled() {
   let choice: string | null = null;
   try {
@@ -27,7 +27,7 @@ export function previewBridgeEnabled() {
   return choice === "on" ? true : choice === "off" ? false : PREVIEW_BRIDGE_DEFAULT;
 }
 
-export const PREVIEW_BRIDGE_DEFAULT = false;
+export const PREVIEW_BRIDGE_DEFAULT = true;
 
 let podRef: RefObject<ClaudePodController | null> | null = null;
 

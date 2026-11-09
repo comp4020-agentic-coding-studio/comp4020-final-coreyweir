@@ -1,6 +1,6 @@
 # 11. The preview gets its own origin
 
-- Status: accepted (2a built; 2b built behind a switch, off by default, 9 Nov)
+- Status: accepted (2a built; 2b built, on by default since Corey tried it on live, 9 Nov)
 - Date: 2026-11-08
 
 ## Context
@@ -248,6 +248,12 @@ the host's frame uses 2a's relay unless that browser has
 `localStorage["riff-preview-bridge"] = "on"`. Flipping
 `PREVIEW_BRIDGE_DEFAULT` in `app/src/previewBridge.ts` turns it on for
 everyone once it has been tried on live.
+
+**On by default (9 Nov, 11:15).** Corey tried the bridge on live (host
+preview, Vite's hot reload) and decided to turn it on for everyone.
+`PREVIEW_BRIDGE_DEFAULT` is now `true`; a browser can still opt out with
+`"off"`, and every failure falls back to the relay as before. Firefox and
+Safari remain unmeasured.
 
 What was built, as designed above, with two simplifications:
 `app/server/previewBridge.mjs` serves `host.html`, `sw.js` and `helper.js`
