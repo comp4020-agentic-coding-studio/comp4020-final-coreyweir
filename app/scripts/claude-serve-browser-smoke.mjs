@@ -140,6 +140,15 @@ try {
     console.log(`npx serve: ${JSON.stringify(npx.slice(0, 80))}`);
     await until(async () => /<!DOCTYPE html|<html/i.test(await run("bash: curl -sS localhost:8003/ | head -c 300")), "curl to reach npx serve", 120_000);
     console.log("npx serve from Claude's Bash: the tab survives and curl reaches it");
+    // While it runs, its output is in the task's output file, which is how
+    // Claude tells a live server from a dead one. npx used to hold a
+    // program's output until it exited, so Claude found no file and kept
+    // relaunching Vite (live, 2026-11-09).
+    const outputFile = /Output is being written to: (\S+?\.output)/.exec(npx)?.[1];
+    assert.ok(outputFile, npx);
+    const taskOutput = await run(`bash: tail -c 600 ${outputFile}`);
+    assert.match(taskOutput, /Serving!/, `npx serve's banner in its task output while it runs: ${taskOutput}`);
+    console.log("npx serve's output reaches Claude's task output file while it runs");
   }
 
   if (process.env.PYTHON === "1") {
