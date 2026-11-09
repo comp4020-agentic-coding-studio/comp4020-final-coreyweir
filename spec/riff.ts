@@ -227,7 +227,13 @@ export function open(baseUrl: string, document: string, options: OpenOptions = {
   provider.attach();
   const leave = () => {
     provider.destroy();
-    socket.destroy();
+    // A socket the server turned away may still be connecting; ws throws
+    // "closed before the connection was established" when it's closed then.
+    try {
+      socket.destroy();
+    } catch {
+      // already going away: nothing to clean up
+    }
     doc.destroy();
   };
   const saved = () =>
