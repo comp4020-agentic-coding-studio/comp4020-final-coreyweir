@@ -62,7 +62,8 @@ Derived from `README.md`. If the README changes, this section changes in the
 same commit. Each README quality turns into what it means for a change:
 
 - **Ease of use.** Joining takes a name and a room code, nothing more. Hosting
-  takes a name, an API endpoint and token, and GitHub. A change that adds a
+  takes a name; Riff's free models need no key, an own endpoint and token are
+  optional, and GitHub is optional. A change that adds a
   step to either path needs my sign-off. Test the first-run path in a fresh
   browser profile, because a stored identity hides it.
 - **Resilience.** The host's filesystem survives a reload or a crash. Verify a

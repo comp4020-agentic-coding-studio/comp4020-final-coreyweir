@@ -5,8 +5,8 @@ prompt, and preview while working on a web application. It was originally intend
 working on the project after Crit 1.
 
 For Riff to be good, it needs:
-- Ease of use: easy to get started. Hosting should be as simple as providing your name, API endpoint and token, and connecting your
-  GitHub. Joining should just need your name and the room code.
+- Ease of use: easy to get started. Hosting should be as simple as providing your name (Riff's free models need no key; bring
+  your own endpoint and token if you prefer), and optionally connecting your GitHub. Joining should just need your name and the room code.
 - Resilience: it must be resilient to data loss. The filesystem Claude works in must be persisted locally, not just in memory, so that
   a browser crash/accidental reload/etc. don't result in unpushed changes being lost.
 - Versatility: it must not unduly limit the sort of projects that can be worked on, e.g. only vite projects. It needs to be able to work

@@ -16,6 +16,14 @@ use the site with Nemotron 3 models provided by the site using OpenRouter. The s
 GitHub-API backed `git` tool, and features support for MCPs—including GitHub MCP support, which has permission customisation options
 and works with the OAuth token Riff already has.
 
+The biggest stack choice was running Claude Code in the host's browser rather than in a container per room on the server. It means
+the host's API key and GitHub token never leave their browser ([ADR 0007](docs/adr/0007-credentials-stay-in-the-tab.md)) and Riff
+pays nothing per room. The cost is versatility and maintenance: I carry forks of wasmer-js and Nodepod, and bugs in them became
+mine, from a deadlock when typing fast ([`2e995ce`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/2e995ce))
+to `npx serve` crashing the tab ([`b5567c6`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/b5567c6)).
+Python can't open a server socket at all. One Fly machine behind nginx keeps deployment simple, at the price of a 256 MB memory
+ceiling that shaped the storage design.
+
 ## How I got here
 The work in this project really fell into a number of distinct phases:
 
@@ -63,7 +71,6 @@ sign in first, then host or join, which made sign-in ask for no scope and push a
 the guest entirely ([ADR 0007](docs/adr/0007-credentials-stay-in-the-tab.md),
 [`99f3ac8`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/99f3ac8)).
 
-## Phase 3
 ## Phase 3
 Phase 3 was the manual implementation phase: one long session with Claude, working through the plan a feature at a time.
 Each feature followed the same rhythm: the ADR, then a spec check that fails ("red until built"), then the server, the client,
@@ -120,3 +127,5 @@ real Vite found two more bugs that every check had missed
 ([`553ce14`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/553ce14),
 [`0773744`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-coreyweir/commit/0773744)).
 
+It wasn't free. Workers sometimes sat for hours inside a single shell command until every command got a timeout, parallel work
+collided in shared files, and the run-up used about US$440 of the course budget.
